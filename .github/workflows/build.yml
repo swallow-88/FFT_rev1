@@ -94,12 +94,14 @@ jobs:
           echo "P4A_NDK_DIR=$HOME/android-sdk/ndk/25.2.9519653"  >> $GITHUB_ENV
           echo "P4A_ANT_DIR=$HOME/.buildozer/android/platform/apache-ant-1.10.13" >> $GITHUB_ENV
 
+
       # (기존에 있던) python-for-android 강제 재클론 단계
       - name: Reset python-for-android
         run: |
           rm -rf ~/.buildozer/android/platform/python-for-android
+          # 태그명(v2023.9.16)을 정확히 지정합니다.
           git clone --depth 1 \
-            --branch v2023.9.16 \         # ← 태그명 앞에 v를 붙여야 합니다
+            --branch v2023.9.16 \
             https://github.com/kivy/python-for-android.git \
             ~/.buildozer/android/platform/python-for-android
 
