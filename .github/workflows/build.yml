@@ -1,0 +1,126 @@
+name: Build Kivy APK
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash -eux {0}
+
+    steps:
+      # 0) 캐시 완전 삭제
+      - name: Wipe caches
+        run: rm -rf .buildozer ~/.buildozer ~/.android || true
+
+      # 1) 소스 체크아웃 & Python/Java 설치
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: {python-version: '3.10'}
+      - uses: actions/setup-java@v3
+        with: {distribution: temurin, java-version: '11'}
+
+      # 2) Buildozer & p4a 설치
+
+      - name: Install Buildozer & python-for-android
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential zip unzip
+          python -m pip install --upgrade pip
+          pip install cython buildozer==1.5.0
+          # Buildozer 1.5.0 과 호환된 p4a 2023.x
+          pip install python-for-android==2023.9.16
+
+      # 3) 외부 Android cmdline-tools 설치
+      - name: Install Android SDK commandline-tools
+        run: |
+          SDK=$HOME/android-sdk
+          mkdir -p "$SDK/cmdline-tools" && cd "$SDK/cmdline-tools"
+          curl -fSLo tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q tools.zip && mv cmdline-tools latest
+
+      # 4) 외부 SDK에 플랫폼·빌드툴·NDK 설치
+      - name: Install Android packages into external SDK
+        run: |
+          SDK=$HOME/android-sdk
+          export PATH=$SDK/cmdline-tools/latest/bin:$SDK/platform-tools:$PATH
+          yes | sdkmanager --sdk_root="$SDK" --licenses
+          sdkmanager --sdk_root="$SDK" \
+            "platform-tools" \
+            "platforms;android-31" \
+            "build-tools;31.0.0" \
+            "ndk;25.2.9519653"
+
+      # 5) p4a가 보는 곳에 외부 SDK 심볼릭 링크
+      - name: Symlink SDK for p4a
+        run: |
+          mkdir -p ~/.buildozer/android/platform
+          ln -sfn "$HOME/android-sdk" \
+                 ~/.buildozer/android/platform/android-sdk
+
+      # 6) p4a 자체 SDK 설치 차단
+      - name: Prevent p4a auto SDK install
+        run: touch ~/.buildozer/android/platform/.skip_sdk_install
+
+      # 7) legacy tools/bin/sdkmanager 경로에 링크
+      - name: Link sdkmanager into legacy path
+        run: |
+          mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
+          ln -sfn \
+            "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
+            ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+
+      # 8) Apache Ant 설치
+      - name: Install Apache Ant 1.10.13
+        run: |
+          ANT=$HOME/.buildozer/android/platform/apache-ant-1.10.13
+          mkdir -p "$(dirname "$ANT")"
+          curl -fSLo ant.tgz \
+            https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
+          tar -xzf ant.tgz && mv apache-ant-1.10.13 "$ANT"
+          echo "ANT_HOME=$ANT" >> $GITHUB_ENV
+          echo "$ANT/bin"      >> $GITHUB_PATH
+
+      # 9) p4a에 SDK/NDK/ANT 경로 알려주기
+      - name: Export p4a paths
+        run: |
+          echo "P4A_SDK_DIR=$HOME/android-sdk"                   >> $GITHUB_ENV
+          echo "P4A_NDK_DIR=$HOME/android-sdk/ndk/25.2.9519653"  >> $GITHUB_ENV
+          echo "P4A_ANT_DIR=$HOME/.buildozer/android/platform/apache-ant-1.10.13" >> $GITHUB_ENV
+
+      - name: Pin p4a to 2023.9.16
+        run: |
+          rm -rf ~/.buildozer/android/platform/python-for-android
+          git clone --depth 1 \
+            --branch v2023.09.16 \
+            https://github.com/kivy/python-for-android.git \
+            ~/.buildozer/android/platform/python-for-android
+
+
+      # 10) APK 빌드
+      - name: Build APK
+        run: buildozer android debug --log-level 2 | tee build.log
+
+      # 11) 로그 및 APK 업로드
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+
+      - id: find_apk
+        run: echo "apk=$(find bin -name '*.apk' -print -quit)" >> $GITHUB_OUTPUT
+
+      - uses: softprops/action-gh-release@v1
+        if: success() && steps.find_apk.outputs.apk != ''
+        with:
+          files: ${{ steps.find_apk.outputs.apk }}
+          tag_name: nightly-${{ github.run_number }}
+          name: Nightly Build #${{ github.run_number }}
+          prerelease: true
