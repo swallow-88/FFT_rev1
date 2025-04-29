@@ -35,12 +35,20 @@ jobs:
                                  zip unzip wget ant cmake ninja-build \
                                  autoconf automake libtool pkg-config
 
+
+
       - name: Install Android SDK Command-line Tools
         run: |
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
-          unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools/latest
+          unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           rm cmdline.zip
+          # unzip 결과: android-sdk/cmdline-tools/cmdline-tools/{bin,lib,…}
+          # 이걸 latest로 리네임
+          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+          # sdkmanager 실행파일에 실행권한 추가 (안전 차원)
+          chmod +x $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager
+          # PATH 설정: latest/bin 경로를 반드시 포함
           echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
       - name: Accept licenses & install SDK components
@@ -50,6 +58,8 @@ jobs:
                      "platforms;android-33" "build-tools;33.0.2" \
                      "ndk;23.1.7779620" "cmake;3.22.1" \
                      "extras;google;m2repository" "extras;android;m2repository"
+
+  
       - name: Upgrade pip & install Buildozer + p4a
         run: |
           python3 -m pip install --upgrade pip
