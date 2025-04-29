@@ -49,13 +49,18 @@ jobs:
             "ndk;25.2.9519653"
 
       # 5) buildozer.spec 에 외부 SDK/NDK 경로 주입
+      # 5) buildozer.spec 에 외부 SDK/NDK 경로 주입 & 중복 옵션 제거
       - name: Configure buildozer.spec
         run: |
+          # 기존에 남아있는 중복 옵션( sdk_path, ndk_path, build_tools_version ) 삭제
           sed -i '/^android\.sdk_path/d' buildozer.spec || true
           sed -i '/^android\.ndk_path/d' buildozer.spec || true
-          echo "android.sdk_path = $HOME/android-sdk"          >> buildozer.spec
-          echo "android.ndk_path = $HOME/android-sdk/ndk/25.2.9519653" >> buildozer.spec
-          echo "android.build_tools_version = 31.0.0"           >> buildozer.spec
+          sed -i '/^android\.build_tools_version/d' buildozer.spec || true
+
+          # 올바른 값 추가
+          echo "android.sdk_path = $HOME/android-sdk"                   >> buildozer.spec
+          echo "android.ndk_path = $HOME/android-sdk/ndk/25.2.9519653"  >> buildozer.spec
+          echo "android.build_tools_version = 31.0.0"                    >> buildozer.spec
 
       # 6) APK 빌드
       - name: Build APK with Buildozer
