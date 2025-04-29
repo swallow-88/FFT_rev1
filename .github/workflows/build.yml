@@ -82,12 +82,11 @@ jobs:
 
       # 11) Buildozer & python-for-android 설치
       # 11) Buildozer & python-for-android 설치
-      - name: Install Buildozer & p4a (capture logs)
+      - name: Install Buildozer & p4a
         run: |
-          pip install cython==0.29.34 buildozer==1.5.0 git+https://github.com/kivy/python-for-android.git@develop \
-            2>&1 | tee pip-install.log
-        continue-on-error: true
-
+          pip install cython==0.29.34 buildozer==1.5.0
+          # v2024.03.04(예시)처럼 버전을 지정
+          pip install python-for-android==2024.03.04
 
 
 
