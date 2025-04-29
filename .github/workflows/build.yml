@@ -29,11 +29,12 @@ jobs:
 
       # 2) Buildozer 및 python-for-android 설치
       - name: Install Buildozer & python-for-android
+        shell: bash -eux {0}
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential zip unzip
           python -m pip install --upgrade pip cython buildozer==1.5.0
-          pip install python-for-android==2023.9.16
+          pip install python-for-android==2023.09.16
 
       # 3) 외부 Android SDK(cmdline-tools) 설치
       - name: Install Android SDK commandline-tools
