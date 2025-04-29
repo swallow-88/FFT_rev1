@@ -32,10 +32,9 @@ jobs:
       - name: Install Buildozer & python-for-android
         run: |
           sudo apt update
-          sudo apt install -y build-essential zip unzip cython3
+          sudo apt install -y build-essential zip unzip
           python -m pip install --upgrade pip
-          pip install buildozer==1.5.0
-          # 최신 p4a 릴리스 적용
+          pip install cython buildozer==1.5.0
           pip install python-for-android==2023.09.16
 
       # (기존에 있던) python-for-android 강제 재클론 단계
