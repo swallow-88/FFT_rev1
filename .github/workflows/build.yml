@@ -11,31 +11,44 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      ANDROID_HOME:     /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
-      # 1) 코드 체크아웃
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2) 호스트 러너 기본 Android SDK 경로 세팅
-      - name: Configure Android SDK paths
-        run: |
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          # preinstalled SDK 툴 위치를 PATH에 추가
-          echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "/usr/local/lib/android/sdk/tools/bin" >> $GITHUB_PATH
-          echo "/usr/local/lib/android/sdk/platform-tools" >> $GITHUB_PATH
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-      # 3) sdkmanager 실행 확인
+      - name: Set up Java 11
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            build-essential git zip unzip wget \
+            python3-pip python3-dev ant \
+            cmake ninja-build autoconf automake libtool pkg-config
+
       - name: Verify sdkmanager
         run: |
-          which sdkmanager
+          echo "PATH for sdkmanager:" $PATH
+          which sdkmanager || (echo "sdkmanager not found" && exit 1)
           sdkmanager --version
 
-      # 4) 라이선스 동의 및 SDK 컴포넌트 설치
-      - name: Accept licenses & install SDK components
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
+
+      - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses
           sdkmanager "platform-tools" \
                      "platforms;android-33" \
                      "build-tools;33.0.2" \
@@ -44,30 +57,22 @@ jobs:
                      "extras;google;m2repository" \
                      "extras;android;m2repository"
 
-      # 5) 빌드 툴 의존성 설치
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            python3-pip python3-dev build-essential git \
-            zip unzip wget ant cmake ninja-build \
-            autoconf automake libtool pkg-config
-
-      # 6) pip 업그레이드 및 Buildozer/p4a 설치
-      - name: Install Buildozer & python-for-android
+      - name: Pin packaging to 21.3 to avoid setuptools conflict
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
+          pip install packaging==21.3
+
+      - name: Install Buildozer & python-for-android
+        run: |
           pip install cython==0.29.34 \
                       buildozer==1.5.0 \
                       python-for-android==2023.09.16
 
-      # 7) APK 빌드
       - name: Build APK (Debug)
         run: |
           buildozer android clean || true
           buildozer android debug --verbose
 
-      # 8) 결과물 업로드
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
