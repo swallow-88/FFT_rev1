@@ -35,17 +35,15 @@ jobs:
           sudo apt install -y build-essential zip unzip cython3
           python -m pip install --upgrade pip
           pip install buildozer==1.5.0
-          # Buildozer 1.5.0 과 호환된 p4a 2023.x
-          pip install python-for-android==2024.01.21
-          
-      # … 중략 …
+          # 최신 p4a 릴리스 적용
+          pip install python-for-android==2024.1.21
 
       # (기존에 있던) python-for-android 강제 재클론 단계
       - name: Reset python-for-android
         run: |
           rm -rf ~/.buildozer/android/platform/python-for-android
           git clone --depth 1 \
-            --branch v2024.01.21 \
+            --branch v2024.1.21 \
             https://github.com/kivy/python-for-android.git \
             ~/.buildozer/android/platform/python-for-android
 
