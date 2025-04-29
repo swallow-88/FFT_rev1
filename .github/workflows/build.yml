@@ -28,14 +28,14 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      # 2) Buildozer & p4a 설치
+      # 2) Buildozer & python-for-android 설치
       - name: Install Buildozer & python-for-android
         run: |
           sudo apt update
           sudo apt install -y build-essential zip unzip
           python -m pip install --upgrade pip
           pip install cython buildozer==1.5.0
-          # Buildozer 1.5.0과 호환된 p4a 2023.x
+          # pip으로 설치된 python-for-android 그대로 사용
           pip install python-for-android==2023.9.16
 
       # 3) 외부 Android cmdline-tools 설치
@@ -96,20 +96,12 @@ jobs:
           echo "P4A_NDK_DIR=$HOME/android-sdk/ndk/25.2.9519653"  >> $GITHUB_ENV
           echo "P4A_ANT_DIR=$HOME/.buildozer/android/platform/apache-ant-1.10.13" >> $GITHUB_ENV
 
-      # 10) python-for-android 강제 재클론 단계 (올바른 태그 사용)
-      - name: Reset python-for-android
-        run: |
-          rm -rf ~/.buildozer/android/platform/python-for-android
-          git clone --depth 1 \
-            --branch v2023.09.16 \
-            https://github.com/kivy/python-for-android.git \
-            ~/.buildozer/android/platform/python-for-android
-
-      # 11) APK 빌드
+      # 10) APK 빌드
       - name: Build APK
-        run: buildozer android debug --log-level 2 | tee build.log
+        run: |
+          buildozer android debug --log-level 2 | tee build.log
 
-      # 12) 로그 및 APK 업로드
+      # 11) 로그 및 APK 업로드
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -117,7 +109,8 @@ jobs:
           path: build.log
 
       - id: find_apk
-        run: echo "apk=$(find bin -name '*.apk' -print -quit)" >> $GITHUB_OUTPUT
+        run: |
+          echo "apk=$(find bin -name '*.apk' -print -quit)" >> $GITHUB_OUTPUT
 
       - uses: softprops/action-gh-release@v1
         if: success() && steps.find_apk.outputs.apk != ''
