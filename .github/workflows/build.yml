@@ -14,6 +14,9 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: Ensure project-level p4a dir exists (prevent FileNotFoundError)
+        run: mkdir -p $GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -25,20 +28,17 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      # 1) 필수 APT 패키지
       - name: Install system deps
         run: |
           sudo apt update
           sudo apt install -y build-essential zip unzip libffi-dev
 
-      # 2) Buildozer & p4a 설치
-      - name: Install Buildozer & python-for-android
+      - name: Install Buildozer & p4a
         run: |
           python -m pip install --upgrade pip
           pip install cython buildozer==1.5.0 python-for-android==2023.9.16
 
-      # 3) Android SDK cmdline-tools 설치
-      - name: Install Android SDK commandline-tools
+      - name: Install Android SDK cmdline-tools
         run: |
           SDK=$HOME/android-sdk
           mkdir -p "$SDK/cmdline-tools" && cd "$SDK/cmdline-tools"
@@ -46,7 +46,6 @@ jobs:
             https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q tools.zip && mv cmdline-tools latest
 
-      # 4) 플랫폼·빌드툴·NDK 설치
       - name: Install Android packages
         run: |
           SDK=$HOME/android-sdk
@@ -58,38 +57,21 @@ jobs:
             "build-tools;31.0.0" \
             "ndk;25.2.9519653"
 
-      # 5) Buildozer가 찾는 위치에 SDK 심볼릭 링크
-      - name: Symlink SDK into .buildozer
+      - name: Symlink SDK into home .buildozer
         run: |
           mkdir -p ~/.buildozer/android/platform
           ln -sfn "$HOME/android-sdk" ~/.buildozer/android/platform/android-sdk
-
-      # 6) p4a 자동 SDK 설치 차단
-      - name: Prevent p4a auto SDK install
-        run: |
           touch ~/.buildozer/android/platform/.skip_sdk_install
-
-      # 7) legacy sdkmanager 경로 링크
-      - name: Link sdkmanager into legacy path
-        run: |
           mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
-          ln -sfn \
-            "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
-            ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
+          ln -sfn "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
+                 ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
 
-      # 8) p4a 디렉터리 빈 폴더로 미리 생성 (clean 시 에러 방지)
-      - name: Ensure p4a directory exists
-        run: |
-          mkdir -p ~/.buildozer/android/platform/python-for-android
-
-      # 9) Clean & Build
-      - name: Clean Buildozer cache
+      - name: buildozer android clean
         run: buildozer android clean
 
-      - name: Build APK
+      - name: buildozer android debug
         run: buildozer android debug --verbose | tee build.log
 
-      # 10) 아티팩트 업로드
       - uses: actions/upload-artifact@v4
         if: always()
         with:
