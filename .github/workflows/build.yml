@@ -6,13 +6,13 @@ on:
   push:
     branches: [ main ]
 
-env:
-  ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
-  ANDROID_HOME:     ${{ runner.temp }}/android-sdk
-
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # runner.temp 대신 HOME 디렉터리 사용
+    env:
+      ANDROID_SDK_ROOT: $HOME/android-sdk
+      ANDROID_HOME:     $HOME/android-sdk
 
     steps:
       - name: Checkout repository
@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Set up Java 11 (for Gradle/SDK build)
+      - name: Set up Java 11 (for SDK/Gradle)
         uses: actions/setup-java@v3
         with:
           distribution: temurin
@@ -34,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             python3-pip python3-dev build-essential git \
-            zip unzip curl wget ant cmake ninja-build \
+            zip unzip wget ant cmake ninja-build \
             autoconf automake libtool pkg-config
 
       - name: Install Android SDK Command-line Tools
@@ -44,28 +44,27 @@ jobs:
           unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
           mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
           rm cmdline.zip
-          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      - name: Accept SDK licenses & install platforms
+      - name: Accept licenses & install SDK components
         run: |
           yes | sdkmanager --sdk_root=$ANDROID_SDK_ROOT --licenses
-          sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" "platforms;android-33" \
-                    "build-tools;33.0.2" "ndk;23.1.7779620" "cmake;3.22.1" \
-                    "extras;google;m2repository" "extras;android;m2repository"
+          sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" \
+            "platforms;android-33" "build-tools;33.0.2" \
+            "ndk;23.1.7779620" "cmake;3.22.1" \
+            "extras;google;m2repository" "extras;android;m2repository"
 
-      - name: Upgrade pip & Install Buildozer + p4a
+      - name: Upgrade pip & install Buildozer + p4a
         run: |
           python3 -m pip install --upgrade pip
           pip install cython buildozer==1.5.0 python-for-android==2023.09.16
 
       - name: Build APK (Debug)
         run: |
-          # clean 이전 아티팩트
           buildozer android clean
-          # 실제 빌드
-          buildozer android debug deploy run --verbose
+          buildozer android debug --verbose
 
-      - name: Archive & Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v3
         with:
           name: FFTApp-debug-apk
