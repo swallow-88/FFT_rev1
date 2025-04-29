@@ -102,12 +102,21 @@ jobs:
                       buildozer==1.5.0 \
                       python-for-android==2023.09.16
 
-      # 10) Build APK
-      - name: Build APK (Debug)
+        # 10) Build APK
+      - name: Build APK (Debug) and capture logs
         run: |
+          # 이전 빌드 지우기
           buildozer android clean || true
-          buildozer android debug --verbose
-
+          # 전체 로그를 tee 로 파일에 저장, 오류가 나도 다음 스텝으로 넘어가게 설정
+          buildozer android debug --verbose | tee buildozer.log
+        continue-on-error: true
+  
+      - name: Upload full build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-full-log
+          path: buildozer.log
+          
       # 11) Upload the APK artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
