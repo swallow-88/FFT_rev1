@@ -34,6 +34,6 @@ p4a.bootstrap = gradle
 [p4a]
 # (str) python-for-android 포크 URL과 사용할 태그/브랜치
 p4a.url    = https://github.com/kivy/python-for-android.git
-p4a.branch = v2023.9.16
+p4a.branch = 2023.9.16
 release = false
 
