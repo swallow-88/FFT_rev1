@@ -15,7 +15,7 @@ jobs:
       ANDROID_HOME:     $HOME/android-sdk
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python 3.10
@@ -33,25 +33,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            python3-pip python3-dev build-essential git \
-            zip unzip wget ant cmake ninja-build \
-            autoconf automake libtool pkg-config
+            build-essential git zip unzip wget curl \
+            python3-pip python3-dev openjdk-11-jdk ant \
+            cmake ninja-build autoconf automake libtool pkg-config
 
-      - name: Install Android SDK Command-line Tools
+      - name: Install legacy Android SDK Tools
         run: |
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          cd "$ANDROID_SDK_ROOT/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip
-          rm cmdline-tools.zip
-          # zip 안에 있는 cmdline-tools 폴더를 latest로 리네임
-          mv cmdline-tools latest
-          # 실행 권한 보장
-          chmod +x latest/bin/sdkmanager
+          mkdir -p "$ANDROID_SDK_ROOT"
+          wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip -O sdk-tools.zip
+          unzip -q sdk-tools.zip -d "$ANDROID_SDK_ROOT"
+          rm sdk-tools.zip
+          # tools/bin 에 sdkmanager, avdmanager 스크립트와 lib/*.jar 이 제대로 위치
+          echo "PATH=$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      - name: Update PATH for sdkmanager
-        run: |
-          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+      - name: Verify sdkmanager works
+        run: sdkmanager --version
 
       - name: Accept licenses & install SDK components
         run: |
@@ -68,7 +64,9 @@ jobs:
       - name: Upgrade pip & install Buildozer + p4a
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
-          pip install cython buildozer==1.5.0 python-for-android==2023.09.16
+          pip install cython==0.29.34 \
+                      buildozer==1.5.0 \
+                      python-for-android==2023.09.16
 
       - name: Build APK (Debug)
         run: |
