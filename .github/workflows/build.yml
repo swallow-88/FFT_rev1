@@ -39,11 +39,12 @@ jobs:
 
       # … 중략 …
 
+      # (기존에 있던) python-for-android 강제 재클론 단계
       - name: Reset python-for-android
         run: |
           rm -rf ~/.buildozer/android/platform/python-for-android
           git clone --depth 1 \
-            --branch v2024.1.21 \
+            --branch v2024.01.21 \
             https://github.com/kivy/python-for-android.git \
             ~/.buildozer/android/platform/python-for-android
 
