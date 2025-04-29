@@ -4,8 +4,7 @@ name: Build & Release FFTApp
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   build:
@@ -38,23 +37,20 @@ jobs:
 
       - name: Install Android SDK Command-line Tools
         run: |
-          mkdir -p $ANDROID_SDK_ROOT
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
           wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
-          unzip cmdline.zip -d $ANDROID_SDK_ROOT
+          unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools/latest
           rm cmdline.zip
-          # sdkmanager 스크립트가 찾는 'tools' 디렉터리에 맞춰서 이동
-          mv $ANDROID_SDK_ROOT/cmdline-tools $ANDROID_SDK_ROOT/tools
-          echo "PATH=$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      - name: Accept licenses & install Android platforms
+      - name: Accept licenses & install SDK components
         run: |
           yes | sdkmanager --sdk_root=$ANDROID_SDK_ROOT --licenses
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" \
                      "platforms;android-33" "build-tools;33.0.2" \
                      "ndk;23.1.7779620" "cmake;3.22.1" \
                      "extras;google;m2repository" "extras;android;m2repository"
-
-      - name: Upgrade pip & Install Buildozer + p4a
+      - name: Upgrade pip & install Buildozer + p4a
         run: |
           python3 -m pip install --upgrade pip
           pip install cython buildozer==1.5.0 python-for-android==2023.09.16
