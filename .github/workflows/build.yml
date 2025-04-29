@@ -75,14 +75,16 @@ jobs:
           sdkmanager --version
 
       # 7) Accept licenses and install Android SDK components
-      - name: Accept licenses & install SDK components
+# 기존의 “Install required Android SDK components” 부분만 교체
+
+      - name: Install required Android SDK components
         run: |
           yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses
           sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2" \
-            "ndk;23.1.7779620" \
+            "ndk;25.2.9519653" \
             "cmake;3.22.1" \
             "extras;google;m2repository" \
             "extras;android;m2repository"
