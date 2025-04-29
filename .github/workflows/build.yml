@@ -38,12 +38,13 @@ jobs:
 
       - name: Install Android SDK Command-line Tools
         run: |
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          mkdir -p $ANDROID_SDK_ROOT
           wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
-          unzip cmdline.zip -d $ANDROID_SDK_ROOT/cmdline-tools
-          mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+          unzip cmdline.zip -d $ANDROID_SDK_ROOT
           rm cmdline.zip
-          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+          # sdkmanager 스크립트가 찾는 'tools' 디렉터리에 맞춰서 이동
+          mv $ANDROID_SDK_ROOT/cmdline-tools $ANDROID_SDK_ROOT/tools
+          echo "PATH=$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
       - name: Accept licenses & install Android platforms
         run: |
@@ -64,7 +65,7 @@ jobs:
           buildozer android debug --verbose
 
       - name: Archive & Upload APK
-        uses: actions/upload-artifact@v4    # ← v3 → v4 로 변경
+        uses: actions/upload-artifact@v4
         with:
           name: FFTApp-debug-apk
           path: bin/*.apk
