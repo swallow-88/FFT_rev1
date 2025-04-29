@@ -20,9 +20,9 @@ android.bootstrap           = gradle
 android.permissions         = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 android.archs               = arm64-v8a,armeabi-v7a
 
+android.ndk = 25.2.9519653
 
-[python-for-android]
-branch = 2023.9.16
+branch = v2023.9.16
 
 # Buildozer/P4A 가 주입해 두길 바라는 절대경로
 android.sdk_path = /home/runner/android-sdk
