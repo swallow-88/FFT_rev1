@@ -1,8 +1,7 @@
 # .github/workflows/build.yml
 
-name: 📱 Build & Release FFTApp APK
+name: Build & Release FFTApp APK
 
-# main 브랜치에 푸시될 때마다 실행
 on:
   push:
     branches:
@@ -11,71 +10,53 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
-    # Android SDK/NDK 루트 경로
     env:
       ANDROID_SDK_ROOT: $HOME/android-sdk
       ANDROID_HOME:     $HOME/android-sdk
-      # 빌드로깅용
-      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF8
 
     steps:
-      # 1) 소스 체크아웃
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2) 환경 디버깅: 기본 정보 출력
-      - name: Print environment
-        run: |
-          echo "=== ENV ==="
-          env | sort
-          echo "=== PATH ==="
-          echo $PATH
-
-      # 3) Python 3.10 설치
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 4) Java 11 설치 (Android 툴체인용)
       - name: Set up Java 11
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '11'
 
-      # 5) 시스템 패키지 설치
       - name: Install system dependencies
         run: |
-          sudo apt-get update -y
+          sudo apt-get update
           sudo apt-get install -y \
-            build-essential git zip unzip wget curl \
-            python3-pip python3-dev openjdk-11-jdk ant \
-            cmake ninja-build autoconf automake libtool pkg-config
+            python3-pip python3-dev build-essential git \
+            zip unzip wget ant cmake ninja-build \
+            autoconf automake libtool pkg-config
 
-      # 6) Android SDK Command-line Tools 설치
       - name: Install Android SDK Command-line Tools
         run: |
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
-          unzip -q cmdline.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          rm cmdline.zip
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          chmod +x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-      - name: Add SDK tools to PATH
+          cd "$ANDROID_SDK_ROOT/cmdline-tools"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          rm cmdline-tools.zip
+          # zip 안에 있는 cmdline-tools 폴더를 latest로 리네임
+          mv cmdline-tools latest
+          # 실행 권한 보장
+          chmod +x latest/bin/sdkmanager
+
+      - name: Update PATH for sdkmanager
         run: |
           echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      # 7) sdkmanager 버전 확인 (문제시 로깅용)
-      - name: sdkmanager --version
-        run: sdkmanager --version
-
-      # 8) 라이선스 동의 및 플랫폼/빌드도구 설치
       - name: Accept licenses & install SDK components
         run: |
-          yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses
-          sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2" \
@@ -84,34 +65,16 @@ jobs:
             "extras;google;m2repository" \
             "extras;android;m2repository"
 
-      # 9) pip 업그레이드 및 Buildozer·p4a 설치
-      - name: Upgrade pip & install Buildozer + python-for-android
+      - name: Upgrade pip & install Buildozer + p4a
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
-          pip install cython==0.29.34 \
-                      buildozer==1.5.0 \
-                      python-for-android==2023.09.16
+          pip install cython buildozer==1.5.0 python-for-android==2023.09.16
 
-      # 10) 개발 툴 버전 확인 (디버깅용)
-      - name: Verify tool versions
-        run: |
-          java -version
-          javac -version
-          python3 --version
-          buildozer --version
-          python3 -c "import numpy; print('numpy', numpy.__version__)"
-          python3 -c "import kivy; print('kivy', kivy.__version__)"
-          sdkmanager --list
-
-      # 11) APK 빌드
       - name: Build APK (Debug)
         run: |
-          # 기존 빌드 결과 삭제
           buildozer android clean || true
-          # 실제 빌드 (verbose)
           buildozer android debug --verbose
 
-      # 12) 빌드 아티팩트 업로드
       - name: Archive & Upload APK
         uses: actions/upload-artifact@v4
         with:
