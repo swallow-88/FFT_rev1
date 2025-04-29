@@ -81,11 +81,14 @@ jobs:
           pip install setuptools==65.5.0 packaging==20.9 wheel
 
       # 11) Buildozer & python-for-android 설치
-      - name: Buildozer & p4a 설치
+      # 11) Buildozer & python-for-android 설치
+      - name: Install Buildozer & p4a (capture logs)
         run: |
-          pip install cython==0.29.34 buildozer==1.5.0
-          # python-for-android develop 브랜치 사용(AAB 지원 동기화)
-          pip install git+https://github.com/kivy/python-for-android.git@develop
+          pip install cython==0.29.34 buildozer==1.5.0 git+https://github.com/kivy/python-for-android.git@develop \
+            2>&1 | tee pip-install.log
+        continue-on-error: true
+
+
 
 
       - name: Build APK (Debug) and capture logs
@@ -94,11 +97,12 @@ jobs:
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
 
-      - name: Upload full build log
+      # 12) pip install 로그 업로드
+      - name: Upload pip-install log
         uses: actions/upload-artifact@v4
         with:
-          name: buildozer-full-log
-          path: buildozer.log
+          name: pip-install-log
+          path: pip-install.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
