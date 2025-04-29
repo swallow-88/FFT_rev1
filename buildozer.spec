@@ -21,6 +21,10 @@ android.ndk_api     = 21
 android.arch        = armeabi-v7a,arm64-v8a
 android.gradle_dependencies = com.android.support:appcompat-v7:28.0.0
 
+
+android.sdk_path = /home/runner/android-sdk
+android.ndk_path = /home/runner/android-sdk/ndk/23.1.7779620
+
 log_level           = 2
 log_dir             = true
 
