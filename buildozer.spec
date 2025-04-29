@@ -23,17 +23,16 @@ android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,INTERNET
 android.api                 = 33
 android.minapi              = 21
 android.arch                = armeabi-v7a,arm64-v8a
-android.ndk                 = 23b
+android.ndk                 = 25b
 android.ndk_api             = 21
 
 # ── Build Tools 버전 고정 ──────────────────────────────────────────────────────
 android.build_tools_version = 33.0.2
 
 # ── 시스템 SDK/NDK 경로 지정 ─────────────────────────────────────────────────
-# GitHub Actions 러너에 이미 설치된 SDK/NDK를 그대로 사용
 android.sdk_path            = /usr/local/lib/android/sdk
-android.ndk_path            = /usr/local/lib/android/sdk/ndk/23.1.7779620
-
+# r25b를 설치했다면 경로 예시:
+android.ndk_path            = /usr/local/lib/android/sdk/ndk/25.2.9519653
 
 # ── AppCompat 호환성 강화 (필요 시) ────────────────────────────────────────────
 android.gradle_dependencies = com.android.support:appcompat-v7:28.0.0
