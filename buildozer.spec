@@ -44,7 +44,7 @@ android.logcat_filters      = *:S python:D
 
 # ── python-for-android 설정 ──────────────────────────────────────────────────
 p4a.bootstrap               = sdl2
-p4a.branch                  = master
+p4a.branch                  = develop
 
 # ── (선택) SDK/NDK 경로 고정 ───────────────────────────────────────────────────
 # android.sdk_path          = /home/runner/android-sdk
