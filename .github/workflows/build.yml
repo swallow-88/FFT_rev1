@@ -80,7 +80,8 @@ jobs:
         run: |
           pip install cython==0.29.34 \
                       buildozer==1.5.0 \
-                      python-for-android==2023.09.16
+          pip install git+https://github.com/kivy/python-for-android.git@develop
+  
 
       - name: Build APK (Debug) and capture logs
         run: |
