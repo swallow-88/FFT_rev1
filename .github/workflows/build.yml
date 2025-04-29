@@ -97,20 +97,25 @@ jobs:
           pip install setuptools==65.5.0 packaging==21.3 wheel
 
       # 9) Install Buildozer & python‐for‐android
+
+      # … (앞부분 생략) …
+
+      # 10) Buildozer & p4a 설치
       - name: Install Buildozer & p4a
         run: |
           pip install cython==0.29.34 \
-                      buildozer==1.5.0 \
-                      python-for-android==2023.09.16
+                      buildozer==1.5.0
+          # 안정된 p4a 릴리스로 고정
+          pip install python-for-android==2023.09.16
 
-        # 10) Build APK
+      # 11) Build APK (Debug) and capture logs
       - name: Build APK (Debug) and capture logs
         run: |
-          # 이전 빌드 지우기
           buildozer android clean || true
-          # 전체 로그를 tee 로 파일에 저장, 오류가 나도 다음 스텝으로 넘어가게 설정
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
+
+      
   
       - name: Upload full build log
         uses: actions/upload-artifact@v4
