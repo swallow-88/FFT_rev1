@@ -32,5 +32,5 @@ android.accept_sdk_license = True
 [p4a]
 # pip으로 설치한 버전을 그대로 쓸 거면 이 줄들 통째로 삭제
 p4a.url                 = https://github.com/kivy/python-for-android.git
-p4a.branch              = v2024.1.21
+p4a.branch              = v2023.09.16
 release                 = false
