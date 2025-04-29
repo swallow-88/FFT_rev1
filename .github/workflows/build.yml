@@ -52,6 +52,22 @@ jobs:
           echo "/usr/local/lib/android/sdk/tools/bin"           >> $GITHUB_PATH
           echo "/usr/local/lib/android/sdk/platform-tools"      >> $GITHUB_PATH
 
+
+# … 기존 steps 중 “Configure Android SDK paths” 바로 뒤에 추가
+
+      - name: Symlink sdkmanager for Buildozer
+        run: |
+          # Buildozer가 /usr/local/lib/android/sdk/tools/bin/sdkmanager 를 찾으므로
+          mkdir -p $ANDROID_SDK_ROOT/tools/bin
+          ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+                   $ANDROID_SDK_ROOT/tools/bin/sdkmanager
+
+      - name: Verify sdkmanager at legacy tools location
+        run: |
+          echo "Legacy sdkmanager path:" $ANDROID_SDK_ROOT/tools/bin/sdkmanager
+          $ANDROID_SDK_ROOT/tools/bin/sdkmanager --version
+
+
       # 6) Verify sdkmanager is on PATH
       - name: Verify sdkmanager
         run: |
