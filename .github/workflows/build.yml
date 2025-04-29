@@ -78,10 +78,12 @@ jobs:
 
       - name: Install Buildozer & python-for-android
         run: |
-          pip install cython==0.29.34 \
-                      buildozer==1.5.0 \
+          python3 -m pip install --upgrade pip setuptools wheel
+          # install Cython and Buildozer
+          pip install cython==0.29.34 buildozer==1.5.0
+          # pull p4a from its develop branch so that aab support lines up
           pip install git+https://github.com/kivy/python-for-android.git@develop
-  
+
 
       - name: Build APK (Debug) and capture logs
         run: |
