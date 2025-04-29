@@ -1,41 +1,36 @@
 [app]
-title             = FFTApp
-package.name      = fftapp
-package.domain    = org.example
-source.dir        = .
-source.include_exts = py,kv,csv
-version           = 0.1
-requirements      = python3,kivy,kivy_garden.graph,numpy,scipy
-orientation       = portrait
-
-android.use_aab = False
+title                   = FFTApp
+package.name            = fftapp
+package.domain          = org.example
+source.dir              = .
+source.include_exts     = py,kv,csv
+version                 = 0.1
+requirements            = python3,kivy,kivy_garden.graph,numpy,scipy
+orientation             = portrait
+android.use_aab         = False
 
 [android]
-android.api                 = 31
-android.minapi              = 21
-android.ndk_api             = 21
+# SDK/NDK/API 설정
+android.api             = 31
+android.minapi          = 21
+android.ndk_api         = 21
 android.build_tools_version = 31.0.0
-# gradle bootstrap 권장
-android.bootstrap           = gradle
-android.permissions         = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
-android.archs               = arm64-v8a,armeabi-v7a
+android.ndk             = 25.2.9519653
 
-android.ndk = 25.2.9519653
+# 권장: gradle bootstrap
+android.bootstrap       = gradle
+p4a.bootstrap           = gradle
 
-branch = v2023.9.16
+android.permissions     = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.archs           = arm64-v8a,armeabi-v7a
 
-# Buildozer/P4A 가 주입해 두길 바라는 절대경로
-android.sdk_path = /home/runner/android-sdk
-android.ndk_path = /home/runner/android-ndk-r25b      # ← 25b 를 받아 놓은 경우
-android.accept_sdk_license = True                     # 라이선스 재확인 막기
-# 이미 gradle bootstrap 을 쓰고 있으니 굳이 ant 1.9.4 가 필요 없다
-p4a.bootstrap = gradle
+# 외부에서 설치해 둔 경로
+android.sdk_path        = /home/runner/android-sdk
+android.ndk_path        = /home/runner/android-ndk-r25b
+android.accept_sdk_license = True
 
 [p4a]
-# (str) python-for-android 포크 URL과 사용할 태그/브랜치
-[p4a]
-p4a.url    = https://github.com/kivy/python-for-android.git
-p4a.branch = v2024.01.21
-# 또는 branch 없이 pip 설치된 버전을 그대로 쓰려면 이 줄을 삭제하세요.
-release = false
-
+# pip으로 설치한 버전을 그대로 쓸 거면 이 줄들 통째로 삭제
+p4a.url                 = https://github.com/kivy/python-for-android.git
+p4a.branch              = v2024.1.21
+release                 = false
