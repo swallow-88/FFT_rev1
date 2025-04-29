@@ -28,10 +28,15 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Install system deps
+      # 2) Buildozer & python-for-android 설치
+      - name: Install Buildozer, Cython & python-for-android
         run: |
           sudo apt update
-          sudo apt install -y build-essential zip unzip libffi-dev
+          sudo apt install -y build-essential zip unzip python3-dev
+          python -m pip install --upgrade pip
+          pip install cython           # ★ 여기서 반드시 Cython을 깔아야 합니다
+          pip install buildozer==1.5.0
+          pip install python-for-android==2023.9.16
 
       - name: Install Buildozer & p4a
         run: |
