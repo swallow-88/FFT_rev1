@@ -54,6 +54,10 @@ p4a.branch                  = develop
 android.release_artifact_types = apk
 
 
+# lib2to3, test 모듈을 컴파일 대상에서 제외
+p4a.extra_args = --blacklist-requirements=test,lib2to3
+
+
 [buildozer]
 # ── 빌드 캐시 및 출력 디렉터리 ───────────────────────────────────────────────
 build_dir           = .buildozer
