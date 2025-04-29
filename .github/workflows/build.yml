@@ -35,8 +35,17 @@ jobs:
           sudo apt install -y build-essential zip unzip
           python -m pip install --upgrade pip
           pip install cython buildozer==1.5.0
-          # pip으로 설치된 python-for-android 그대로 사용
-          pip install python-for-android==2023.9.16
+          pip install python-for-android==2024.1.21
+
+      # … 중략 …
+
+      - name: Reset python-for-android
+        run: |
+          rm -rf ~/.buildozer/android/platform/python-for-android
+          git clone --depth 1 \
+            --branch v2024.1.21 \
+            https://github.com/kivy/python-for-android.git \
+            ~/.buildozer/android/platform/python-for-android
 
       # 3) 외부 Android cmdline-tools 설치
       - name: Install Android SDK commandline-tools
