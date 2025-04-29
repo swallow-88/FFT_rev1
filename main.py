@@ -1,125 +1,206 @@
 import os
+import csv
 import numpy as np
-from scipy.fft import rfft, rfftfreq
+from numpy.fft import fft
 from kivy.app import App
-from kivy.lang import Builder
-from kivy.properties import StringProperty
 from kivy.uix.boxlayout import BoxLayout
-from kivy_garden.graph import Graph, MeshLinePlot
-from kivy.uix.filechooser import FileChooserIconView
+from kivy.uix.button import Button
+from kivy.uix.label import Label
 from kivy.uix.popup import Popup
+from kivy.uix.widget import Widget
+from kivy.graphics import Line, Color
+from kivy.clock import Clock
+from plyer import filechooser
+import threading
 
-KV = '''
-<Root>:
-    orientation: "vertical"
-    padding: dp(10)
-    spacing: dp(10)
+# Android 런타임 권한 요청
+from android.permissions import request_permissions, Permission
 
-    BoxLayout:
-        size_hint_y: None
-        height: "40dp"
-        spacing: dp(10)
+class GraphWidget(Widget):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.datasets = []            # FFT 결과들
+        self.difference_dataset = []  # 차이 그래프
+        self.colors = itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
+        self.diff_color = (1,1,1)
+        self.padding_x = 80
+        self.padding_y = 30
+        self.max_x = 1
+        self.max_y = 1
 
-        Button:
-            text: "CSV 1 선택"
-            on_release: root.pick_file(1)
-        Label:
-            text: root.file1_name or "없음"
+        self.bind(size=self.on_size)
 
-    BoxLayout:
-        size_hint_y: None
-        height: "40dp"
-        spacing: dp(10)
+    def update_graph(self, points_list, diff_points, x_max, y_max):
+        # 기존 Label 위젯 제거 (레이블 재생성을 위해)
+        for child in list(self.children):
+            if isinstance(child, Label):
+                self.remove_widget(child)
 
-        Button:
-            text: "CSV 2 선택"
-            on_release: root.pick_file(2)
-        Label:
-            text: root.file2_name or "없음"
+        self.datasets = points_list
+        self.difference_dataset = diff_points
+        self.max_x = x_max
+        self.max_y = y_max
 
-    Button:
-        size_hint_y: None
-        height: "50dp"
-        text: "분석 시작"
-        on_release: root.run_fft()
+        self.canvas.clear()
+        self.draw_graph()
 
-    Graph:
-        id: graph
-        xlabel: "Frequency (Hz)"
-        ylabel: "Amplitude"
-        x_grid: True
-        y_grid: True
-        xmin: 0
-        xmax: 100
-        ymin: 0
-        ymax: 1
-'''
+    def on_size(self, *args):
+        if self.datasets:
+            self.canvas.clear()
+            self.draw_graph()
 
-class Root(BoxLayout):
-    file1_name = StringProperty("")
-    file2_name = StringProperty("")
-    file1_path = ""
-    file2_path = ""
+    def draw_graph(self):
+        with self.canvas:
+            self.draw_grid()
+            self.draw_axis_labels()
+            self.draw_right_axis_labels()
 
-    def pick_file(self, idx):
-        chooser = FileChooserIconView(filters=['*.csv'])
-        popup = Popup(title="CSV 파일 선택", content=chooser, size_hint=(0.9, 0.9))
-        chooser.bind(on_submit=lambda c, sel, *_: self._file_chosen(idx, sel, popup))
-        popup.open()
+            # FFT 결과들
+            for points in self.datasets:
+                Color(*next(self.colors))
+                Line(points=[self.scale_point(x,y) for x,y in points], width=1)
 
-    def _file_chosen(self, idx, selection, popup):
-        if selection:
-            path = selection[0]
-            if idx == 1:
-                self.file1_path = path
-                self.file1_name = os.path.basename(path)
-            else:
-                self.file2_path = path
-                self.file2_name = os.path.basename(path)
-        popup.dismiss()
+            # 차이 그래프
+            Color(*self.diff_color)
+            Line(points=[self.scale_point(x,y) for x,y in self.difference_dataset], width=1)
 
-    def run_fft(self):
-        if not (self.file1_path and self.file2_path):
-            print("CSV 파일 두 개를 모두 선택하세요.")
-            return
+    def scale_point(self, x, y):
+        scaled_x = self.padding_x + (x/self.max_x) * (self.width - 2*self.padding_x)
+        scaled_y = self.padding_y + (y/self.max_y) * (self.height - 2*self.padding_y)
+        return scaled_x, scaled_y
 
-        # CSV → 1열만 로드
-        data1 = np.loadtxt(self.file1_path, delimiter=',')[:, 0]
-        data2 = np.loadtxt(self.file2_path, delimiter=',')[:, 0]
+    def draw_grid(self):
+        gx = (self.width - 2*self.padding_x) / 10
+        gy = (self.height - 2*self.padding_y) / 10
+        Color(0.7,0.7,0.7)
+        for i in range(11):
+            # 세로
+            Line(points=[self.padding_x + i*gx, self.padding_y,
+                          self.padding_x + i*gx, self.height-self.padding_y], width=1)
+            # 가로
+            Line(points=[self.padding_x, self.padding_y + i*gy,
+                          self.width-self.padding_x, self.padding_y + i*gy], width=1)
 
-        n = min(len(data1), len(data2))
-        data1, data2 = data1[:n], data2[:n]
+    def draw_axis_labels(self):
+        # X축 레이블
+        for i in range(11):
+            freq = (self.max_x/10)*i
+            x = self.padding_x + i*(self.width-2*self.padding_x)/10 - 20
+            y = self.padding_y - 30
+            lbl = Label(text=f"{freq:.1f}Hz", size_hint=(None,None),
+                        size=(60,20), pos=(x,y))
+            self.add_widget(lbl)
 
-        fs = 200  # 샘플링 주파수 예시(Hz) – 필요하면 CSV에 맞게 조정
-        freq = rfftfreq(n, d=1 / fs)
-        amp1 = np.abs(rfft(data1)) / n
-        amp2 = np.abs(rfft(data2)) / n
-        diff = np.abs(amp1 - amp2)
+        # Y축(왼쪽)
+        for i in range(11):
+            mag = (self.max_y/10)*i
+            y = self.padding_y + i*(self.height-2*self.padding_y)/10 - 10
+            x = self.padding_x - 70
+            lbl = Label(text=f"{mag:.1e}", size_hint=(None,None),
+                        size=(60,20), pos=(x,y))
+            self.add_widget(lbl)
 
-        g: Graph = self.ids.graph
-        g.clear_plots()
+    def draw_right_axis_labels(self):
+        # Y축(오른쪽) 차이용
+        for i in range(11):
+            mag = (self.max_y/10)*i
+            y = self.padding_y + i*(self.height-2*self.padding_y)/10 - 10
+            x = self.width - self.padding_x + 20
+            lbl = Label(text=f"{mag:.1e}", size_hint=(None,None),
+                        size=(60,20), pos=(x,y))
+            self.add_widget(lbl)
 
-        plot1 = MeshLinePlot(color=[0, 1, 0, 1])  # green
-        plot2 = MeshLinePlot(color=[1, 0, 0, 1])  # red
-        plot3 = MeshLinePlot(color=[1, 1, 1, 1])  # white
-
-        # 100 Hz까지만
-        mask = freq <= 100
-        xs = freq[mask]
-        plot1.points = list(zip(xs, amp1[mask]))
-        plot2.points = list(zip(xs, amp2[mask]))
-        plot3.points = list(zip(xs, diff[mask]))
-
-        g.xmax = 100
-        g.ymax = max(amp1.max(), amp2.max()) * 1.1
-        g.add_plot(plot1)
-        g.add_plot(plot2)
-        g.add_plot(plot3)
-        print("FFT 분석 완료.")
 
 class FFTApp(App):
     def build(self):
-        return Builder.load_string(KV)
+        # 런타임 권한 요청
+        request_permissions([
+            Permission.READ_EXTERNAL_STORAGE,
+            Permission.WRITE_EXTERNAL_STORAGE
+        ])
+
+        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+
+        self.label = Label(text="CSV 파일 2개를 선택하세요", size_hint=(1,0.1))
+        self.layout.add_widget(self.label)
+
+        self.process_button = Button(text="파일 선택 & 처리", size_hint=(1,0.1))
+        self.process_button.bind(on_press=self.process_data)
+        self.layout.add_widget(self.process_button)
+
+        self.exit_button = Button(text="종료", size_hint=(1,0.1))
+        self.exit_button.bind(on_press=self.stop)
+        self.layout.add_widget(self.exit_button)
+
+        self.graph_widget = GraphWidget(size_hint=(1,0.6))
+        self.layout.add_widget(self.graph_widget)
+
+        return self.layout
+
+    def process_data(self, instance):
+        # Plyer 파일 선택기 열기
+        filechooser.open_file(
+            on_selection=self.file_selection_callback,
+            multiple=True,
+            filters=[("CSV files", "*.csv")]
+        )
+
+    def file_selection_callback(self, selection):
+        if not selection or len(selection) < 2:
+            self.label.text = "최소 2개의 CSV를 선택해야 합니다."
+            return
+        # 백그라운드 스레드에서 CSV 읽기·FFT 수행
+        threading.Thread(target=self.compute_and_plot, args=(selection[:2],), daemon=True).start()
+
+    def compute_and_plot(self, files):
+        f1, x1, y1 = self.process_csv_and_compute_fft(files[0])
+        f2, x2, y2 = self.process_csv_and_compute_fft(files[1])
+        if f1 is None or f2 is None:
+            Clock.schedule_once(lambda dt: setattr(self.label, 'text', "CSV 처리 중 오류 발생"))
+            return
+
+        diff = [(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
+        x_max = max(x1, x2)
+        y_max = max(y1, y2, max(y for _,y in diff))
+
+        # UI 스레드에서 그래프 갱신
+        Clock.schedule_once(lambda dt:
+            self.graph_widget.update_graph([f1,f2], diff, x_max, y_max)
+        )
+
+    def process_csv_and_compute_fft(self, filepath):
+        try:
+            time = []; acc = []
+            with open(filepath, 'r') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    try:
+                        t = float(row[0]); a = float(row[1])
+                        time.append(t); acc.append(a)
+                    except:
+                        continue
+            n = len(acc)
+            if n < 2:
+                raise ValueError("데이터가 너무 적습니다.")
+            # 시간 간격
+            dt = (time[-1] - time[0]) / n
+            freq = np.fft.fftfreq(n, d=dt)[:n//2]
+            vals = np.abs(fft(acc))[:n//2]
+
+            # 50Hz 이하만
+            mask = freq <= 50
+            freq = freq[mask]
+            vals = vals[mask]
+
+            # 간단 스무딩
+            window = np.ones(10)/10
+            smooth = np.convolve(vals, window, mode='same')
+            points = list(zip(freq, smooth))
+            return points, max(freq), max(smooth)
+        except Exception as e:
+            print(f"Error processing {os.path.basename(filepath)}: {e}")
+            return None, 0, 0
+
 
 if __name__ == "__main__":
     FFTApp().run()
