@@ -32,6 +32,12 @@ android.archs         = arm64-v8a,armeabi-v7a
 # 외부에 설치된 SDK / NDK 경로
 android.sdk_path      = /home/runner/android-sdk
 android.ndk_path      = /home/runner/android-sdk/ndk/25.2.9519653
+android.accept_sdk_license  = True
+
+# pip 설치된 python-for-android 사용
+# (p4a.url/p4a.branch 설정 제거)
+[p4a]
+release = false
 
 # 빌드 도구 버전 고정
 android.build_tools_version = 31.0.0
