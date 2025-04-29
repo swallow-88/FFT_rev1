@@ -71,17 +71,20 @@ jobs:
             "extras;google;m2repository" \
             "extras;android;m2repository"
 
-      - name: Pin packaging & setuptools
+
+
+        # 10) packaging & setuptools 버전 고정
+      - name: packaging & setuptools 고정
         run: |
           python3 -m pip install --upgrade pip
-          pip install setuptools==65.5.0 packaging==21.3 wheel
+          # packaging 20.9 로 하향( strip_trailing_zero 지원 )
+          pip install setuptools==65.5.0 packaging==20.9 wheel
 
-      - name: Install Buildozer & python-for-android
+      # 11) Buildozer & python-for-android 설치
+      - name: Buildozer & p4a 설치
         run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          # install Cython and Buildozer
           pip install cython==0.29.34 buildozer==1.5.0
-          # pull p4a from its develop branch so that aab support lines up
+          # python-for-android develop 브랜치 사용(AAB 지원 동기화)
           pip install git+https://github.com/kivy/python-for-android.git@develop
 
 
