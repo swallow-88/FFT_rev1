@@ -5,7 +5,7 @@ package.domain          = org.example
 source.dir              = .
 source.include_exts     = py,kv,csv
 version                 = 0.1
-requirements            = python3,kivy,kivy_garden.graph,numpy,scipy
+requirements            = python3,kivy,kivy_garden.graph,numpy,scipy,cython
 orientation             = portrait
 android.use_aab         = False
 
