@@ -1,6 +1,6 @@
 # .github/workflows/build.yml
 
-name: 📦 Build & Release FFTApp APK
+name: Build & Release FFTApp APK
 
 on:
   push:
@@ -12,55 +12,57 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      # Use the runner’s preinstalled Android SDK
       ANDROID_HOME:     /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
+      # 1) Check out your code
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Java 11 (Temurin)
+      # 2) Set up Java (for Android SDK and Buildozer)
+      - name: Set up Java 11
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '11'
 
-      - name: Set up Python 3.10
+      # 3) Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install system build dependencies
+      # 4) Install system build dependencies
+      - name: Install apt packages
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
             build-essential git zip unzip wget curl \
             python3-pip python3-dev ant \
-            cmake ninja-build openjdk-11-jdk-headless \
-            autoconf automake libtool pkg-config
+            cmake ninja-build autoconf automake libtool pkg-config \
+            openjdk-11-jdk-headless
 
-      - name: Configure Android SDK paths
+      # 5) Configure Android SDK paths (use runner-preinstalled SDK)
+      - name: Configure Android SDK
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
-          # add all likely SDK tool dirs to PATH
           echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${ANDROID_SDK_ROOT}/tools/bin"           >> $GITHUB_PATH
           echo "${ANDROID_SDK_ROOT}/platform-tools"      >> $GITHUB_PATH
           echo "${ANDROID_SDK_ROOT}/emulator"            >> $GITHUB_PATH
 
-      - name: Verify sdkmanager is available
+      # 6) Verify sdkmanager is on PATH
+      - name: Verify sdkmanager
         run: |
-          echo "PATH = $PATH"
-          which sdkmanager || { echo "ERROR: sdkmanager not found"; exit 1; }
+          which sdkmanager
           sdkmanager --version
 
-      - name: Accept all Android SDK licenses
-        run: yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses
-
-      - name: Install required Android SDK components
+      # 7) Accept licenses and install Android SDK components
+      - name: Accept licenses & install SDK components
         run: |
+          yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses
           sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
             "platform-tools" \
             "platforms;android-33" \
@@ -70,25 +72,27 @@ jobs:
             "extras;google;m2repository" \
             "extras;android;m2repository"
 
-      - name: Pin packaging to avoid setuptools conflict
+      # 8) Pin packaging/setuptools to avoid metadata‐generation errors
+      - name: Pin packaging & setuptools
         run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          pip install packaging==21.3
+          python3 -m pip install --upgrade pip
+          pip install setuptools==65.5.0 packaging==21.3 wheel
 
-      - name: Install Buildozer & python-for-android
+      # 9) Install Buildozer & python‐for‐android
+      - name: Install Buildozer & p4a
         run: |
           pip install cython==0.29.34 \
                       buildozer==1.5.0 \
                       python-for-android==2023.09.16
 
+      # 10) Build APK
       - name: Build APK (Debug)
         run: |
-          # clean out previous artifacts
           buildozer android clean || true
-          # run a fully verbose build
           buildozer android debug --verbose
 
-      - name: Upload APK artifact
+      # 11) Upload the APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-debug-apk
