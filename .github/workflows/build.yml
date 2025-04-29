@@ -1,6 +1,6 @@
 # .github/workflows/build.yml
 
-name: Build & Release FFTApp APK
+name: 📦 Build & Release FFTApp APK
 
 on:
   push:
@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
+      # Use the runner’s preinstalled Android SDK
       ANDROID_HOME:     /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
@@ -19,45 +20,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Set up Java 11
+      - name: Set up Java 11 (Temurin)
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '11'
 
-      - name: Install system dependencies
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install system build dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            build-essential git zip unzip wget \
+            build-essential git zip unzip wget curl \
             python3-pip python3-dev ant \
-            cmake ninja-build autoconf automake libtool pkg-config
+            cmake ninja-build openjdk-11-jdk-headless \
+            autoconf automake libtool pkg-config
 
-      - name: Verify sdkmanager
+      - name: Configure Android SDK paths
         run: |
-          echo "PATH for sdkmanager:" $PATH
-          which sdkmanager || (echo "sdkmanager not found" && exit 1)
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
+          # add all likely SDK tool dirs to PATH
+          echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "${ANDROID_SDK_ROOT}/tools/bin"           >> $GITHUB_PATH
+          echo "${ANDROID_SDK_ROOT}/platform-tools"      >> $GITHUB_PATH
+          echo "${ANDROID_SDK_ROOT}/emulator"            >> $GITHUB_PATH
+
+      - name: Verify sdkmanager is available
+        run: |
+          echo "PATH = $PATH"
+          which sdkmanager || { echo "ERROR: sdkmanager not found"; exit 1; }
           sdkmanager --version
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
+      - name: Accept all Android SDK licenses
+        run: yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses
 
-      - name: Install Android SDK components
+      - name: Install required Android SDK components
         run: |
-          sdkmanager "platform-tools" \
-                     "platforms;android-33" \
-                     "build-tools;33.0.2" \
-                     "ndk;23.1.7779620" \
-                     "cmake;3.22.1" \
-                     "extras;google;m2repository" \
-                     "extras;android;m2repository"
+          sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "ndk;23.1.7779620" \
+            "cmake;3.22.1" \
+            "extras;google;m2repository" \
+            "extras;android;m2repository"
 
-      - name: Pin packaging to 21.3 to avoid setuptools conflict
+      - name: Pin packaging to avoid setuptools conflict
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
           pip install packaging==21.3
@@ -70,7 +83,9 @@ jobs:
 
       - name: Build APK (Debug)
         run: |
+          # clean out previous artifacts
           buildozer android clean || true
+          # run a fully verbose build
           buildozer android debug --verbose
 
       - name: Upload APK artifact
