@@ -36,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install buildozer==1.5.0
           # Buildozer 1.5.0 과 호환된 p4a 2023.x
-          pip install python-for-android==2024.1.21
+          pip install python-for-android==2024.01.21
           
       # … 중략 …
 
