@@ -50,6 +50,11 @@ p4a.branch                  = master
 # android.sdk_path          = /home/runner/android-sdk
 # android.ndk_path          = /home/runner/android-sdk/ndk/23.1.7779620
 
+[app]
+# …
+# Release 아티팩트 타입을 apk로 강제
+android.release_artifact_types = apk
+
 
 [buildozer]
 # ── 빌드 캐시 및 출력 디렉터리 ───────────────────────────────────────────────
