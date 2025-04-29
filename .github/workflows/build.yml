@@ -10,70 +10,71 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      ANDROID_SDK_ROOT: $HOME/android-sdk
-      ANDROID_HOME:     $HOME/android-sdk
 
     steps:
-      - name: Checkout repository
+      # 1) 코드 체크아웃
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
+      # 2) Python 3.10 셋업
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Set up Java 11
+      # 3) Java 11 셋업 (SDK 툴체인용)
+      - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '11'
 
-      - name: Install system dependencies
+      # 4) 의존성 설치 (Buildozer 빌드 툴)
+      - name: Install Buildozer dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential git zip unzip wget curl \
-            python3-pip python3-dev openjdk-11-jdk ant \
+            build-essential git zip unzip wget \
+            python3-pip python3-dev ant \
             cmake ninja-build autoconf automake libtool pkg-config
 
-      - name: Install legacy Android SDK Tools
+      # 5) sdkmanager 확인 — 없으면 실패
+      - name: Verify sdkmanager exists
         run: |
-          mkdir -p "$ANDROID_SDK_ROOT"
-          wget -q https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip -O sdk-tools.zip
-          unzip -q sdk-tools.zip -d "$ANDROID_SDK_ROOT"
-          rm sdk-tools.zip
-          # tools/bin 에 sdkmanager, avdmanager 스크립트와 lib/*.jar 이 제대로 위치
-          echo "PATH=$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+          which sdkmanager
+          sdkmanager --version
 
-      - name: Verify sdkmanager works
-        run: sdkmanager --version
+      # 6) 라이선스 자동 동의
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
 
-      - name: Accept licenses & install SDK components
+      # 7) 필요한 SDK 컴포넌트 설치
+      - name: Install Android SDK components
         run: |
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.2" \
-            "ndk;23.1.7779620" \
-            "cmake;3.22.1" \
-            "extras;google;m2repository" \
-            "extras;android;m2repository"
+          sdkmanager "platform-tools" \
+                     "platforms;android-33" \
+                     "build-tools;33.0.2" \
+                     "ndk;23.1.7779620" \
+                     "cmake;3.22.1" \
+                     "extras;google;m2repository" \
+                     "extras;android;m2repository"
 
-      - name: Upgrade pip & install Buildozer + p4a
+      # 8) pip 업그레이드 & Buildozer 설치
+      - name: Install Buildozer & p4a
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
           pip install cython==0.29.34 \
                       buildozer==1.5.0 \
                       python-for-android==2023.09.16
 
+      # 9) APK 빌드
       - name: Build APK (Debug)
         run: |
           buildozer android clean || true
           buildozer android debug --verbose
 
-      - name: Archive & Upload APK
+      # 10) 결과물 업로드
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-debug-apk
