@@ -100,12 +100,6 @@ jobs:
           buildozer android debug --verbose 2>&1 | tee buildozer.log
         continue-on-error: true
 
-
-      - name: Build APK (Debug) and capture logs
-        run: |
-          buildozer android clean || true
-          buildozer android debug --verbose 2>&1 | tee buildozer.log
-        
       
       - name: Debug print all APK files
         run: |
