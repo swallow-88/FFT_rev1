@@ -93,19 +93,19 @@ jobs:
       # Install Buildozer & python-for-android
       - name: Buildozer & p4a 설치
         run: |
-          pip install cython==0.29.34 buildozer==1.5.0
+          pip install cython==0.29.34 buildozer==1.5.0 \
+                      python-for-android==2023.9.16
           # PyPI에 있는 최신 안정 버전으로 고정
           pip install --upgrade --force-reinstall \
             git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
     
 
-      # 12) Build APK (Debug) and capture logs      - name: Build APK (Debug) and capture logs
+      # 12) Build APK (Debug) and capture logs      
       - name: Build APK (Debug) and capture logs
         run: |
-          buildozer android clean
+          buildozer android clean || true
           # stderr 도 함께 tee 로 묶어서 기록합니다.
-          buildozer
-
+          buildozer android debug --verbose 2>&1 | tee buildozer.log
       
       - name: Debug print all APK files
         run: |
