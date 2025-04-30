@@ -116,5 +116,5 @@ jobs:
         with:
           name: FFTApp-apks
           path: |
-            .buildozer/android/platform/*/build/outputs/apk/**/*.apk
+            **/*.apk
           if-no-files-found: error
