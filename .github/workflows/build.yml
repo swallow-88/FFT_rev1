@@ -103,6 +103,13 @@ jobs:
           echo "▶ PWD = $PWD"
           find . -type f -name '*.apk' -print
 
+      - name: Debug show build errors
+        run: |
+          echo "▶ buildozer.log 에서 ERROR 검색"
+          grep -R "ERROR" buildozer.log || echo "ERROR 없음"
+          echo "▶ buildozer.log 마지막 50줄"
+          tail -n 50 buildozer.log
+
           
       # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
