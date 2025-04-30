@@ -23,7 +23,7 @@ android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,INTERNET
 android.api                 = 33
 android.minapi              = 24
 android.arch                = armeabi-v7a,arm64-v8a
-android.ndk                 = 25b
+android.ndk = 25.2.9519653
 android.ndk_api             = 24
 
 # ── Build Tools 버전 고정 ──────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ android.logcat_filters      = *:S python:D
 
 # ── python-for-android 설정 ──────────────────────────────────────────────────
 p4a.bootstrap               = sdl2
-p4a.branch                  = develop
+p4a.branch = stable
 
 # ── (선택) SDK/NDK 경로 고정 ───────────────────────────────────────────────────
 # android.sdk_path          = /home/runner/android-sdk
@@ -60,8 +60,6 @@ android.release_artifact_types = apk
 
 # … 기존 설정 …
 # p4a에 setup.py 실행을 요청합니다.
-p4a.extra_args = --use-setup-py
-
 
 [buildozer]
 # ── 빌드 캐시 및 출력 디렉터리 ───────────────────────────────────────────────
