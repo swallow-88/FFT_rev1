@@ -124,7 +124,7 @@ jobs:
       # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
         run: |
-          find . -type f -name '*.apk'
+          find . -type f -name '*.apk' -print
 
       # 15) APK 업로드
 
