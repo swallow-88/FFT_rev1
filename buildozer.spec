@@ -21,10 +21,10 @@ android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,INTERNET
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
-android.minapi              = 21
+android.minapi              = 24
 android.arch                = armeabi-v7a,arm64-v8a
 android.ndk                 = 25b
-android.ndk_api             = 21
+android.ndk_api             = 24
 
 # ── Build Tools 버전 고정 ──────────────────────────────────────────────────────
 android.build_tools_version = 33.0.2
