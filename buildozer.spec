@@ -55,7 +55,12 @@ android.release_artifact_types = apk
 
 
 # lib2to3, test 모듈을 컴파일 대상에서 제외
-p4a.extra_args = --blacklist-requirements=test,lib2to3
+#p4a.extra_args = --blacklist-requirements=test,lib2to3
+
+
+# … 기존 설정 …
+# p4a에 setup.py 실행을 요청합니다.
+p4a.extra_args = --use-setup-py
 
 
 [buildozer]
