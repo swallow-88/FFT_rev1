@@ -105,6 +105,12 @@ jobs:
           find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
 
 
+      # 14) 생성된 APK 위치 확인
+      - name: Locate generated APK(s)
+        run: |
+          echo "🔍 APK 파일 위치 검색 중…"
+          find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
+
       # 15) APK 업로드
       - name: Upload APK(s)
         uses: actions/upload-artifact@v4
@@ -114,4 +120,3 @@ jobs:
             bin/*.apk
             .buildozer/android/platform/*/build/outputs/apk/**/*.apk
           if-no-files-found: error
-
