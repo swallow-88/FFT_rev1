@@ -120,6 +120,15 @@ jobs:
           echo "▶ buildozer.log 마지막 50줄"
           tail -n 50 buildozer.log
 
+      - name: Truncated build log with notice
+        run: |
+          echo "⚠️ 로그가 너무 길어 전체를 보지 못할 수 있습니다. 주요 에러·경고만 표시합니다."
+          echo "▶ 에러·경고 검색:"
+          grep -E "ERROR|WARNING" buildozer.log || echo "에러/경고 없음"
+          echo
+          echo "▶ buildozer.log 마지막 50줄:"
+          tail -n 50 buildozer.log
+
           
       # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
