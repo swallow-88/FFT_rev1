@@ -90,13 +90,6 @@ jobs:
           pip install python-for-android==2024.1.21
 
 
-
-      - name: Build APK (Debug) and capture logs
-        run: |
-          buildozer android clean || true
-          buildozer android debug --verbose | tee buildozer.log
-        continue-on-error: true
-
       # 12) Build APK (Debug) and capture logs
       - name: Build APK (Debug) and capture logs
         run: |
@@ -104,19 +97,6 @@ jobs:
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
 
-
-      - name: Locate generated APK(s)
-        run: |
-          echo "🔍 APK 파일 위치 검색..."
-          find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
-
-
-      # 13) Upload full build log
-      - name: Upload full build log
-        uses: actions/upload-artifact@v4
-        with:
-          name: buildozer-full-log
-          path: buildozer.log
 
       # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
