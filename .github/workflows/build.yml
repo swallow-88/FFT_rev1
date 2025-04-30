@@ -89,7 +89,7 @@ jobs:
         run: |
           pip install cython==0.29.34 buildozer==1.5.0
           # PyPI에 있는 최신 안정 버전으로 고정
-          pip install python-for-android==2024.1.21
+          #pip install python-for-android==2024.1.21
 
 
       # 12) Build APK (Debug) and capture logs      - name: Build APK (Debug) and capture logs
