@@ -96,6 +96,12 @@ jobs:
           buildozer android clean || true
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
+        
+      
+      - name: Debug: print all .apk files
+        run: |
+          echo ">> 기본 작업 디렉터리: $PWD"
+          find . -type f -name '*.apk' -print
 
 
       # 14) 생성된 APK 위치 확인
@@ -110,6 +116,5 @@ jobs:
         with:
           name: FFTApp-apks
           path: |
-            bin/*.apk
             .buildozer/android/platform/*/build/outputs/apk/**/*.apk
           if-no-files-found: error
