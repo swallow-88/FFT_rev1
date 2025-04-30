@@ -112,10 +112,15 @@ jobs:
         run: |
           echo "🔍 APK 위치:"
           find . -type f -name '*.apk' -print
+  
+      - name: Debug List APKs in bin/
+        run: |
+          echo "▶ bin/ 폴더 내용:"
+          ls -l bin/*.apk || echo "bin/*.apk 파일이 없습니다!"
 
       - name: Upload APK(s)
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-apks
-          path: .buildozer/android/platform/*/build/outputs/apk/debug/fftapp-debug.apk
+          path: bin/*.apk
           if-no-files-found: error
