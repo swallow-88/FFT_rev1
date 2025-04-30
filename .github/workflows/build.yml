@@ -100,10 +100,10 @@ jobs:
       
       - name: Debug print all APK files
         run: |
-          echo ">> 기본 작업 디렉터리: $PWD"
+          echo "▶ PWD = $PWD"
           find . -type f -name '*.apk' -print
 
-
+          
       # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
         run: |
@@ -116,5 +116,5 @@ jobs:
         with:
           name: FFTApp-apks
           path: |
-            **/*.apk
+            .buildozer/android/platform/*/build/outputs/apk/debug/fftapp-debug.apk
           if-no-files-found: error
