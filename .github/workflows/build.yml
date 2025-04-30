@@ -80,66 +80,42 @@ jobs:
             "extras;android;m2repository"
 
 
+# … 위쪽 스텝들 생략 …
 
-        # 10) packaging & setuptools 버전 고정
       - name: packaging & setuptools 고정
         run: |
           python3 -m pip install --upgrade pip
-          # packaging 20.9 로 하향( strip_trailing_zero 지원 )
           pip install setuptools==65.5.0 packaging==20.9 wheel
 
-      # 11) Buildozer & python-for-android 설치
-      # 11) Buildozer & python-for-android 설치
-      # Install Buildozer & python-for-android
       - name: Buildozer & p4a 설치
         run: |
-          pip install cython==0.29.34 buildozer==1.5.0 \
-                      python-for-android==2023.9.16
-          # PyPI에 있는 최신 안정 버전으로 고정
-          pip install --upgrade --force-reinstall \
-            git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
-    
+          pip install cython==0.29.34 \
+                      buildozer==1.5.0 \
+                      python-for-android==2024.1.21
 
-      # 12) Build APK (Debug) and capture logs      
       - name: Build APK (Debug) and capture logs
         run: |
           buildozer android clean || true
-          # stderr 도 함께 tee 로 묶어서 기록합니다.
           buildozer android debug --verbose 2>&1 | tee buildozer.log
-          continue-on-error: true
-          
-      - name: Debug list all .apk files
-        run: |
-          echo "▶ Generated APK files:"
-          find . -type f -name '*.apk' -print
-
-      - name: Debug show build errors
-        run: |
-          echo "▶ buildozer.log 에서 ERROR 검색"
-          grep -R "ERROR" buildozer.log || echo "ERROR 없음"
-          echo "▶ buildozer.log 마지막 50줄"
-          tail -n 50 buildozer.log
+        continue-on-error: true
 
       - name: Truncated build log with notice
         run: |
-          echo "⚠️ 로그가 너무 길어 전체를 보지 못할 수 있습니다. 주요 에러·경고만 표시합니다."
-          echo "▶ 에러·경고 검색:"
+          echo "⚠️ 로그가 너무 길어 전체를 보지 못할 수 있습니다."
+          echo "▶ 에러·경고:"
           grep -E "ERROR|WARNING" buildozer.log || echo "에러/경고 없음"
           echo
           echo "▶ buildozer.log 마지막 50줄:"
           tail -n 50 buildozer.log
 
-          
-      # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
         run: |
+          echo "🔍 APK 위치:"
           find . -type f -name '*.apk' -print
-
-      # 15) APK 업로드
 
       - name: Upload APK(s)
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-apks
-          path: .buildozer/android/platform/*/build/outputs/apk/**/*.apk
+          path: .buildozer/android/platform/*/build/outputs/apk/debug/fftapp-debug.apk
           if-no-files-found: error
