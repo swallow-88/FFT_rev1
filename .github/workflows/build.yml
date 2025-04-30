@@ -104,6 +104,13 @@ jobs:
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
 
+
+      - name: Locate generated APK(s)
+        run: |
+          echo "🔍 APK 파일 위치 검색..."
+          find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
+
+
       # 13) Upload full build log
       - name: Upload full build log
         uses: actions/upload-artifact@v4
@@ -119,13 +126,13 @@ jobs:
 
 
      # 15) Upload APK(s)
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FFTApp-apks
-          # 워크스페이스 어디에든 있는 .apk 전부 업로드
-          path: '**/*.apk'
+          name: FFTApp-apk
+          path: |
+            "bin/*.apk"
+            ".buildozer/android/platform/*/build/outputs/apk/**/*.apk"
           if-no-files-found: error
-        
 
 
