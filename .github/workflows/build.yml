@@ -97,16 +97,35 @@ jobs:
           buildozer android debug --verbose | tee buildozer.log
         continue-on-error: true
 
-      # 12) pip install 로그 업로드
-      - name: Upload pip-install log
-        uses: actions/upload-artifact@v4
-        with:
-          name: pip-install-log
-          path: pip-install.log
+      # 12) Build APK (Debug) and capture logs
+      - name: Build APK (Debug) and capture logs
+        run: |
+          buildozer android clean || true
+          buildozer android debug --verbose | tee buildozer.log
+        continue-on-error: true
 
-      - name: Upload APK artifact
+      # 13) Upload full build log
+      - name: Upload full build log
         uses: actions/upload-artifact@v4
         with:
-          name: FFTApp-debug-apk
-          path: bin/*.apk
+          name: buildozer-full-log
+          path: buildozer.log
+
+      # 14) 어디에 APK가 생성됐는지 확인
+      - name: Locate generated APK(s)
+        run: |
+          echo "🔍 Searching for .apk under workspace:"
+          find . -type f -name '*.apk' || echo "No .apk files found"
+
+
+     # 15) Upload APK(s)
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFTApp-apks
+          # 워크스페이스 어디에든 있는 .apk 전부 업로드
+          path: '**/*.apk'
           if-no-files-found: error
+        
+
+
