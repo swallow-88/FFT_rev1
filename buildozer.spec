@@ -22,7 +22,7 @@ android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,INTERNET
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
 android.minapi              = 24
-android.arch                = armeabi-v7a,arm64-v8a
+android.archs                = armeabi-v7a,arm64-v8a
 android.ndk = 25.2.9519653
 android.ndk_api             = 24
 
