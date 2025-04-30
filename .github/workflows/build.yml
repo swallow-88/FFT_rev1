@@ -103,14 +103,15 @@ jobs:
         run: |
           echo "🔍 APK 파일 위치 검색 중…"
           find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
-      
-            # 15) APK 업로드
+
+
+      # 15) APK 업로드
       - name: Upload APK(s)
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-apks
-          path:
-            - bin/*.apk
-            - .buildozer/android/platform/*/build/outputs/apk/**/*.apk
+          path: |
+            bin/*.apk
+            .buildozer/android/platform/*/build/outputs/apk/**/*.apk
           if-no-files-found: error
 
