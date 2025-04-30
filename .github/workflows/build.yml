@@ -118,21 +118,19 @@ jobs:
           name: buildozer-full-log
           path: buildozer.log
 
-      # 14) 어디에 APK가 생성됐는지 확인
+      # 14) 생성된 APK 위치 확인
       - name: Locate generated APK(s)
         run: |
-          echo "🔍 Searching for .apk under workspace:"
-          find . -type f -name '*.apk' || echo "No .apk files found"
-
-
-     # 15) Upload APK(s)
+          echo "🔍 APK 파일 위치 검색 중…"
+          find . -type f -name '*.apk' || echo "APK 파일이 없습니다."
+      
+      # 15) APK 업로드
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FFTApp-apk
+          name: FFTApp-apks
           path: |
             "bin/*.apk"
             ".buildozer/android/platform/*/build/outputs/apk/**/*.apk"
           if-no-files-found: error
-
 
