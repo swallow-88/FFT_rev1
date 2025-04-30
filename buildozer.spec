@@ -45,8 +45,6 @@ android.logcat_filters      = *:S python:D
 # ── python-for-android 설정 ──────────────────────────────────────────────────
 p4a.bootstrap               = sdl2
 #p4a.branch = stable
- [app]
-    # … 기존 설정 …
 
 # python-for-android develop 브랜치를 clone 하지 않도록 주석 처리!
 p4a.branch                  = develop
