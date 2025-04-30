@@ -90,11 +90,12 @@ jobs:
           pip install python-for-android==2024.1.21
 
 
-      # 12) Build APK (Debug) and capture logs
+      # 12) Build APK (Debug) and capture logs      - name: Build APK (Debug) and capture logs
       - name: Build APK (Debug) and capture logs
         run: |
           buildozer android clean || true
-          buildozer android debug --verbose | tee buildozer.log
+          # stderr 도 함께 tee 로 묶어서 기록합니다.
+          buildozer android debug --verbose 2>&1 | tee buildozer.log
         continue-on-error: true
         
       
