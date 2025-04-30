@@ -100,7 +100,7 @@ jobs:
           echo "🔍 전체 APK 찾기:"
           find . -type f -name '*.apk' -print
 
-      - name: Debug: List APKs in bin/
+      - name: Debug List APKs in bin/
         run: |
           echo "▶ ./bin/ 폴더 내용:"
           ls -l ./bin/*.apk || echo "bin/*.apk 파일이 없습니다!"
