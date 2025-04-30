@@ -110,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FFTApp-apks
-          path: |
-            bin/*.apk
+          path: |                    # ← 반드시 블록 스칼라로 시작
+            bin/*.apk               # ← 두 칸 들여쓰기
             .buildozer/android/platform/*/build/outputs/apk/**/*.apk
           if-no-files-found: error
