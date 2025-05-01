@@ -80,8 +80,9 @@ jobs:
       - name: Install Buildozer & python-for-android
         run: |
           pip install cython==0.29.34 buildozer==1.5.0
-          # AAB 지원 포함 최신 릴리스
-          pip install python-for-android==2024.3.0
+          # AAB 지원이 들어간 GitHub 개발 브랜치로 설치
+          pip install --upgrade --force-reinstall \
+            git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
 
 
       - name: Build APK (Debug) and capture logs
