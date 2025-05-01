@@ -79,12 +79,14 @@ jobs:
       
       - name: Install Buildozer & python-for-android
         run: |
+          # pip 최신화
           python3 -m pip install --upgrade pip
-          pip install \
+          # Buildozer 2.0.0a1, Cython, P4A 설치
+          pip install --upgrade \
+            buildozer==2.0.0a1 \
             cython==0.29.34 \
-            buildozer==1.5.0 \
             python-for-android==2024.1.21
-
+            
       - name: Build APK (Debug) and capture logs
         run: |
           buildozer android clean || true
