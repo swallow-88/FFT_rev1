@@ -76,14 +76,13 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install setuptools==65.5.0 packaging==21.3 wheel
 
-      - name: Install Buildozer & python-for-android
+      - name: Install Buildozer & python-for-android from GitHub
         run: |
           python3 -m pip install --upgrade pip
-          # 프리릴리즈도 허용하도록 --pre 추가
-          pip install --upgrade --pre \
-            buildozer==2.0.0a1 \
+          pip install --upgrade \
             cython==0.29.34 \
-            python-for-android==2024.1.21
+            git+https://github.com/kivy/buildozer.git@develop#egg=buildozer \
+            git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
             
       - name: Build APK (Debug) and capture logs
         run: |
