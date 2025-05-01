@@ -76,13 +76,12 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install setuptools==65.5.0 packaging==21.3 wheel
 
+      
       - name: Install Buildozer & python-for-android
         run: |
           pip install cython==0.29.34 buildozer==1.5.0
-          # AAB(aab) 지원이 포함된 최신 p4a 개발 버전을 깃허브에서 직접 설치
-          pip install --upgrade --force-reinstall \
-            git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
-
+          # AAB 지원 포함 최신 릴리스
+          pip install python-for-android==2024.3.0
 
 
       - name: Build APK (Debug) and capture logs
