@@ -47,7 +47,7 @@ p4a.bootstrap               = sdl2
 #p4a.branch = stable
 
 # python-for-android develop 브랜치를 clone 하지 않도록 주석 처리!
-p4a.branch                  = develop
+#p4a.branch                  = develop
 
     # … 나머지 설정 …
 
