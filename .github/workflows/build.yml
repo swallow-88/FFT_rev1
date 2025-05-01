@@ -70,19 +70,18 @@ jobs:
             "cmake;3.22.1" \
             "extras;google;m2repository" \
             "extras;android;m2repository"
-
+            
       - name: Pin packaging & setuptools
         run: |
           python3 -m pip install --upgrade pip
-          pip install setuptools==65.5.0 packaging==20.9 wheel
+          pip install setuptools==65.5.0 packaging==21.3 wheel
 
       - name: Install Buildozer & python-for-android
         run: |
           pip install cython==0.29.34 buildozer==1.5.0
-          # aab 커맨드가 포함된 최신 p4a(develop)으로 덮어씌우기
           pip install --upgrade --force-reinstall \
             git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
-    
+
 
       - name: Build APK (Debug) and capture logs
         run: |
