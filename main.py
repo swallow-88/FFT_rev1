@@ -150,49 +150,26 @@ class FFTApp(App):
         #return self.layout
 
     
-   def process_data(self, instance):
-    filechooser.open_file(
-        on_selection=self.file_selection_callback,
-        multiple=True,   # 가능하면 한 번에 여러 개 고를 수 있게
-        filters=[("CSV files", "*.csv")]
-    )
+    def process_data(self, instance):
+        filechooser.open_file(
+            on_selection=self.file_selection_callback,
+            multiple=True,   # 가능하면 한 번에 여러 개 고를 수 있게
+            filters=[("CSV files", "*.csv")]
+        )
 
     def file_selection_callback(self, selection):
-        # 1) 아무것도 선택하지 않았으면 무시
-        if not selection:
-            self.label.text = "CSV 파일을 선택해 주세요."
+        if not selection or len(selection) < 2:
+            self.label.text = "CSV 파일 2개를 선택하세요."
             self.run_button.disabled = True
             return
-    
-        # 2) 디버깅용 로그(나중에 지워도 됩니다)
-        print("▶ selection:", selection)
-    
-        # 3) 한 번에 두 개 이상 들어오면 바로 처리
-        if len(selection) >= 2:
-            self.selected_files = selection[:2]
-            names = [os.path.basename(p) for p in self.selected_files]
-            self.label.text = f"선택: {names[0]}, {names[1]}"
-            self.run_button.disabled = False
-            # 혹시 이전에 저장했던 first_file 이 있으면 지워두기
-            if hasattr(self, 'first_file'):
-                del self.first_file
-            return
-    
-        # 4) 그 외에는 “두 번에 걸친 선택” 모드
-        path = selection[0]
-        if not hasattr(self, 'first_file'):
-            # 첫 번째 파일
-            self.first_file = path
-            self.label.text = f"1st: {os.path.basename(path)}\n2nd 파일을 선택하세요"
-            self.run_button.disabled = True
-        else:
-            # 두 번째 파일
-            self.selected_files = [self.first_file, path]
-            names = [os.path.basename(p) for p in self.selected_files]
-            self.label.text = f"선택: {names[0]}, {names[1]}"
-            self.run_button.disabled = False
-            del self.first_file
-    
+
+        # 한 번에 선택된 상위 2개 파일만 사용
+        self.selected_files = selection[:2]
+        names = [os.path.basename(p) for p in self.selected_files]
+        self.label.text = f"선택: {names[0]}, {names[1]}"
+        self.run_button.disabled = False
+
+       
     '''
     def file_selection_callback(self, selection):
         if not selection:
