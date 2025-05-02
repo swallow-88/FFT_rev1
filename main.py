@@ -64,9 +64,14 @@ class GraphWidget(Widget):
                 Line(points=[self.scale_point(x,y) for x,y in points], width=1)
 
             # 차이 그래프
-            Color(*self.diff_color)
-            Line(points=[self.scale_point(x,y) for x,y in self.difference_dataset], width=1)
+            #Color(*self.diff_color)
+            #Line(points=[self.scale_point(x,y) for x,y in self.difference_dataset], width=1)
 
+            # 차이 그래프 (데이터가 있을 때만)
+            if self.difference_dataset:
+                Color(*self.diff_color)
+                Line(points=[self.scale_point(x,y) for x,y in self.difference_dataset], width=1)
+    
     def scale_point(self, x, y):
         scaled_x = self.padding_x + (x/self.max_x) * (self.width - 2*self.padding_x)
         scaled_y = self.padding_y + (y/self.max_y) * (self.height - 2*self.padding_y)
@@ -158,6 +163,7 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
+        '''
         if not selection:
             return
 
@@ -180,7 +186,21 @@ class FFTApp(App):
         self.run_button.disabled = False
         # 선택 완료했으니 first_file 속성 지워도 무방
         del self.first_file
-       
+        '''
+
+        if not selection:
+            self.label.text = "CSV 파일을 선택하세요."
+            self.run_button.disabled = True
+            return
+
+        # 1개 또는 2개까지 파일을 취급
+        self.selected_files = selection[:2]
+        names = [os.path.basename(p) for p in self.selected_files]
+        # “파일1, 파일2” 또는 “파일1” 로 표시
+        self.label.text = "선택: " + ", ".join(names)
+        self.run_button.disabled = False
+
+
     '''
     def file_selection_callback(self, selection):
         if not selection:
@@ -214,6 +234,7 @@ class FFTApp(App):
         ).start()
 
     def compute_and_plot(self, files):
+        '''
         f1, x1, y1 = self.process_csv_and_compute_fft(files[0])
         f2, x2, y2 = self.process_csv_and_compute_fft(files[1])
         if f1 is None or f2 is None:
@@ -227,6 +248,35 @@ class FFTApp(App):
         # UI 스레드에서 그래프 갱신
         Clock.schedule_once(lambda dt:
             self.graph_widget.update_graph([f1,f2], diff, x_max, y_max)
+        )
+        '''
+
+        results = []
+        for fp in files:
+            f, x_max, y_max = self.process_csv_and_compute_fft(fp)
+            if f is None:
+                Clock.schedule_once(lambda dt:
+                    setattr(self.label, 'text', "CSV 처리 중 오류가 발생했습니다.")
+                )
+                return
+            results.append((f, x_max, y_max))
+
+        # 단일 파일인 경우
+        if len(results) == 1:
+            f1, x1, y1 = results[0]
+            Clock.schedule_once(lambda dt:
+                self.graph_widget.update_graph([f1], [], x1, y1)
+            )
+            return
+
+        # 두 파일인 경우: 두 그래프 + 차이 그래프
+        (f1, x1, y1), (f2, x2, y2) = results
+        diff = [(f1[i][0], abs(f1[i][1] - f2[i][1]))
+                for i in range(min(len(f1), len(f2)))]
+        x_max = max(x1, x2)
+        y_max = max(y1, y2, max(y for _, y in diff))
+        Clock.schedule_once(lambda dt:
+            self.graph_widget.update_graph([f1, f2], diff, x_max, y_max)
         )
 
     def process_csv_and_compute_fft(self, filepath):
