@@ -12,6 +12,8 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Line, Color
 from kivy.clock import Clock
 from plyer import filechooser
+from kivy.logger import Logger
+
 import threading
 
 # Android 런타임 권한 요청
@@ -157,19 +159,21 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
-        # selection: 리스트로 반환된 선택된 파일 경로들
-        if not selection or len(selection) < 2:
-            self.label.text = "CSV 파일 2개를 선택해야 합니다."
-            self.run_button.disabled = True
+
+        if not selection:
             return
-
-        # 첫 두 개 파일만 사용
-        self.selected_files = selection[:2]
-        names = [os.path.basename(p) for p in self.selected_files]
-        self.label.text = f"선택: {names[0]}, {names[1]}"
-
-        # FFT 실행 버튼 활성화
-        self.run_button.disabled = False
+        path = selection[0]
+        # 첫 번째 파일이 아직 없으면 저장
+        if not hasattr(self, 'first_file'):
+            self.first_file = path
+            self.label.text = f"1st: {os.path.basename(path)}\n두 번째 파일을 선택하세요"
+        else:
+            self.selected_files = [self.first_file, path]
+            names = [os.path.basename(p) for p in self.selected_files]
+            self.label.text = f"선택: {names[0]}, {names[1]}"
+            self.run_button.disabled = False
+            # 다음번 실행을 대비해 first_file 초기화
+            del self.first_file
     
     '''
     def file_selection_callback(self, selection):
