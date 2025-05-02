@@ -154,18 +154,17 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
-        if not selection or len(selection) < 2:
-            self.label.text = "Select 2 CSV FILE_ERROR"
-            self.run_button.disabled = True
+        if not selection:
             return
-
-        # 선택된 파일 경로 저장
-        self.selected_files = selection[:2]
-        names = [os.path.basename(p) for p in self.selected_files]
-        self.label.text = f"Select: {names[0]}, {names[1]}"
-
-        # FFT 실행 버튼 활성화
-        self.run_button.disabled = False
+        # 첫 번째 선택인지, 두 번째 선택인지 구분
+        if not hasattr(self, 'first_file'):
+            self.first_file = selection[0]
+            self.label.text = f"1st: {os.path.basename(self.first_file)}\nSelect 2nd file"
+        else:
+            self.selected_files = [ self.first_file, selection[0] ]
+            names = [os.path.basename(p) for p in self.selected_files]
+            self.label.text = f"Select: {names[0]}, {names[1]}"
+            self.run_button.disabled = False
 
     def on_run_fft(self, instance):
         # 버튼 누르면 비활성화해서 중복 실행 방지
