@@ -157,6 +157,22 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
+        # selection: 리스트로 반환된 선택된 파일 경로들
+        if not selection or len(selection) < 2:
+            self.label.text = "CSV 파일 2개를 선택해야 합니다."
+            self.run_button.disabled = True
+            return
+
+        # 첫 두 개 파일만 사용
+        self.selected_files = selection[:2]
+        names = [os.path.basename(p) for p in self.selected_files]
+        self.label.text = f"선택: {names[0]}, {names[1]}"
+
+        # FFT 실행 버튼 활성화
+        self.run_button.disabled = False
+    
+    '''
+    def file_selection_callback(self, selection):
         if not selection:
             return
         path = selection[0]
@@ -173,7 +189,7 @@ class FFTApp(App):
             names = [os.path.basename(p) for p in self.selected_files]
             self.label.text = f"Select: {names[0]}, {names[1]}"
             self.run_button.disabled = False
-
+    '''
 
     def on_run_fft(self, instance):
         # 버튼 누르면 비활성화해서 중복 실행 방지
