@@ -168,19 +168,16 @@ class FFTApp(App):
         self.run_button.disabled = False
 
     def on_run_fft(self, instance):
-        # 버튼 누르면 비활성화해서 중복실행 방지
+        # 버튼 누르면 비활성화해서 중복 실행 방지
         self.run_button.disabled = True
         self.label.text = "FFT RUN…"
 
-         # 백그라운드에서 실제 계산·그래프 그리기
-         threading.Thread(
-             target=lambda: self.compute_and_plot(self.selected_files),
-             daemon=True
-         ).start()
-
-
-        # 백그라운드 스레드에서 CSV 읽기·FFT 수행
-        threading.Thread(target=self.compute_and_plot, args=(selection[:2],), daemon=True).start()
+        # 백그라운드에서 실제 계산·그래프 그리기
+        threading.Thread(
+            target=self.compute_and_plot,
+            args=(self.selected_files,),
+            daemon=True
+        ).start()
 
     def compute_and_plot(self, files):
         f1, x1, y1 = self.process_csv_and_compute_fft(files[0])
