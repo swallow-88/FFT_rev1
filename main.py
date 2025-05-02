@@ -143,8 +143,11 @@ class FFTApp(App):
         self.graph_widget = GraphWidget(size_hint=(1,0.6))
         self.layout.add_widget(self.graph_widget)
 
+        #return self.layout
+        self.first_file = None
         return self.layout
 
+    
     def process_data(self, instance):
         # Plyer 파일 선택기 열기
         filechooser.open_file(
@@ -156,6 +159,30 @@ class FFTApp(App):
     def file_selection_callback(self, selection):
         if not selection:
             return
+        path = selection[0]
+
+        # 1) 첫 번째 파일 선택
+        if self.first_file is None:
+            self.first_file = path
+            self.label.text = f"1st: {os.path.basename(path)}\nSelect 2nd file"
+            # 두 파일 고를 때까지 RUN 비활성
+            self.run_button.disabled = True
+        # 2) 두 번째 파일 선택
+        else:
+            self.selected_files = [self.first_file, path]
+            names = [os.path.basename(p) for p in self.selected_files]
+            self.label.text = f"Select: {names[0]}, {names[1]}"
+
+            # 이제 RUN 버튼 활성화
+            self.run_button.disabled = False
+            # (원한다면) 첫 파일 변수 초기화
+            self.first_file = None
+
+
+
+'''
+        if not selection:
+            return
         # 첫 번째 선택인지, 두 번째 선택인지 구분
         if not hasattr(self, 'first_file'):
             self.first_file = selection[0]
@@ -165,7 +192,7 @@ class FFTApp(App):
             names = [os.path.basename(p) for p in self.selected_files]
             self.label.text = f"Select: {names[0]}, {names[1]}"
             self.run_button.disabled = False
-
+'''
     def on_run_fft(self, instance):
         # 버튼 누르면 비활성화해서 중복 실행 방지
         self.run_button.disabled = True
