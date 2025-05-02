@@ -122,14 +122,21 @@ class FFTApp(App):
 
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
-        self.label = Label(text="CSV 파일 2개를 선택하세요", size_hint=(1,0.1))
+        self.label = Label(text="Select 2 CSV FILE", size_hint=(1,0.1))
         self.layout.add_widget(self.label)
 
-        self.process_button = Button(text="파일 선택 & 처리", size_hint=(1,0.1))
-        self.process_button.bind(on_press=self.process_data)
-        self.layout.add_widget(self.process_button)
+        # 1) 파일 선택만 담당할 버튼
+        self.select_button = Button(text="Select 2 CSV FILE", size_hint=(1,0.1))
+        self.select_button.bind(on_press=self.process_data)
+        self.layout.add_widget(self.select_button)
 
-        self.exit_button = Button(text="종료", size_hint=(1,0.1))
+        # 2) FFT 실행 버튼 (초기에는 비활성화)
+        self.run_button = Button(text="FFT RUN", size_hint=(1,0.1), disabled=True)
+        self.run_button.bind(on_press=self.on_run_fft)
+        self.layout.add_widget(self.run_button)
+  
+
+        self.exit_button = Button(text="EXIT", size_hint=(1,0.1))
         self.exit_button.bind(on_press=self.stop)
         self.layout.add_widget(self.exit_button)
 
@@ -148,8 +155,30 @@ class FFTApp(App):
 
     def file_selection_callback(self, selection):
         if not selection or len(selection) < 2:
-            self.label.text = "최소 2개의 CSV를 선택해야 합니다."
+            self.label.text = "Select 2 CSV FILE_ERROR"
+            self.run_button.disabled = True
             return
+
+        # 선택된 파일 경로 저장
+        self.selected_files = selection[:2]
+        names = [os.path.basename(p) for p in self.selected_files]
+        self.label.text = f"Select: {names[0]}, {names[1]}"
+
+        # FFT 실행 버튼 활성화
+        self.run_button.disabled = False
+
+    def on_run_fft(self, instance):
+        # 버튼 누르면 비활성화해서 중복실행 방지
+        self.run_button.disabled = True
+        self.label.text = "FFT RUN…"
+
+         # 백그라운드에서 실제 계산·그래프 그리기
+         threading.Thread(
+             target=lambda: self.compute_and_plot(self.selected_files),
+             daemon=True
+         ).start()
+
+
         # 백그라운드 스레드에서 CSV 읽기·FFT 수행
         threading.Thread(target=self.compute_and_plot, args=(selection[:2],), daemon=True).start()
 
@@ -157,7 +186,7 @@ class FFTApp(App):
         f1, x1, y1 = self.process_csv_and_compute_fft(files[0])
         f2, x2, y2 = self.process_csv_and_compute_fft(files[1])
         if f1 is None or f2 is None:
-            Clock.schedule_once(lambda dt: setattr(self.label, 'text', "CSV 처리 중 오류 발생"))
+            Clock.schedule_once(lambda dt: setattr(self.label, 'text', "ERROR PROCESS CSV FILE"))
             return
 
         diff = [(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
@@ -182,7 +211,7 @@ class FFTApp(App):
                         continue
             n = len(acc)
             if n < 2:
-                raise ValueError("데이터가 너무 적습니다.")
+                raise ValueError("ERROR DATA SIZE")
             # 시간 간격
             dt = (time[-1] - time[0]) / n
             freq = np.fft.fftfreq(n, d=dt)[:n//2]
