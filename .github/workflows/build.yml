@@ -78,14 +78,16 @@ jobs:
 
 
 
-      - name: Install Buildozer & python-for-android (GitHub)
+      - name: Install Buildozer & python-for-android from GitHub
         run: |
+          # pip 최신화
           python3 -m pip install --upgrade pip
-          pip install \
-            cython==0.29.34 \
-            git+https://github.com/kivy/buildozer.git@master#egg=buildozer \
-            git+https://github.com/kivy/python-for-android.git@develop#egg=python-for-android
-
+          # Cython 고정
+          pip install cython==0.29.34
+          # buildozer 은 master 브랜치로
+          pip install git+https://github.com/kivy/buildozer.git#egg=buildozer
+          # p4a 도 기본 브랜치로
+          pip install git+https://github.com/kivy/python-for-android.git#egg=python-for-android
             
       - name: Build APK (Debug) and capture logs
         run: |
