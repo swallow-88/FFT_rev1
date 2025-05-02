@@ -158,17 +158,28 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
-        if not selection or len(selection) < 2:
-            self.label.text = "CSV 파일 2개를 선택하세요."
-            self.run_button.disabled = True
+        if not selection:
             return
 
-        # 한 번에 선택된 상위 2개 파일만 사용
-        self.selected_files = selection[:2]
+        # 첫 번째 파일을 아직 선택하지 않았다면
+        if not hasattr(self, 'first_file'):
+            self.first_file = selection[0]
+            self.label.text = f"1번째: {os.path.basename(self.first_file)}\n2번째 파일을 선택하세요."
+            # 두 번째 파일 선택을 위해 다시 파일 선택기 열기
+            filechooser.open_file(
+                on_selection=self.file_selection_callback,
+                multiple=False,
+                filters=[("CSV files", "*.csv")]
+            )
+            return
+
+        # 두 번째 파일 선택
+        self.selected_files = [self.first_file, selection[0]]
         names = [os.path.basename(p) for p in self.selected_files]
         self.label.text = f"선택: {names[0]}, {names[1]}"
         self.run_button.disabled = False
-
+        # 선택 완료했으니 first_file 속성 지워도 무방
+        del self.first_file
        
     '''
     def file_selection_callback(self, selection):
