@@ -127,6 +127,8 @@ class FFTApp(App):
             Permission.WRITE_EXTERNAL_STORAGE
         ])
 
+        self.ensure_permissions_and_show()
+
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
         self.label = Label(text="Select 2 CSV FILE", size_hint=(1,0.1))
@@ -154,6 +156,20 @@ class FFTApp(App):
         #self.first_file = None
         #return self.layout
 
+    
+    def ensure_permissions_and_show(self):
+        needed = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+        if all(check_permission(p) for p in needed):
+            self.process_data(None)          # 권한 이미 있다면 곧바로 파일 선택
+        else:
+            request_permissions(needed, self.on_permission_result)
+    
+    def on_permission_result(self, permissions, grants):
+        if all(grants):
+            self.process_data(None)
+        else:
+            self.label.text = "저장소 권한이 필요합니다."  
+        
     
     def process_data(self, instance):
         filechooser.open_file(
@@ -199,6 +215,10 @@ class FFTApp(App):
         # “파일1, 파일2” 또는 “파일1” 로 표시
         self.label.text = "선택: " + ", ".join(names)
         self.run_button.disabled = False
+
+        
+        print("DEBUG selection:", selection)  # ← 추가
+        
 
 
     '''
