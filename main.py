@@ -27,10 +27,6 @@ sys.excepthook = show_error# main.py 맨 위
 
 import threading
 
-
-# Android 런타임 권한 요청
-from android.permissions import request_permissions, Permission
-
 class GraphWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
