@@ -179,18 +179,28 @@ class FFTApp(App):
         #return self.layout
         '''
     
+# ─── imports ───────────────────────────────────────────────────────────
+from android.permissions import request_permissions, Permission, check_permission
+# … 생략 …
+
+class FFTApp(App):
+    def build(self):
+        # … 기존 코드 …
+
+    # ---------- 권한 처리 ----------
     def ensure_permissions_and_show(self):
-        needed = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+        needed = [Permission.READ_EXTERNAL_STORAGE,
+                  Permission.WRITE_EXTERNAL_STORAGE]
         if all(check_permission(p) for p in needed):
-            self.process_data(None)          # 권한 이미 있다면 곧바로 파일 선택
-        else:
-            request_permissions(needed, self.on_permission_result)
-    
+            return          # 권한 이미 OK → 아무 것도 하지 않고 UI 대기
+        request_permissions(needed, self.on_permission_result)
+
     def on_permission_result(self, permissions, grants):
         if all(grants):
-            self.process_data(None)
+            self.label.text = "권한 승인 완료, 파일을 선택하세요."
         else:
-            self.label.text = "저장소 권한이 필요합니다."  
+            self.label.text = "⚠️ 저장소 권한 거부됨. 설정에서 권한을 켜주세요."
+            return
         
     
     def process_data(self, instance):
@@ -200,37 +210,47 @@ class FFTApp(App):
             filters=[("CSV files", "*.csv")]
         )
 
+
     def file_selection_callback(self, selection):
+        """plyer.filechooser 가 반환한 파일 선택 결과를 처리"""
+    
         Logger.info(f"FileChooser: {selection}")
-
+    
+        # ── ① 사용자가 창을 닫거나 '취소'를 누른 경우 ─────────────────────────
         if not selection:
-            self.label.text = "CSV 파일을 선택하세요."
-            self.run_button.disabled = True
+            self.label.text = "CSV 파일을 선택하지 않았습니다."
+            self.run_button.disabled = True          # 실행 버튼 비활성
             if hasattr(self, "first_file"):
-                del self.first_file
+                del self.first_file                  # 첫 파일 기록도 초기화
             return
-
+    
+        # ── ② 아직 첫 파일을 확정하지 않은 상태 ────────────────────────────
         if not hasattr(self, "first_file"):
-            # 첫 번째 파일만 저장
-            self.first_file = selection[0]
+            self.first_file = selection[0]           # 첫 번째 파일 저장
             self.label.text = (
-                f"1번째: {os.path.basename(self.first_file)}\n"
-                f"2번째 CSV를 선택하세요."
+                f"1번째 파일 선택됨:\n{os.path.basename(self.first_file)}\n"
+                "이제 2번째 CSV를 선택하세요."
             )
+            # 두 번째 파일을 고르도록 파일 선택기 다시 호출
             filechooser.open_file(
                 on_selection=self.file_selection_callback,
                 multiple=False,
                 filters=[("CSV files", "*.csv")]
             )
-            return
-
-        # 두 번째 파일 선택 완료
+            return                                   # <-- 여기서 함수 종료
+    
+        # ── ③ 두 번째 파일이 선택된 경우 ───────────────────────────────────
         second_file = selection[0]
         self.selected_files = [self.first_file, second_file]
+    
+        # UI 정보 갱신
         name1, name2 = (os.path.basename(p) for p in self.selected_files)
-        self.label.text = f"선택 완료: {name1} & {name2}"
-        self.run_button.disabled = False
+        self.label.text = f"선택 완료: {name1}  &  {name2}"
+        self.run_button.disabled = False             # FFT RUN 버튼 활성화
+    
+        # 다음 사이클을 위해 first_file 상태 삭제
         del self.first_file
+        
 
         '''
         if not selection:
