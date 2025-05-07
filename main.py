@@ -133,22 +133,28 @@ class GraphWidget(Widget):
 class FFTApp(App):
     def build(self):
 
-        # 권한
-        self.ensure_permissions_and_show()
-
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        self.label = Label(text="Select 2 CSV files", size_hint=(1,0.1)); self.layout.add_widget(self.label)
 
-        self.select_button = Button(text="Select CSV", size_hint=(1,0.1))
-        self.select_button.bind(on_press=self.process_data); self.layout.add_widget(self.select_button)
+        self.label = Label(text="Select 2 CSV files", size_hint=(1, .1))
+        self.layout.add_widget(self.label)
 
-        self.run_button = Button(text="FFT RUN", size_hint=(1,0.1), disabled=True)
-        self.run_button.bind(on_press=self.on_run_fft); self.layout.add_widget(self.run_button)
+        self.select_button = Button(text="Select CSV", size_hint=(1, .1))
+        self.select_button.bind(on_press=self.process_data)
+        self.layout.add_widget(self.select_button)
 
-        self.exit_button = Button(text="EXIT", size_hint=(1,0.1))
-        self.exit_button.bind(on_press=self.stop); self.layout.add_widget(self.exit_button)
+        self.run_button = Button(text="FFT RUN", size_hint=(1, .1), disabled=True)
+        self.run_button.bind(on_press=self.on_run_fft)
+        self.layout.add_widget(self.run_button)
 
-        self.graph_widget = GraphWidget(size_hint=(1,0.6)); self.layout.add_widget(self.graph_widget)
+        self.exit_button = Button(text="EXIT", size_hint=(1, .1))
+        self.exit_button.bind(on_press=self.stop)
+        self.layout.add_widget(self.exit_button)
+
+        self.graph_widget = GraphWidget(size_hint=(1, .6))
+        self.layout.add_widget(self.graph_widget)
+
+        # 2️⃣ 위젯이 준비된 뒤 권한 체크
+        self.ensure_permissions_and_show()
 
         return self.layout
 
