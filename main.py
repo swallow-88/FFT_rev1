@@ -201,6 +201,37 @@ class FFTApp(App):
         )
 
     def file_selection_callback(self, selection):
+        Logger.info(f"FileChooser: {selection}")
+
+        if not selection:
+            self.label.text = "CSV 파일을 선택하세요."
+            self.run_button.disabled = True
+            if hasattr(self, "first_file"):
+                del self.first_file
+            return
+
+        if not hasattr(self, "first_file"):
+            # 첫 번째 파일만 저장
+            self.first_file = selection[0]
+            self.label.text = (
+                f"1번째: {os.path.basename(self.first_file)}\n"
+                f"2번째 CSV를 선택하세요."
+            )
+            filechooser.open_file(
+                on_selection=self.file_selection_callback,
+                multiple=False,
+                filters=[("CSV files", "*.csv")]
+            )
+            return
+
+        # 두 번째 파일 선택 완료
+        second_file = selection[0]
+        self.selected_files = [self.first_file, second_file]
+        name1, name2 = (os.path.basename(p) for p in self.selected_files)
+        self.label.text = f"선택 완료: {name1} & {name2}"
+        self.run_button.disabled = False
+        del self.first_file
+
         '''
         if not selection:
             return
@@ -264,30 +295,7 @@ class FFTApp(App):
     '''
 
 
-        Logger.info(f"FileChooser: {selection}")
-
-        # (1) 선택 취소
-        if not selection:
-            self.label.text = "선택이 취소되었습니다."
-            self.run_button.disabled = True
-            if hasattr(self,'first_file'): del self.first_file
-            return
-
-        # (2) 첫 번째 선택
-        if not hasattr(self,'first_file'):
-            self.first_file = selection[0]
-            self.label.text = f"1st: {os.path.basename(self.first_file)}\n2번째 CSV 선택"
-            filechooser.open_file(on_selection=self.file_selection_callback,
-                                  multiple=False, filters=[("CSV","*.csv")])
-            return
-
-        # (3) 두 번째 선택
-        self.selected_files = [self.first_file, selection[0]]
-        names = [os.path.basename(p) for p in self.selected_files]
-        self.label.text = f"선택 완료: {names[0]} & {names[1]}"
-        self.run_button.disabled = False
-        del self.first_file
-
+       
 
     def on_run_fft(self, _):
         self.run_button.disabled = True
