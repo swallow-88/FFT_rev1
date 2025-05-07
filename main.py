@@ -121,13 +121,33 @@ class GraphWidget(Widget):
 
 class FFTApp(App):
     def build(self):
+
+        # 권한
+        self.ensure_permissions_and_show()
+
+        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        self.label = Label(text="Select 2 CSV files", size_hint=(1,0.1)); self.layout.add_widget(self.label)
+
+        self.select_button = Button(text="Select CSV", size_hint=(1,0.1))
+        self.select_button.bind(on_press=self.process_data); self.layout.add_widget(self.select_button)
+
+        self.run_button = Button(text="FFT RUN", size_hint=(1,0.1), disabled=True)
+        self.run_button.bind(on_press=self.on_run_fft); self.layout.add_widget(self.run_button)
+
+        self.exit_button = Button(text="EXIT", size_hint=(1,0.1))
+        self.exit_button.bind(on_press=self.stop); self.layout.add_widget(self.exit_button)
+
+        self.graph_widget = GraphWidget(size_hint=(1,0.6)); self.layout.add_widget(self.graph_widget)
+
+        return self.layout
+
+        '''
         # 런타임 권한 요청
         request_permissions([
             Permission.READ_EXTERNAL_STORAGE,
             Permission.WRITE_EXTERNAL_STORAGE
         ])
 
-        self.ensure_permissions_and_show()
 
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
@@ -152,10 +172,12 @@ class FFTApp(App):
         self.graph_widget = GraphWidget(size_hint=(1,0.6))
         self.layout.add_widget(self.graph_widget)
 
+        self.ensure_permissions_and_show()
+         
         return self.layout
         #self.first_file = None
         #return self.layout
-
+        '''
     
     def ensure_permissions_and_show(self):
         needed = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
@@ -203,7 +225,7 @@ class FFTApp(App):
         # 선택 완료했으니 first_file 속성 지워도 무방
         del self.first_file
         '''
-
+        '''
         if not selection:
             self.label.text = "CSV 파일을 선택하세요."
             self.run_button.disabled = True
@@ -218,7 +240,7 @@ class FFTApp(App):
 
         
         print("DEBUG selection:", selection)  # ← 추가
-        
+        '''
 
 
     '''
@@ -241,18 +263,50 @@ class FFTApp(App):
             self.run_button.disabled = False
     '''
 
-    def on_run_fft(self, instance):
-        # 버튼 누르면 비활성화해서 중복 실행 방지
+
+        """
+        • selection: filechooser가 반환한 파일 경로 리스트
+        • 로직
+          1) 아무것도 안 골랐으면 함수 종료
+          2) 첫 번째 파일이 아직 정해지지 않았으면
+             - 첫 파일 저장 후 안내문 갱신
+             - 파일 선택기를 한 번 더 띄워 두 번째 파일을 고르게 함
+          3) 이미 첫 파일이 있다면 두 번째 파일로 간주
+             - 두 파일 목록을 self.selected_files 에 저장
+             - 라벨·Run 버튼 상태 갱신
+        """
+        Logger.info(f"FileChooser: {selection}")
+
+        # (1) 선택 취소
+        if not selection:
+            self.label.text = "선택이 취소되었습니다."
+            self.run_button.disabled = True
+            if hasattr(self,'first_file'): del self.first_file
+            return
+
+        # (2) 첫 번째 선택
+        if not hasattr(self,'first_file'):
+            self.first_file = selection[0]
+            self.label.text = f"1st: {os.path.basename(self.first_file)}\n2번째 CSV 선택"
+            filechooser.open_file(on_selection=self.file_selection_callback,
+                                  multiple=False, filters=[("CSV","*.csv")])
+            return
+
+        # (3) 두 번째 선택
+        self.selected_files = [self.first_file, selection[0]]
+        names = [os.path.basename(p) for p in self.selected_files]
+        self.label.text = f"선택 완료: {names[0]} & {names[1]}"
+        self.run_button.disabled = False
+        del self.first_file
+
+
+    def on_run_fft(self, _):
         self.run_button.disabled = True
-        self.label.text = "FFT RUN…"
+        self.label.text = "FFT 계산 중…"
+        threading.Thread(target=self.compute_and_plot,
+                         args=(self.selected_files,), daemon=True).start()
 
-        # 백그라운드에서 실제 계산·그래프 그리기
-        threading.Thread(
-            target=self.compute_and_plot,
-            args=(self.selected_files,),
-            daemon=True
-        ).start()
-
+ 
     def compute_and_plot(self, files):
         '''
         f1, x1, y1 = self.process_csv_and_compute_fft(files[0])
@@ -270,7 +324,7 @@ class FFTApp(App):
             self.graph_widget.update_graph([f1,f2], diff, x_max, y_max)
         )
         '''
-
+        '''
         results = []
         for fp in files:
             f, x_max, y_max = self.process_csv_and_compute_fft(fp)
@@ -298,7 +352,27 @@ class FFTApp(App):
         Clock.schedule_once(lambda dt:
             self.graph_widget.update_graph([f1, f2], diff, x_max, y_max)
         )
+        '''
+        
+        results=[]
+        for fp in files:
+            pts,xmax,ymax = self.process_csv_and_compute_fft(fp)
+            if pts is None:
+                Clock.schedule_once(lambda dt: setattr(self.label,'text',"CSV 오류"))
+                return
+            results.append((pts,xmax,ymax))
 
+        if len(results)==1:
+            f1,x1,y1 = results[0]
+            Clock.schedule_once(lambda dt: self.graph_widget.update_graph([f1],[],x1,y1)); return
+
+        (f1,x1,y1),(f2,x2,y2)=results
+        diff=[(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
+        x_max=max(x1,x2); y_max=max(y1,y2,max(y for _,y in diff))
+        Clock.schedule_once(lambda dt: self.graph_widget.update_graph([f1,f2],diff,x_max,y_max))
+
+    
+    '''
     def process_csv_and_compute_fft(self, filepath):
         try:
             time = []; acc = []
@@ -331,6 +405,24 @@ class FFTApp(App):
         except Exception as e:
             print(f"Error processing {os.path.basename(filepath)}: {e}")
             return None, 0, 0
+    '''
+
+    def process_csv_and_compute_fft(self, fp):
+        try:
+            t,acc = [],[]
+            with open(fp,'r') as f:
+                for row in csv.reader(f):
+                    try: t.append(float(row[0])); acc.append(float(row[1]))
+                    except: continue
+            if len(acc)<2: raise ValueError("데이터 부족")
+            dt = (t[-1]-t[0])/len(acc)
+            freq = np.fft.fftfreq(len(acc),d=dt)[:len(acc)//2]
+            vals = np.abs(fft(acc))[:len(acc)//2]
+            mask = freq<=50; freq=freq[mask]; vals=vals[mask]
+            smooth = np.convolve(vals, np.ones(10)/10, mode='same')
+            return list(zip(freq,smooth)), max(freq), max(smooth)
+        except Exception as e:
+            Logger.error(f"FFT: {e}"); return None,0,0
 
 
 if __name__ == "__main__":
