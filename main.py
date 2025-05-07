@@ -27,6 +27,14 @@ sys.excepthook = show_error# main.py 맨 위
 
 import threading
 
+def log(self, msg):
+    """콘솔(Logcat)과 화면 라벨 둘 다 출력"""
+    Logger.info(msg)
+    # 최하단에 짧게 보이도록 (3초 후 자동 지움)
+    self.label.text = msg
+    Clock.schedule_once(lambda dt: setattr(self.label, "text", ""), 3)
+
+
 # Android 런타임 권한 요청
 from android.permissions import request_permissions, Permission
 
@@ -214,6 +222,7 @@ class FFTApp(App):
         
     
     def process_data(self, instance):
+        self.log("loading FILE Select")
         filechooser.open_file(
             on_selection=self.file_selection_callback,
             multiple=True,   # 가능하면 한 번에 여러 개 고를 수 있게
@@ -222,6 +231,7 @@ class FFTApp(App):
 
 
     def file_selection_callback(self, selection):
+        self.log(f"file result:{selection}")
         Logger.info(f"FileChooser: {selection}")
     
         if not selection:
@@ -326,6 +336,7 @@ class FFTApp(App):
        
 
     def on_run_fft(self, _):
+        self.log("Start FFT")
         self.run_button.disabled = True
         self.label.text = "FFT 계산 중…"
         threading.Thread(target=self.compute_and_plot,
@@ -378,11 +389,13 @@ class FFTApp(App):
             self.graph_widget.update_graph([f1, f2], diff, x_max, y_max)
         )
         '''
+        self.log("CSV to FFT CHANGE")
         
         results=[]
         for fp in files:
             pts,xmax,ymax = self.process_csv_and_compute_fft(fp)
             if pts is None:
+                self.log("CSV PROCESS FAIL")
                 Clock.schedule_once(lambda dt: setattr(self.label,'text',"CSV 오류"))
                 return
             results.append((pts,xmax,ymax))
