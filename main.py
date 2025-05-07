@@ -27,13 +27,6 @@ sys.excepthook = show_error# main.py 맨 위
 
 import threading
 
-def log(self, msg):
-    """콘솔(Logcat)과 화면 라벨 둘 다 출력"""
-    Logger.info(msg)
-    # 최하단에 짧게 보이도록 (3초 후 자동 지움)
-    self.label.text = msg
-    Clock.schedule_once(lambda dt: setattr(self.label, "text", ""), 3)
-
 
 # Android 런타임 권한 요청
 from android.permissions import request_permissions, Permission
@@ -139,6 +132,14 @@ class GraphWidget(Widget):
 
 
 class FFTApp(App):
+
+    def log(self, msg):
+        """콘솔(Logcat) + 화면 라벨 모두 출력"""
+        Logger.info(msg)
+        self.label.text = msg
+        Clock.schedule_once(lambda dt: setattr(self.label, "text", ""), 3)
+
+    
     def build(self):
 
         self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
