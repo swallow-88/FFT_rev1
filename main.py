@@ -13,6 +13,7 @@ from kivy.graphics import Line, Color
 from kivy.clock import Clock
 from plyer import filechooser
 from kivy.logger import Logger
+from android.permissions import request_permissions, Permission, check_permission
 
 # main.py 맨 위
 import sys, traceback
@@ -190,14 +191,7 @@ class FFTApp(App):
         '''
     
 # ─── imports ───────────────────────────────────────────────────────────
-from android.permissions import request_permissions, Permission, check_permission
-# … 생략 …
 
-class FFTApp(App):
-    def build(self):
-        # … 기존 코드 …
-
-    # ---------- 권한 처리 ----------
     def ensure_permissions_and_show(self):
         needed = [Permission.READ_EXTERNAL_STORAGE,
                   Permission.WRITE_EXTERNAL_STORAGE]
