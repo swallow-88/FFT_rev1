@@ -221,44 +221,44 @@ class FFTApp(App):
         )
 
 
-    def file_selection_callback(self, selection):    
+    def file_selection_callback(self, selection):
         Logger.info(f"FileChooser: {selection}")
     
-        # ── ① 사용자가 창을 닫거나 '취소'를 누른 경우 ─────────────────────────
         if not selection:
             self.label.text = "CSV 파일을 선택하지 않았습니다."
-            self.run_button.disabled = True          # 실행 버튼 비활성
-            if hasattr(self, "first_file"):
-                del self.first_file                  # 첫 파일 기록도 초기화
+            self.run_button.disabled = True
+            self.first_file = None
             return
     
-        # ── ② 아직 첫 파일을 확정하지 않은 상태 ────────────────────────────
-        if not hasattr(self, "first_file"):
-            self.first_file = selection[0]           # 첫 번째 파일 저장
+        # ── A) 한 번에 2 개 이상 선택한 경우 ─────────────────────────────
+        if len(selection) >= 2:
+            self.selected_files = selection[:2]
+            n1, n2 = (os.path.basename(p) for p in self.selected_files)
+            self.label.text = f"선택 완료: {n1} & {n2}"
+            self.run_button.disabled = False
+            self.first_file = None
+            return
+    
+        # ── B) 한 번에 1 개씩 고르는 워크플로 ────────────────────────────
+        if not hasattr(self, "first_file") or self.first_file is None:
+            self.first_file = selection[0]
             self.label.text = (
                 f"1번째 파일 선택됨:\n{os.path.basename(self.first_file)}\n"
                 "이제 2번째 CSV를 선택하세요."
             )
-            # 두 번째 파일을 고르도록 파일 선택기 다시 호출
             filechooser.open_file(
                 on_selection=self.file_selection_callback,
                 multiple=False,
-                filters=[("CSV files", "*.csv")]
+                filters=[("CSV files", "*.csv")],
             )
-            return                                   # <-- 여기서 함수 종료
+            return
     
-        # ── ③ 두 번째 파일이 선택된 경우 ───────────────────────────────────
-        second_file = selection[0]
-        self.selected_files = [self.first_file, second_file]
-    
-        # UI 정보 갱신
-        name1, name2 = (os.path.basename(p) for p in self.selected_files)
-        self.label.text = f"선택 완료: {name1}  &  {name2}"
-        self.run_button.disabled = False             # FFT RUN 버튼 활성화
-    
-        # 다음 사이클을 위해 first_file 상태 삭제
-        del self.first_file
-        
+        # C) ‑ 두 번째 파일까지 확보
+        self.selected_files = [self.first_file, selection[0]]
+        n1, n2 = (os.path.basename(p) for p in self.selected_files)
+        self.label.text = f"선택 완료: {n1} & {n2}"
+        self.run_button.disabled = False
+        self.first_file = None
 
         '''
         if not selection:
@@ -395,6 +395,7 @@ class FFTApp(App):
         diff=[(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
         x_max=max(x1,x2); y_max=max(y1,y2,max(y for _,y in diff))
         Clock.schedule_once(lambda dt: self.graph_widget.update_graph([f1,f2],diff,x_max,y_max))
+        Clock.schedule_once(lambda dt: setattr(self.run_button, "disabled", False))
 
     
     '''
