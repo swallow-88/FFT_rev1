@@ -14,6 +14,16 @@ from kivy.clock import Clock
 from plyer import filechooser
 from kivy.logger import Logger
 
+# main.py 맨 위
+import sys, traceback
+
+def show_error(exc_type, exc, tb):
+    txt = "".join(traceback.format_exception(exc_type, exc, tb))[:1500]
+    Logger.error(txt)
+    Clock.schedule_once(lambda *_:
+        Popup(title="Unhandled Exception", content=Label(text=txt), size_hint=(.9,.9)).open())
+sys.excepthook = show_error# main.py 맨 위
+
 import threading
 
 # Android 런타임 권한 요청
