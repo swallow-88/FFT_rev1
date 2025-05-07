@@ -18,6 +18,14 @@ from android.permissions import request_permissions, Permission, check_permissio
 # main.py 맨 위
 import sys, traceback
 
+from kivy.utils import platform
+from jnius import autoclass
+
+android_api = 0
+if platform == "android":
+    android_api = autoclass("android.os.Build$VERSION").SDK_INT
+
+
 def show_error(exc_type, exc, tb):
     txt = "".join(traceback.format_exception(exc_type, exc, tb))[:1500]
     Logger.error(txt)
@@ -204,11 +212,24 @@ class FFTApp(App):
 # ─── imports ───────────────────────────────────────────────────────────
 
     def ensure_permissions_and_show(self):
-        needed = [Permission.READ_EXTERNAL_STORAGE,
-                  Permission.WRITE_EXTERNAL_STORAGE]
+        base_perms = [Permission.READ_EXTERNAL_STORAGE,
+                      Permission.WRITE_EXTERNAL_STORAGE]
+
+        extra = []
+        if android_api >= 33:          # Android 13+
+            extra = [Permission.READ_MEDIA_IMAGES,
+                     Permission.READ_MEDIA_AUDIO,
+                     Permission.READ_MEDIA_VIDEO]
+
+        needed = base_perms + extra
+
         if all(check_permission(p) for p in needed):
-            return          # 권한 이미 OK → 아무 것도 하지 않고 UI 대기
+            self.log("권한 OK – 파일을 선택하세요.")
+            return
+
         request_permissions(needed, self.on_permission_result)
+
+ 
 
     def on_permission_result(self, permissions, grants):
         if all(grants):
