@@ -221,9 +221,7 @@ class FFTApp(App):
         )
 
 
-    def file_selection_callback(self, selection):
-        """plyer.filechooser 가 반환한 파일 선택 결과를 처리"""
-    
+    def file_selection_callback(self, selection):    
         Logger.info(f"FileChooser: {selection}")
     
         # ── ① 사용자가 창을 닫거나 '취소'를 누른 경우 ─────────────────────────
