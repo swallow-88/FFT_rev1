@@ -264,17 +264,6 @@ class FFTApp(App):
     '''
 
 
-        """
-        • selection: filechooser가 반환한 파일 경로 리스트
-        • 로직
-          1) 아무것도 안 골랐으면 함수 종료
-          2) 첫 번째 파일이 아직 정해지지 않았으면
-             - 첫 파일 저장 후 안내문 갱신
-             - 파일 선택기를 한 번 더 띄워 두 번째 파일을 고르게 함
-          3) 이미 첫 파일이 있다면 두 번째 파일로 간주
-             - 두 파일 목록을 self.selected_files 에 저장
-             - 라벨·Run 버튼 상태 갱신
-        """
         Logger.info(f"FileChooser: {selection}")
 
         # (1) 선택 취소
