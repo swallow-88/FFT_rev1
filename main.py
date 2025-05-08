@@ -15,39 +15,48 @@ from kivy.graphics import Line, Color
 from kivy.utils  import platform
 from plyer import filechooser
 
-# ────────────────────────────────────────────────────────────────────────
-# ① Android 여부 판별  +  jnius 가져오기(실패해도 앱은 계속)
-ANDROID = platform == "android"
-ANDROID_API = 0
-if ANDROID:
-    try:
-        from jnius import autoclass
-        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
-        from plyer import toast          # 안드로이드 Toast
-    except Exception as e:
-        ANDROID = False                  # jnius 가 없으면 데스크탑 모드로
-        Logger.warning(f"JNI unavailable: {e}")
-
-
-
-# ②   전역 예외 → crash.log + 팝업
+# ─── 전역 예외 → crash.log + 팝업 ─────────────────────────────────────
 def _dump_crash(msg: str):
     path = os.path.join(os.getenv("HOME", "/sdcard"), "crash.log")
     with open(path, "a", encoding="utf-8") as fp:
-        fp.write("\n"+("="*50)+"\n")
-        fp.write(datetime.datetime.now().isoformat()+"\n")
+        fp.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
         fp.write(msg+"\n")
     Logger.error(msg)
 
-def _exchook(exc_type, exc, tb):
-    txt = "".join(traceback.format_exception(exc_type, exc, tb))
+def _exchook(t, v, tb):
+    txt = "".join(traceback.format_exception(t, v, tb))
     _dump_crash(txt)
-    if ANDROID:   # 팝업은 안드로이드에서만
-        Clock.schedule_once(lambda *_:
-            Popup(title="Python Crash", content=Label(text=txt[:1500]),
-                  size_hint=(.9,.9)).open())
+    Clock.schedule_once(lambda *_:
+        Popup(title="Python Crash", content=Label(text=txt[:1500]),
+              size_hint=(.9,.9)).open())
 sys.excepthook = _exchook
 
+
+# ─── SAF content:// URI  →  앱 cache 실제파일로 복사 ─────────────────
+def uri_to_temp(u_str: str) -> str | None:
+    if not (ANDROID and u_str and u_str.startswith("content://")):
+        return u_str if u_str and os.path.exists(u_str) else None
+    try:
+        uri = Uri.parse(u_str)
+        cr  = activity.getContentResolver()
+
+        # DISPLAY_NAME 구해서 임시 파일명 결정
+        name = "file"
+        c = cr.query(uri, [OpenableColumns.DISPLAY_NAME], None, None, None)
+        if c and c.moveToFirst():
+            name = c.getString(0)
+        if c: c.close()
+
+        istream  = cr.openInputStream(uri)
+        out_path = os.path.join(activity.getCacheDir().getAbsolutePath(),
+                                f"{uuid.uuid4().hex}-{name}")
+        with open(out_path, "wb") as dst:
+            shutil.copyfileobj(cast("java.io.InputStream", istream), dst, 8192)
+        istream.close()
+        return out_path
+    except Exception as e:
+        Logger.error(f"URI copy err: {e}")
+        return None
 
 
 
@@ -137,130 +146,122 @@ class GraphWidget(Widget):
 # ── 메인 앱 ───────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-     # ── 작은 헬퍼 ──────────────────────────────────────────────────────
-    def log(self, msg: str):
+    # ── 간단 로그 + 토스트
+    def log(self, msg):
         Logger.info(msg)
         self.label.text = msg
         if ANDROID:
-            try:   toast(msg)
+            try: toast.toast(msg)
             except: pass
 
-    # ── 권한 체크 / 요청 ───────────────────────────────────────────────
-    def _storage_ok(self) -> bool:
-        if not ANDROID:
-            return True
+    # ── 저장소 권한 확인/요청
+    def _storage_ok(self):
+        if not ANDROID: return True
         from android.permissions import check_permission, Permission
-        base = [Permission.READ_EXTERNAL_STORAGE,
-                Permission.WRITE_EXTERNAL_STORAGE]
-        extra = []
-        if ANDROID_API >= 33:
-            extra = [Permission.READ_MEDIA_IMAGES,
-                     Permission.READ_MEDIA_AUDIO,
-                     Permission.READ_MEDIA_VIDEO]
-        return all(check_permission(p) for p in base+extra)
+        base=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+        ex=[]
+        if ANDROID_API>=33:
+            ex=[Permission.READ_MEDIA_IMAGES,
+                Permission.READ_MEDIA_AUDIO,
+                Permission.READ_MEDIA_VIDEO]
+        return all(check_permission(p) for p in base+ex)
 
     def _ask_storage(self):
-        if not ANDROID or self._storage_ok():
-            return
+        if not ANDROID or self._storage_ok(): return
         from android.permissions import request_permissions, Permission
-        perms = [Permission.READ_EXTERNAL_STORAGE,
-                 Permission.WRITE_EXTERNAL_STORAGE]
-        if ANDROID_API >= 33:
-            perms += [Permission.READ_MEDIA_IMAGES,
-                      Permission.READ_MEDIA_AUDIO,
-                      Permission.READ_MEDIA_VIDEO]
+        perms=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+        if ANDROID_API>=33:
+            perms+= [Permission.READ_MEDIA_IMAGES,
+                     Permission.READ_MEDIA_AUDIO,
+                     Permission.READ_MEDIA_VIDEO]
         request_permissions(perms)
 
-
-    # ── UI 구성 ──
+    # ── UI 구성
     def build(self):
-        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        self.label = Label(text="Select 2 CSV files", size_hint=(1,.1)); root.add_widget(self.label)
 
-        self.label = Label(text="Select 2 CSV files", size_hint=(1,.1))
-        root.add_widget(self.label)
+        root.add_widget(Button(text="Select CSV",size_hint=(1,.1),on_press=self.open_chooser))
 
-        root.add_widget(Button(text="Select CSV", size_hint=(1,.1),
-                               on_press=self.open_chooser))
-
-        self.btn_run = Button(text="FFT RUN", size_hint=(1,.1),
-                              disabled=True, on_press=self.run_fft)
+        self.btn_run = Button(text="FFT RUN",size_hint=(1,.1),disabled=True,on_press=self.run_fft)
         root.add_widget(self.btn_run)
 
-        root.add_widget(Button(text="EXIT", size_hint=(1,.1),
-                               on_press=self.stop))
+        root.add_widget(Button(text="EXIT",size_hint=(1,.1),on_press=self.stop))
 
         self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
-        # 권한 요청은 앱 초기 화면 뜬 뒤에!
         Clock.schedule_once(lambda *_: self._ask_storage(), 0)
-
         return root
 
-      # ── 파일 선택 ─────────────────────────────────────────────────────
-    def open_chooser(self, *_):
+    # ── 파일 선택
+    def open_chooser(self,*_):
         if not self._storage_ok():
-            self.log("먼저 저장소 권한을 허용해 주세요!")
-            return
-        filechooser.open_file(on_selection=self.on_choose,
-                              multiple=True,
-                              filters=[("CSV","*.csv")])
+            self.log("저장소 권한을 먼저 허용하세요"); return
+        filechooser.open_file(
+            on_selection=self.on_choose,
+            multiple=True,
+            filters=[("CSV","*.csv")],
+            native=True               # ★ 시스템 SAF Picker
+        )
 
-    def on_choose(self, paths):
-        self.log(f"Chooser → {paths}")
-        if not paths:
-            self.btn_run.disabled = True; return
-        self.paths = paths[:2]
-        self.label.text = " · ".join(os.path.basename(p) for p in self.paths)
-        self.btn_run.disabled = False
+    def on_choose(self, sel):
+        self.log(f"Chooser ⇒ {sel}")
+        if not sel or sel == [None]:
+            self.btn_run.disabled=True; return
 
-    # ── FFT 처리 ───────────────────────────────────────────────────────
-    def run_fft(self, *_):
-        self.btn_run.disabled = True
+        paths=[]
+        for s in sel[:2]:
+            p = uri_to_temp(s)
+            if not p:
+                self.log("파일 읽기 실패"); return
+            paths.append(p)
+
+        self.paths=paths
+        self.label.text = " · ".join(os.path.basename(p) for p in paths)
+        self.btn_run.disabled=False
+
+    # ── FFT 실행
+    def run_fft(self,*_):
+        self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
     def _fft_bg(self):
-        results = []
-        for fp in self.paths:
-            pts, mx, my = self.csv_fft(fp)
+        out=[]
+        for p in self.paths:
+            pts,mx,my = self.csv_fft(p)
             if pts is None:
-                self.log(f"{os.path.basename(fp)} 오류")
-                return
-            results.append((pts,mx,my))
+                self.log("CSV parse error"); return
+            out.append((pts,mx,my))
 
-        if len(results) == 1:
-            pts,mx,my = results[0]
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts],[], mx,my))
-            return
+        if len(out)==1:
+            pts,mx,my = out[0]
+            Clock.schedule_once(lambda *_: self.graph.update_graph([pts],[],mx,my)); return
 
-        (f1,x1,y1),(f2,x2,y2) = results
-        diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
-                for i in range(min(len(f1),len(f2)))]
-        mx = max(x1,x2); my = max(y1,y2,max(y for _,y in diff))
-        Clock.schedule_once(lambda *_:
-            self.graph.update_graph([f1,f2], diff, mx,my))
+        (f1,x1,y1),(f2,x2,y2)=out
+        diff=[(f1[i][0],abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
+        mx=max(x1,x2); my=max(y1,y2,max(y for _,y in diff))
+        Clock.schedule_once(lambda *_: self.graph.update_graph([f1,f2],diff,mx,my))
         Clock.schedule_once(lambda *_: setattr(self.btn_run,"disabled",False))
 
-
-    # ── CSV → FFT ─────────────────────────────────────────────────────
+    # ── CSV → FFT
     @staticmethod
     def csv_fft(path):
         try:
-            t,a = [],[]
+            t,a=[],[]
             with open(path) as f:
                 for r in csv.reader(f):
                     try: t.append(float(r[0])); a.append(float(r[1]))
                     except: pass
-            if len(a)<2: raise ValueError("too few samples")
-            dt = (t[-1]-t[0])/len(a)
-            freq = np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
-            vals = np.abs(fft(a))[:len(a)//2]
-            mask = freq<=50; freq,vals = freq[mask], vals[mask]
-            smooth = np.convolve(vals, np.ones(10)/10, mode='same')
-            return list(zip(freq,smooth)), freq.max(), smooth.max()
+            if len(a)<2: raise ValueError
+            dt=(t[-1]-t[0])/len(a)
+            f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
+            v=np.abs(fft(a))[:len(a)//2]
+            m=f<=50; f,v=f[m],v[m]
+            s=np.convolve(v,np.ones(10)/10,'same')
+            return list(zip(f,s)), f.max(), s.max()
         except Exception as e:
-            Logger.error(f"FFT err: {e}")
-            return None,0,0
+            Logger.error(f"FFT err: {e}"); return None,0,0
+
 
 
 if __name__ == "__main__":
