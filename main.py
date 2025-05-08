@@ -1,13 +1,20 @@
-# ── 최상단 (import 들보다 위!) ───────────────────────────────
-import os, sys, traceback
-open('/storage/emulated/0/fftapp_run.log', 'w').write(
-    "🗒️  FFTApp start\n")                                         # 파일 초기화
+import os, sys, traceback, datetime
+from kivy.app import App      # ← 뒤에서 get_running_app() 에 필요
 
-def _ex(type_, value, tb):
-    open('/storage/emulated/0/fftapp_run.log', 'a').write(
-        "".join(traceback.format_exception(type_, value, tb)))
-    sys.__excepthook__(type_, value, tb)         # 시스템 기본 처리(즉시 종료)
-sys.excepthook = _ex
+def _ex_hook(exc_type, exc, tb):
+    # 앱 전용 내부폴더 (권한 불필요)
+    app = App.get_running_app()
+    internal = app.user_data_dir if app else "/data/local/tmp"
+    log_path = os.path.join(internal, "fftapp_err.log")
+
+    with open(log_path, "a") as fp:
+        fp.write("\n=== {} ===\n".format(datetime.datetime.now()))
+        traceback.print_exception(exc_type, exc, tb, file=fp)
+
+    # 마무리 : 기본 예외 처리(즉시 종료)
+    sys.__excepthook__(exc_type, exc, tb)
+
+sys.excepthook = _ex_hook
 # ───────────────────────────────────────────────────────────
 
 
