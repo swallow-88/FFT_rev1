@@ -5,7 +5,7 @@ from numpy.fft import fft
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.graphics import Line, Color
-from kivy.logger import Logger
+from kivy.logger import Logger, FileHandler
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -19,6 +19,16 @@ from android.permissions import (
 # ───────── 플랫폼 / SAF 유틸 준비 ────────────────────── ### ADD ###
 from kivy.utils import platform
 from jnius import autoclass
+
+# main.py 상단
+from android.storage import primary_external_storage_path
+
+log_path = os.path.join(primary_external_storage_path(),
+                        'fftapp_run.log')       # /storage/emulated/0/fftapp_run.log
+
+fh = FileHandler(log_path, mode='w')
+Logger.addHandler(fh)
+Logger.info("LOGGER ▶ 파일 로깅 시작")
 
 android_api = 0
 if platform == "android":
