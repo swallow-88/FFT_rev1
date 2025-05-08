@@ -1,4 +1,17 @@
-import os, sys, csv, itertools, traceback, threading
+# ── 최상단 (import 들보다 위!) ───────────────────────────────
+import os, sys, traceback
+open('/storage/emulated/0/fftapp_run.log', 'w').write(
+    "🗒️  FFTApp start\n")                                         # 파일 초기화
+
+def _ex(type_, value, tb):
+    open('/storage/emulated/0/fftapp_run.log', 'a').write(
+        "".join(traceback.format_exception(type_, value, tb)))
+    sys.__excepthook__(type_, value, tb)         # 시스템 기본 처리(즉시 종료)
+sys.excepthook = _ex
+# ───────────────────────────────────────────────────────────
+
+
+import csv, itertools, threading
 import numpy as np
 from numpy.fft import fft
 
@@ -22,6 +35,7 @@ from jnius import autoclass
 
 # main.py 상단
 from android.storage import primary_external_storage_path
+
 
 log_path = os.path.join(primary_external_storage_path(),
                         'fftapp_run.log')       # /storage/emulated/0/fftapp_run.log
