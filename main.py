@@ -1,41 +1,54 @@
-# main.py  ───────────────────────────────────────────────────────────────
-# 2025-05 버전 - Kivy/Plyer FFT 뷰어 (Android 6 ~ 14 호환)
 
-import os, csv, sys, traceback, threading, itertools
-
+import os, csv, sys, traceback, threading, itertools, datetime
 import numpy as np
 from numpy.fft import fft
 
-from kivy.app import App
-from kivy.clock import Clock
-from kivy.graphics import Line, Color
+from kivy.app    import App
+from kivy.clock  import Clock
 from kivy.logger import Logger
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.popup import Popup
-from kivy.uix.widget import Widget
-from kivy.utils import platform
-from plyer import filechooser, toast
+from kivy.uix.button   import Button
+from kivy.uix.label    import Label
+from kivy.uix.popup    import Popup
+from kivy.uix.widget   import Widget
+from kivy.graphics import Line, Color
+from kivy.utils  import platform
+from plyer import filechooser
 
-# ── Android util ────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────
+# ① Android 여부 판별  +  jnius 가져오기(실패해도 앱은 계속)
 ANDROID = platform == "android"
+ANDROID_API = 0
 if ANDROID:
-    from jnius import autoclass
-    ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
-else:
-    ANDROID_API = 0
+    try:
+        from jnius import autoclass
+        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
+        from plyer import toast          # 안드로이드 Toast
+    except Exception as e:
+        ANDROID = False                  # jnius 가 없으면 데스크탑 모드로
+        Logger.warning(f"JNI unavailable: {e}")
 
-# ── 전역 예외 훅: 치명 오류 → 팝업 + logcat ───────────────────────────────
-def _exc_handler(exc_type, exc, tb):
-    msg = "".join(traceback.format_exception(exc_type, exc, tb))
+
+
+# ②   전역 예외 → crash.log + 팝업
+def _dump_crash(msg: str):
+    path = os.path.join(os.getenv("HOME", "/sdcard"), "crash.log")
+    with open(path, "a", encoding="utf-8") as fp:
+        fp.write("\n"+("="*50)+"\n")
+        fp.write(datetime.datetime.now().isoformat()+"\n")
+        fp.write(msg+"\n")
     Logger.error(msg)
-    if ANDROID:
+
+def _exchook(exc_type, exc, tb):
+    txt = "".join(traceback.format_exception(exc_type, exc, tb))
+    _dump_crash(txt)
+    if ANDROID:   # 팝업은 안드로이드에서만
         Clock.schedule_once(lambda *_:
-            Popup(title="Python Error",
-                  content=Label(text=msg[:1500]),
+            Popup(title="Python Crash", content=Label(text=txt[:1500]),
                   size_hint=(.9,.9)).open())
-sys.excepthook = _exc_handler
+sys.excepthook = _exchook
+
+
 
 
 # ── 그래프 위젯 ──────────────────────────────────────────────────────────
@@ -124,14 +137,18 @@ class GraphWidget(Widget):
 # ── 메인 앱 ───────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-    # 작은 로그 출력 helper
-    def log(self, msg):
+     # ── 작은 헬퍼 ──────────────────────────────────────────────────────
+    def log(self, msg: str):
         Logger.info(msg)
         self.label.text = msg
-        Clock.schedule_once(lambda *_: setattr(self.label, "text", ""), 3)
+        if ANDROID:
+            try:   toast(msg)
+            except: pass
 
-    # ── 권한 체크 & 요청 ──
-    def _storage_perms_ok(self):
+    # ── 권한 체크 / 요청 ───────────────────────────────────────────────
+    def _storage_ok(self) -> bool:
+        if not ANDROID:
+            return True
         from android.permissions import check_permission, Permission
         base = [Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE]
@@ -142,8 +159,8 @@ class FFTApp(App):
                      Permission.READ_MEDIA_VIDEO]
         return all(check_permission(p) for p in base+extra)
 
-    def _ask_storage_perms(self):
-        if self._storage_perms_ok():
+    def _ask_storage(self):
+        if not ANDROID or self._storage_ok():
             return
         from android.permissions import request_permissions, Permission
         perms = [Permission.READ_EXTERNAL_STORAGE,
@@ -154,9 +171,10 @@ class FFTApp(App):
                       Permission.READ_MEDIA_VIDEO]
         request_permissions(perms)
 
+
     # ── UI 구성 ──
     def build(self):
-        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
         self.label = Label(text="Select 2 CSV files", size_hint=(1,.1))
         root.add_widget(self.label)
@@ -164,88 +182,84 @@ class FFTApp(App):
         root.add_widget(Button(text="Select CSV", size_hint=(1,.1),
                                on_press=self.open_chooser))
 
-        self.btn_run = Button(text="FFT RUN", disabled=True, size_hint=(1,.1),
-                              on_press=self.run_fft)
+        self.btn_run = Button(text="FFT RUN", size_hint=(1,.1),
+                              disabled=True, on_press=self.run_fft)
         root.add_widget(self.btn_run)
 
-        root.add_widget(Button(text="EXIT", size_hint=(1,.1), on_press=self.stop))
+        root.add_widget(Button(text="EXIT", size_hint=(1,.1),
+                               on_press=self.stop))
 
-        self.graph = GraphWidget(size_hint=(1,.6))
-        root.add_widget(self.graph)
+        self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
-        # build 끝난 뒤 첫 프레임에서 권한 요청
-        if ANDROID:
-            Clock.schedule_once(lambda *_: self._ask_storage_perms(), 0)
+        # 권한 요청은 앱 초기 화면 뜬 뒤에!
+        Clock.schedule_once(lambda *_: self._ask_storage(), 0)
 
         return root
 
-    # ── FileChooser ──
+      # ── 파일 선택 ─────────────────────────────────────────────────────
     def open_chooser(self, *_):
-        if ANDROID and not self._storage_perms_ok():
-            self.log("먼저 저장소 권한을 허용해 주세요.")
+        if not self._storage_ok():
+            self.log("먼저 저장소 권한을 허용해 주세요!")
             return
-
-        filechooser.open_file(on_selection=self.on_chosen,
+        filechooser.open_file(on_selection=self.on_choose,
                               multiple=True,
-                              filters=[("CSV", "*.csv")])
+                              filters=[("CSV","*.csv")])
 
-    def on_chosen(self, paths):
-        self.log(f"Chooser result → {paths}")
+    def on_choose(self, paths):
+        self.log(f"Chooser → {paths}")
         if not paths:
-            toast("선택된 파일이 없습니다.")
-            return
-
+            self.btn_run.disabled = True; return
         self.paths = paths[:2]
-        self.btn_run.disabled = False
         self.label.text = " · ".join(os.path.basename(p) for p in self.paths)
+        self.btn_run.disabled = False
 
-    # ── FFT 처리 ──
+    # ── FFT 처리 ───────────────────────────────────────────────────────
     def run_fft(self, *_):
         self.btn_run.disabled = True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
     def _fft_bg(self):
-        res = []
+        results = []
         for fp in self.paths:
-            pts, xm, ym = self.csv_to_fft(fp)
+            pts, mx, my = self.csv_fft(fp)
             if pts is None:
-                self.log(f"{os.path.basename(fp)} 처리 실패")
+                self.log(f"{os.path.basename(fp)} 오류")
                 return
-            res.append((pts, xm, ym))
+            results.append((pts,mx,my))
 
-        if len(res) == 1:
-            f1,x1,y1 = res[0]
-            Clock.schedule_once(lambda *_: self.graph.update_graph([f1], [], x1, y1))
+        if len(results) == 1:
+            pts,mx,my = results[0]
+            Clock.schedule_once(lambda *_:
+                self.graph.update_graph([pts],[], mx,my))
             return
 
-        (f1,x1,y1),(f2,x2,y2) = res
-        diff = [(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
+        (f1,x1,y1),(f2,x2,y2) = results
+        diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
+                for i in range(min(len(f1),len(f2)))]
         mx = max(x1,x2); my = max(y1,y2,max(y for _,y in diff))
-        Clock.schedule_once(lambda *_: self.graph.update_graph([f1,f2], diff, mx, my))
-        Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+        Clock.schedule_once(lambda *_:
+            self.graph.update_graph([f1,f2], diff, mx,my))
+        Clock.schedule_once(lambda *_: setattr(self.btn_run,"disabled",False))
 
-    # ── CSV → FFT ──
+
+    # ── CSV → FFT ─────────────────────────────────────────────────────
     @staticmethod
-    def csv_to_fft(path):
+    def csv_fft(path):
         try:
-            t, a = [], []
+            t,a = [],[]
             with open(path) as f:
                 for r in csv.reader(f):
-                    try:
-                        t.append(float(r[0])); a.append(float(r[1]))
+                    try: t.append(float(r[0])); a.append(float(r[1]))
                     except: pass
-            if len(a) < 2:
-                raise ValueError("not enough samples")
-
-            dt = (t[-1]-t[0]) / len(a)
-            freq = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
+            if len(a)<2: raise ValueError("too few samples")
+            dt = (t[-1]-t[0])/len(a)
+            freq = np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
             vals = np.abs(fft(a))[:len(a)//2]
-            mask = freq <= 50
-            freq, vals = freq[mask], vals[mask]
+            mask = freq<=50; freq,vals = freq[mask], vals[mask]
             smooth = np.convolve(vals, np.ones(10)/10, mode='same')
-            return list(zip(freq, smooth)), freq.max(), smooth.max()
+            return list(zip(freq,smooth)), freq.max(), smooth.max()
         except Exception as e:
-            Logger.error(f"FFT error: {e}")
+            Logger.error(f"FFT err: {e}")
             return None,0,0
 
 
