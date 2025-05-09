@@ -67,37 +67,43 @@ sys.excepthook = _ex_hook
 # 2) SAF content:// URI  →  앱 cache 로 복사
 #    (file://·직접경로는 그대로 통과)
 # ────────────────────────────────────────────────────────────────
-def uri_to_temp(u_str: str) -> str | None:
-    if not (ANDROID and u_str and u_str.startswith("content://")):
-        return u_str if u_str and os.path.exists(u_str) else None
-    try:
-        cr  = activity.getContentResolver()
-        uri = Uri.parse(u_str)
+from jnius import jarray, cast
 
-        # 파일 이름
+def uri_to_temp(u: str) -> str | None:
+    # direct path (디렉토리 직접 선택) ⇒ 그대로 리턴
+    if not (ANDROID and u and u.startswith("content://")):
+        return u if u and os.path.exists(u) else None
+
+    try:
+        cr   = activity.getContentResolver()
+        uri  = Uri.parse(u)
+
+        # ----- 파일 이름 얻기 ----- #
         name = "file"
         c = cr.query(uri, [OpenableCols.DISPLAY_NAME], None, None, None)
         if c and c.moveToFirst():
             name = c.getString(0)
-        if c: c.close()
+        if c:
+            c.close()
 
         istream  = cr.openInputStream(uri)
-        out_path = os.path.join(activity.getCacheDir().getAbsolutePath(),
-                                f"{uuid.uuid4().hex}-{name}")
+        out_path = os.path.join(
+            activity.getCacheDir().getAbsolutePath(),
+            f"{uuid.uuid4().hex}-{name}"
+        )
 
-        # ▶︎ 핵심: 항상 jarray('b') 버퍼로 읽기
-        buf = jarray('b')(8192)   # Java byte[] 8192
+        buf = jarray('b')(8192)                 # Java byte[] 버퍼
         with open(out_path, "wb") as dst:
             while True:
-                n = istream.read(buf)   # n: 읽은 byte 수, -1=EOF
+                n = istream.read(buf)           # n = 읽은 byte 수, -1 이면 EOF
                 if n == -1:
                     break
-                dst.write(bytes(buf[:n]))   # Java 배열 → Python bytes
+                dst.write(bytes(buf[:n]))       # jarray → Python bytes
         istream.close()
         return out_path
 
     except Exception as e:
-        Logger.error(f"URI copy err: {e}")   # ← logcat 에서 원인 확인
+        Logger.error(f"URI copy err: {type(e).__name__}: {e}")
         return None
 # ────────────────────────────────────────────────────────────────
 # 3) 그래프 위젯
@@ -242,7 +248,7 @@ class FFTApp(App):
         filechooser.open_file(on_selection=self.on_choose,
                               multiple=True,
                               filters=[("CSV","*.csv")],
-                              native=False)
+                              native=True)
 
     def on_choose(self, sel):
         self.log(f"Chooser ⇒ {sel}")
