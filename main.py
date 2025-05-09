@@ -20,18 +20,15 @@ from plyer             import filechooser
 # ── Android / Pyjnius ───────────────────────────────────────────────────
 ANDROID      = platform == "android"
 ANDROID_API  = 0
-toast        = None
-Uri          = None
-OpenableCols = None
-activity     = None
+toast = Uri = OpenableCols = activity = None
 
 try:
-    # cast() 가 없는 오래된 pyjnius 환경도 처리
+    # pyjnius ≥ 1.7 : cast 지원 /  그보다 낮으면 except 분기
     try:
         from jnius import autoclass, cast
     except Exception:
         from jnius import autoclass
-        cast = lambda cls, obj: obj    # 더미 cast
+        cast = lambda cls, obj: obj
     if ANDROID:
         ANDROID_API  = autoclass("android.os.Build$VERSION").SDK_INT
         PythonAct    = autoclass("org.kivy.android.PythonActivity")
@@ -44,7 +41,7 @@ except Exception as e:
     ANDROID = False   # 데스크탑 런 시나리오
 
 # ────────────────────────────────────────────────────────────────────────
-# 1)   전역 예외 → crash.log + 팝업  (폰에서 확인 가능)
+# 1)   전역 예외 → crash.log + 팝업
 # ────────────────────────────────────────────────────────────────────────
 def _dump_crash(msg: str):
     path = os.path.join(os.getenv("HOME", "/sdcard"), "crash.log")
@@ -59,45 +56,58 @@ def _exchook(t, v, tb):
     if ANDROID:
         Clock.schedule_once(lambda *_:
             Popup(title="Python Crash",
-                  content=Label(text=txt[:1500]), size_hint=(.9,.9)).open())
+                  content=Label(text=txt[:1500]),
+                  size_hint=(.9,.9)).open())
 sys.excepthook = _exchook
 
 # ────────────────────────────────────────────────────────────────────────
 # 2)   SAF content:// URI → 임시파일 복사
-#      (Download 폴더 등의 직접 경로는 그대로 통과)
 # ────────────────────────────────────────────────────────────────────────
 def uri_to_temp(u_str: str) -> str | None:
+    """
+    • content:// → /data/user/0/<pkg>/cache/uuid-원본이름 으로 복사
+    • file://·일반경로는 그대로 반환
+    • 실패시 None
+    """
     if not (ANDROID and u_str and u_str.startswith("content://")):
         return u_str if u_str and os.path.exists(u_str) else None
+
     try:
         cr  = activity.getContentResolver()
         uri = Uri.parse(u_str)
 
-        # 파일 이름 얻기
+        # ① SAF 메타데이터로 DISPLAY_NAME 확보
         name = "file"
         c = cr.query(uri, [OpenableCols.DISPLAY_NAME], None, None, None)
         if c and c.moveToFirst():
             name = c.getString(0)
         if c: c.close()
 
+        # ② InputStream → cache 복사
         istream  = cr.openInputStream(uri)
-        out_path = os.path.join(activity.getCacheDir().getAbsolutePath(),
-                                f"{uuid.uuid4().hex}-{name}")
+        out_path = os.path.join(
+            activity.getCacheDir().getAbsolutePath(),
+            f"{uuid.uuid4().hex}-{name}"
+        )
 
         with open(out_path, "wb") as dst:
-            # ── cast() 미지원 디바이스 →  read()/write() 직접 사용
-            if hasattr(istream, "read"):
+            try:
+                # 최신 pyjnius : read(n) → bytes
                 while True:
                     buf = istream.read(8192)
-                    if not buf: break
-                    dst.write(buf)
-            else:
-                bis = cast("java.io.InputStream", istream)
-                arr = autoclass("java.nio.ByteBuffer").allocate(8192)
+                    if not buf:
+                        break
+                    # buf 가 jarray(int) 일 수도 있어 bytes 변환
+                    dst.write(bytes(buf))
+            except TypeError:
+                # 구버전 pyjnius : read() 결과를 jarray 로 받아야 함
+                from jnius import jarray
+                barr = jarray('b')(8192)
                 while True:
-                    n = bis.read(arr.array())
-                    if n == -1: break
-                    dst.write(bytes(arr.array()[:n]))
+                    n = istream.read(barr)
+                    if n == -1:
+                        break
+                    dst.write(bytes(barr[:n]))
         istream.close()
         return out_path
     except Exception as e:
@@ -124,7 +134,8 @@ class GraphWidget(Widget):
     # ---------- 내부 ---------- #
     def redraw(self, *_):
         self.canvas.clear()
-        if not self.datasets: return
+        if not self.datasets:
+            return
         with self.canvas:
             self._grid(); self._labels()
             col = self.colors
@@ -135,41 +146,47 @@ class GraphWidget(Widget):
 
     def _scale(self, pts):
         w,h = self.width-2*self.pad_x, self.height-2*self.pad_y
-        return [c
+        return [coord
                 for x,y in pts
-                for c in (self.pad_x + x/self.max_x*w,
-                          self.pad_y + y/self.max_y*h)]
+                for coord in (self.pad_x + x/self.max_x*w,
+                              self.pad_y + y/self.max_y*h)]
 
     def _grid(self):
-        gx,gy = (self.width-2*self.pad_x)/10, (self.height-2*self.pad_y)/10
+        gx, gy = (self.width-2*self.pad_x)/10, (self.height-2*self.pad_y)/10
         Color(.6,.6,.6)
         for i in range(11):
             Line(points=[self.pad_x+i*gx, self.pad_y,
                          self.pad_x+i*gx, self.height-self.pad_y])
             Line(points=[self.pad_x, self.pad_y+i*gy,
                          self.width-self.pad_x, self.pad_y+i*gy])
+
     def _labels(self):
         for w in list(self.children):
             if isinstance(w, Label): self.remove_widget(w)
+        # X축
         for i in range(11):
-            x = self.pad_x+i*(self.width-2*self.pad_x)/10 - 20
-            y = self.pad_y-30
-            self.add_widget(Label(text=f"{self.max_x/10*i:.1f} Hz",
+            freq = self.max_x/10*i
+            x = self.pad_x + i*(self.width-2*self.pad_x)/10 - 20
+            y = self.pad_y - 30
+            self.add_widget(Label(text=f"{freq:.1f} Hz",
                                   size_hint=(None,None), size=(60,20), pos=(x,y)))
-            y = self.pad_y+i*(self.height-2*self.pad_y)/10 - 10
-            self.add_widget(Label(text=f"{self.max_y/10*i:.1e}",
+        # Y축 L/R
+        for i in range(11):
+            mag = self.max_y/10*i
+            y   = self.pad_y + i*(self.height-2*self.pad_y)/10 - 10
+            self.add_widget(Label(text=f"{mag:.1e}",
                                   size_hint=(None,None), size=(60,20),
-                                  pos=(self.pad_x-70,y)))
-            self.add_widget(Label(text=f"{self.max_y/10*i:.1e}",
+                                  pos=(self.pad_x-70, y)))
+            self.add_widget(Label(text=f"{mag:.1e}",
                                   size_hint=(None,None), size=(60,20),
-                                  pos=(self.width-self.pad_x+20,y)))
+                                  pos=(self.width-self.pad_x+20, y)))
 
 # ────────────────────────────────────────────────────────────────────────
 # 4)   메인 앱
 # ────────────────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-    # ── 토스트 + 라벨 동시 로그
+    # ── 간단 로그 + 토스트
     def log(self, msg):
         Logger.info(msg)
         self.label.text = msg
@@ -219,18 +236,22 @@ class FFTApp(App):
             on_selection=self.on_choose,
             multiple=True,
             filters=[("CSV","*.csv")],
-            native=False)         # SAF Picker
+            native=False   # SAF 대신 전통 FileChooser(경로가 바로 옴)
+        )
 
     def on_choose(self, sel):
         self.log(f"Chooser ⇒ {sel}")
         if not sel or sel == [None]:
             self.btn_run.disabled=True; return
+
         paths=[]
         for s in sel[:2]:
             p = uri_to_temp(s)
             if not p:
-                self.log("파일 복사 실패"); return
+                self.log("❌ 파일 복사 실패 – 다시 선택")
+                return
             paths.append(p)
+
         self.paths=paths
         self.label.text = " · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
@@ -247,9 +268,11 @@ class FFTApp(App):
             if pts is None:
                 self.log("CSV 읽기 오류"); return
             res.append((pts,mx,my))
+
         if len(res)==1:
             pts,mx,my = res[0]
             Clock.schedule_once(lambda *_: self.graph.update_graph([pts],[],mx,my)); return
+
         (f1,x1,y1),(f2,x2,y2)=res
         diff=[(f1[i][0], abs(f1[i][1]-f2[i][1])) for i in range(min(len(f1),len(f2)))]
         mx=max(x1,x2); my=max(y1,y2,max(y for _,y in diff))
