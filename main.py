@@ -256,24 +256,22 @@ class FFTApp(App):
         filechooser.open_file(on_selection=self.on_choose,
                               multiple=True,
                               filters=[("CSV","*.csv")],
-                              native=True)
+                              native=False)
 
-    def on_choose(self, sel):
+
+
+    def on_choose(self,sel):
         self.log(f"Chooser ⇒ {sel}")
-
-        if not sel or sel == [None]:
-            self.btn_run.disabled = True
-            return
-
-        paths = []
+        if not sel or sel==[None]:
+            self.btn_run.disabled=True; return
+        paths=[]
         for s in sel[:2]:
-            p = uri_to_temp(s)
+            p=uri_to_temp(s)   # 전통 경로면 그대로 반환 → 거의 항상 성공
             Logger.info(f"COPY → {s} → {p}")
             if not p:
-                self.log("❌ 파일 복사 실패 – 다시 선택")
-                return
+                self.log("❌ 파일 복사 실패 – 다시 선택"); return
             paths.append(p)
-
+        
         self.paths = paths
         self.label.text = " · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled = False
