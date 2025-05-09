@@ -217,9 +217,9 @@ class FFTApp(App):
             self.log("저장소 권한을 먼저 허용하세요"); return
         filechooser.open_file(
             on_selection=self.on_choose,
-            multiple=False,
+            multiple=True,
             filters=[("CSV","*.csv")],
-            native=True)         # SAF Picker
+            native=False)         # SAF Picker
 
     def on_choose(self, sel):
         self.log(f"Chooser ⇒ {sel}")
