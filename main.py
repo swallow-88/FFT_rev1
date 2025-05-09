@@ -1,7 +1,7 @@
-# ────────────────────────────────────────────────────────────────
-# 0) Imports & Android 환경 판별
-# ────────────────────────────────────────────────────────────────
-import os, csv, sys, traceback, threading, itertools, datetime, uuid
+##############################################################################
+# 0)  imports
+##############################################################################
+import os, csv, sys, traceback, threading, itertools
 import numpy as np
 from numpy.fft import fft
 
@@ -11,325 +11,90 @@ from kivy.logger import Logger
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button   import Button
 from kivy.uix.label    import Label
-from kivy.uix.popup    import Popup
 from kivy.uix.widget   import Widget
 from kivy.graphics     import Line, Color
-from kivy.utils        import platform
-from plyer             import filechooser
-
-# ── Android / Pyjnius (존재-유무·버전 모두 대응) ──────────────────────
-ANDROID      = platform == "android"
-ANDROID_API  = 0
-toast        = None
-Uri          = None
-OpenableCols = None
-activity     = None
-
-try:
-    # pyjnius ≥1.7 은 cast 지원, 그 이전은 except 분기로 더미 cast 정의
+from plyer             import filechooser         # ← Kivy FileChooser
+##############################################################################
+# 1)  예외를 파일에 기록 (PC 없이도 확인)
+##############################################################################
+def dump_crash(et, ev, tb):
+    txt = "".join(traceback.format_exception(et, ev, tb))
     try:
-        from jnius import autoclass, cast
+        with open("/sdcard/fft_crash.log","a",encoding="utf-8") as fp:
+            fp.write(txt+"\n"+"="*60+"\n")
     except Exception:
-        from jnius import autoclass
-        cast = lambda cls, obj: obj          # cast 없는 환경용 더미
-    if ANDROID:
-        ANDROID_API  = autoclass("android.os.Build$VERSION").SDK_INT
-        PythonAct    = autoclass("org.kivy.android.PythonActivity")
-        activity     = PythonAct.mActivity
-        Uri          = autoclass("android.net.Uri")
-        OpenableCols = autoclass("android.provider.OpenableColumns")
-        from plyer import toast
-except Exception as e:
-    Logger.warning(f"[JNI unavailable] {e}")
-    ANDROID = False          # 데스크탑에서도 실행 가능하도록
-
-# ────────────────────────────────────────────────────────────────
-# 1) 전역 예외 → crash.log + 팝업
-# ────────────────────────────────────────────────────────────────
-def _dump_crash(txt: str):
-    path = os.path.join(os.getenv("HOME", "/sdcard"), "crash.log")
-    with open(path, "a", encoding="utf-8") as fp:
-        fp.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
-        fp.write(txt+"\n")
+        pass
     Logger.error(txt)
-
-def _ex_hook(t, v, tb):
-    txt = "".join(traceback.format_exception(t, v, tb))
-    _dump_crash(txt)
-    if ANDROID:
-        Clock.schedule_once(lambda *_:
-            Popup(title="Python Crash",
-                  content=Label(text=txt[:1500]),
-                  size_hint=(.9,.9)).open())
-sys.excepthook = _ex_hook
-
-# ────────────────────────────────────────────────────────────────
-# 2) SAF content:// URI  →  앱 cache 로 복사
-#    (file://·직접경로는 그대로 통과)
-# ────────────────────────────────────────────────────────────────
-from jnius import jarray, cast
-
-from urllib.parse import unquote
-
-def uri_to_temp(u: str) -> str | None:
-    # 0) file:// → 실제 경로로 변환
-    if u and u.startswith("file://"):
-        real = unquote(u[7:])          # 'file://' 잘라내고 URL 디코딩
-        return real if os.path.exists(real) else None
-
-    # 1) 전통 경로  ( /storage/emulated/... ) ----------------------------
-    if not (ANDROID and u and u.startswith("content://")):
-        return u if u and os.path.exists(u) else None
-
-
-    try:
-        cr   = activity.getContentResolver()
-        uri  = Uri.parse(u)
-
-        # ----- 파일 이름 얻기 ----- #
-        name = "file"
-        c = cr.query(uri, [OpenableCols.DISPLAY_NAME], None, None, None)
-        if c and c.moveToFirst():
-            name = c.getString(0)
-        if c:
-            c.close()
-
-        istream  = cr.openInputStream(uri)
-        out_path = os.path.join(
-            activity.getCacheDir().getAbsolutePath(),
-            f"{uuid.uuid4().hex}-{name}"
-        )
-
-        buf = jarray('b')(8192)                 # Java byte[] 버퍼
-        with open(out_path, "wb") as dst:
-            while True:
-                n = istream.read(buf)           # n = 읽은 byte 수, -1 이면 EOF
-                if n == -1:
-                    break
-                dst.write(bytes(buf[:n]))       # jarray → Python bytes
-        istream.close()
-        return out_path
-
-    except Exception as e:
-        Logger.error(f"URI copy err: {type(e).__name__}: {e}")
-        return None
-# ────────────────────────────────────────────────────────────────
-# 3) 그래프 위젯
-# ────────────────────────────────────────────────────────────────
+sys.excepthook = dump_crash
+##############################################################################
+# 2)  아주 단순한 그래프 위젯 (변경 없음)
+##############################################################################
 class GraphWidget(Widget):
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.datasets, self.diff = [], []
-        self.colors = itertools.cycle([(1,0,0), (0,1,0), (0,0,1)])
-        self.pad_x = 80; self.pad_y = 30
-        self.max_x = self.max_y = 1
-        self.bind(size=self.redraw)
+        self.data = []; self.colors = itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
+        self.bind(size=lambda *_: self.redraw())
 
-    def update_graph(self, data_sets, diff_pts, x_max, y_max):
-        self.datasets, self.diff = data_sets, diff_pts
-        self.max_x, self.max_y   = x_max, y_max
-        self.redraw()
+    def update(self, *datasets):
+        self.data = datasets; self.redraw()
 
-    # ---------- 내부 ---------- #
-    def redraw(self, *_):
+    def redraw(self):
         self.canvas.clear()
-        if not self.datasets:
-            return
+        if not self.data: return
         with self.canvas:
-            self._grid()
-            self._labels()
-            col = self.colors
-            for pts in self.datasets:
-                Color(*next(col)); Line(points=self._scale(pts))
-            if self.diff:
-                Color(1,1,1);  Line(points=self._scale(self.diff))
+            for pts in self.data:
+                Color(*next(self.colors))
+                Line(points=[c for x,y in pts for c in (x*10+40, y*100+40)])
 
-    # 점 → 화면좌표
-    def _scale(self, pts):
-        w,h = self.width-2*self.pad_x, self.height-2*self.pad_y
-        return [c
-                for x,y in pts
-                for c in (self.pad_x + x/self.max_x*w,
-                          self.pad_y + y/self.max_y*h)]
-
-    def _grid(self):
-        gx, gy = (self.width-2*self.pad_x)/10, (self.height-2*self.pad_y)/10
-        Color(.6,.6,.6)
-        for i in range(11):
-            Line(points=[self.pad_x+i*gx, self.pad_y,
-                         self.pad_x+i*gx, self.height-self.pad_y])
-            Line(points=[self.pad_x, self.pad_y+i*gy,
-                         self.width-self.pad_x, self.pad_y+i*gy])
-
-    def _labels(self):
-        # 기존 레이블 제거
-        for w in list(self.children):
-            if isinstance(w, Label): self.remove_widget(w)
-
-        # X축
-        for i in range(11):
-            freq = self.max_x/10*i
-            x = self.pad_x + i*(self.width-2*self.pad_x)/10 - 20
-            y = self.pad_y - 30
-            self.add_widget(Label(text=f"{freq:.1f} Hz",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(x,y)))
-        # Y축(좌/우)
-        for i in range(11):
-            mag = self.max_y/10*i
-            y   = self.pad_y + i*(self.height-2*self.pad_y)/10 - 10
-            self.add_widget(Label(text=f"{mag:.1e}",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(self.pad_x-70, y)))
-            self.add_widget(Label(text=f"{mag:.1e}",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(self.width-self.pad_x+20, y)))
-
-# ────────────────────────────────────────────────────────────────
-# 4) 메인 앱
-# ────────────────────────────────────────────────────────────────
+##############################################################################
+# 3)  메인 앱 - 파일 선택 → FFT
+##############################################################################
 class FFTApp(App):
-
-    # ── 라벨 + 토스트 로그
-    def log(self, msg):
-        Logger.info(msg)
-        self.label.text = msg
-        if ANDROID and toast:
-            try: toast.toast(msg)
-            except: pass
-
-    # ── 저장소 권한
-    def _storage_ok(self):
-        if not ANDROID:
-            return True
-        from android.permissions import check_permission, Permission
-        base = [Permission.READ_EXTERNAL_STORAGE,
-                Permission.WRITE_EXTERNAL_STORAGE]
-        extra = []
-        if ANDROID_API >= 33:
-            extra = [Permission.READ_MEDIA_IMAGES,
-                     Permission.READ_MEDIA_AUDIO,
-                     Permission.READ_MEDIA_VIDEO]
-        return all(check_permission(p) for p in base+extra)
-
-    def _ask_storage(self):
-        if not ANDROID or self._storage_ok():
-            return
-        from android.permissions import request_permissions, Permission
-        perms = [Permission.READ_EXTERNAL_STORAGE,
-                 Permission.WRITE_EXTERNAL_STORAGE]
-        if ANDROID_API >= 33:
-            perms += [Permission.READ_MEDIA_IMAGES,
-                      Permission.READ_MEDIA_AUDIO,
-                      Permission.READ_MEDIA_VIDEO]
-        request_permissions(perms)
-
-    # ── UI
     def build(self):
-        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
-
-        self.label = Label(text="Select 2 CSV files", size_hint=(1,.1))
-        root.add_widget(self.label)
-
-        root.add_widget(Button(text="Select CSV", size_hint=(1,.1),
-                               on_press=self.open_chooser))
-
-        self.btn_run = Button(text="FFT RUN", size_hint=(1,.1),
-                              disabled=True, on_press=self.run_fft)
-        root.add_widget(self.btn_run)
-
-        root.add_widget(Button(text="EXIT", size_hint=(1,.1),
-                               on_press=self.stop))
-
-        self.graph = GraphWidget(size_hint=(1,.6))
-        root.add_widget(self.graph)
-
-        Clock.schedule_once(lambda *_: self._ask_storage(), 0)
+        root = BoxLayout(orientation="vertical",padding=10,spacing=10)
+        self.info = Label(text="CSV 두 개를 고르세요"); root.add_widget(self.info)
+        root.add_widget(Button(text="Select CSV",on_press=self.pick))
+        self.run = Button(text="FFT RUN",disabled=True,on_press=self.do_fft)
+        root.add_widget(self.run)
+        self.graph = GraphWidget(); root.add_widget(self.graph)
         return root
 
-    # ── 파일 선택
-    def open_chooser(self,*_):
-        if not self._storage_ok():
-            self.log("저장소 권한을 먼저 허용하세요"); return
+    def pick(self,*_):
+        filechooser.open_file(
+            on_selection=self.got,
+            multiple=True,
+            filters=[("CSV","*.csv")],
+            native=False)        #  ← Kivy FileChooser (실경로 반환)
 
-        # native=False  ➜  전통 FileChooser (경로 바로 반환)
-        filechooser.open_file(on_selection=self.on_choose,
-                              multiple=True,
-                              filters=[("CSV","*.csv")],
-                              native=False)
+    def got(self, sel):
+        Logger.info(f"Chooser ⇒ {sel}")
+        if not sel: return
+        self.paths = sel[:2]          # 1 개 또는 2 개
+        self.info.text = " · ".join(os.path.basename(p) for p in self.paths)
+        self.run.disabled = False
 
+    def do_fft(self,*_):
+        self.run.disabled = True
+        threading.Thread(target=self._fft,daemon=True).start()
 
-
-    def on_choose(self,sel):
-        self.log(f"Chooser ⇒ {sel}")
-        if not sel or sel==[None]:
-            self.btn_run.disabled=True; return
-        paths=[]
-        for s in sel[:2]:
-            p=uri_to_temp(s)   # 전통 경로면 그대로 반환 → 거의 항상 성공
-            Logger.info(f"COPY → {s} → {p}")
-            if not p:
-                self.log("❌ 파일 복사 실패 – 다시 선택"); return
-            paths.append(p)
-        
-        self.paths = paths
-        self.label.text = " · ".join(os.path.basename(p) for p in paths)
-        self.btn_run.disabled = False
-
-    # ── FFT
-    def run_fft(self,*_):
-        self.btn_run.disabled = True
-        threading.Thread(target=self._fft_bg, daemon=True).start()
-
-    def _fft_bg(self):
-        res = []
+    def _fft(self):
+        out=[]
         for p in self.paths:
-            pts, mx, my = self.csv_fft(p)
-            if pts is None:
-                self.log("CSV 읽기 오류"); return
-            res.append((pts, mx, my))
-
-        if len(res) == 1:
-            pts,mx,my = res[0]
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts], [], mx, my))
-            return
-
-        (f1,x1,y1), (f2,x2,y2) = res
-        diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
-                for i in range(min(len(f1), len(f2)))]
-        mx = max(x1,x2);  my = max(y1,y2, max(y for _,y in diff))
-        Clock.schedule_once(lambda *_:
-            self.graph.update_graph([f1,f2], diff, mx, my))
-        Clock.schedule_once(lambda *_:
-            setattr(self.btn_run, "disabled", False))
-
-    # ── CSV → FFT
-    @staticmethod
-    def csv_fft(path):
-        try:
-            t, a = [], []
-            with open(path) as f:
-                for r in csv.reader(f):
-                    try:
+            try:
+                t,a=[],[]
+                with open(p) as f:
+                    for r in csv.reader(f):
                         t.append(float(r[0])); a.append(float(r[1]))
-                    except: pass
-            if len(a) < 2:
-                raise ValueError("too few samples")
+                dt=(t[-1]-t[0])/len(a)
+                f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
+                v=np.abs(fft(a))[:len(a)//2]
+                out.append(list(zip(f/5, v/max(v))))    # 그냥 축소해서 표시
+            except Exception as e:
+                Logger.error(f"FFT err {e}")
+                return
+        Clock.schedule_once(lambda *_: (self.graph.update(*out),
+                                        setattr(self.run,"disabled",False)))
 
-            dt   = (t[-1]-t[0]) / len(a)
-            freq = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
-            vals = np.abs(fft(a))[:len(a)//2]
-
-            mask = freq <= 50
-            freq, vals = freq[mask], vals[mask]
-            smooth = np.convolve(vals, np.ones(10)/10, 'same')
-
-            return list(zip(freq, smooth)), freq.max(), smooth.max()
-        except Exception as e:
-            Logger.error(f"FFT err: {e}")
-            return None,0,0
-
-
+##############################################################################
 if __name__ == "__main__":
     FFTApp().run()
