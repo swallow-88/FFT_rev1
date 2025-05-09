@@ -69,10 +69,18 @@ sys.excepthook = _ex_hook
 # ────────────────────────────────────────────────────────────────
 from jnius import jarray, cast
 
+from urllib.parse import unquote
+
 def uri_to_temp(u: str) -> str | None:
-    # direct path (디렉토리 직접 선택) ⇒ 그대로 리턴
+    # 0) file:// → 실제 경로로 변환
+    if u and u.startswith("file://"):
+        real = unquote(u[7:])          # 'file://' 잘라내고 URL 디코딩
+        return real if os.path.exists(real) else None
+
+    # 1) 전통 경로  ( /storage/emulated/... ) ----------------------------
     if not (ANDROID and u and u.startswith("content://")):
         return u if u and os.path.exists(u) else None
+
 
     try:
         cr   = activity.getContentResolver()
