@@ -69,16 +69,12 @@ sys.excepthook = _ex_hook
 # ────────────────────────────────────────────────────────────────
 def uri_to_temp(u_str: str) -> str | None:
     if not (ANDROID and u_str and u_str.startswith("content://")):
-        # file:// 접두어 정리
-        if u_str and u_str.startswith("file://"):
-            u_str = u_str[7:]
         return u_str if u_str and os.path.exists(u_str) else None
-
     try:
         cr  = activity.getContentResolver()
         uri = Uri.parse(u_str)
 
-        # DISPLAY_NAME 쿼리
+        # 파일 이름
         name = "file"
         c = cr.query(uri, [OpenableCols.DISPLAY_NAME], None, None, None)
         if c and c.moveToFirst():
@@ -86,35 +82,23 @@ def uri_to_temp(u_str: str) -> str | None:
         if c: c.close()
 
         istream  = cr.openInputStream(uri)
-        out_path = os.path.join(
-            activity.getCacheDir().getAbsolutePath(),
-            f"{uuid.uuid4().hex}-{name}"
-        )
+        out_path = os.path.join(activity.getCacheDir().getAbsolutePath(),
+                                f"{uuid.uuid4().hex}-{name}")
 
-        # pyjnius 버전별 InputStream.read 처리
+        # ▶︎ 핵심: 항상 jarray('b') 버퍼로 읽기
+        buf = jarray('b')(8192)   # Java byte[] 8192
         with open(out_path, "wb") as dst:
-            try:            # ≥1.7 : read(8192) → bytes or bytearray
-                while True:
-                    buf = istream.read(16384)
-                    if not buf:
-                        break
-                    dst.write(bytes(buf))
-            except TypeError:
-                # 구버전 : read(byte[]) 패턴
-                from jnius import jarray
-                barr = jarray('b')(16384)
-                while True:
-                    n = istream.read(barr)
-                    if n == -1:
-                        break
-                    dst.write(bytes(barr[:n]))
+            while True:
+                n = istream.read(buf)   # n: 읽은 byte 수, -1=EOF
+                if n == -1:
+                    break
+                dst.write(bytes(buf[:n]))   # Java 배열 → Python bytes
         istream.close()
         return out_path
 
     except Exception as e:
-        Logger.error(f"URI copy err: {e}")
+        Logger.error(f"URI copy err: {e}")   # ← logcat 에서 원인 확인
         return None
-
 # ────────────────────────────────────────────────────────────────
 # 3) 그래프 위젯
 # ────────────────────────────────────────────────────────────────
