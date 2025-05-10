@@ -14,7 +14,7 @@ source.dir          = .
 source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 
 # ── 파이썬 모듈 요구사항 ──────────────────────────────────────────────────────
-requirements        = python3,kivy,numpy,plyer,pyjnius
+requirements        = python3,kivy,numpy,plyer,pyjnius,android
 
 
 # ── Android 퍼미션 ────────────────────────────────────────────────────────────
