@@ -53,7 +53,7 @@ def uri_to_file(p: str) -> str | None:
 
         act  = autoclass("org.kivy.android.PythonActivity").mActivity   # ← ②
         Uri  = autoclass("android.net.Uri")                             # ← ③
-        #Cols = autoclass("android.provider.OpenableColumns")            # ← ④
+        Cols = autoclass("android.provider.OpenableColumns")            # ← ④
         cr   = act.getContentResolver()
 
         uri  = Uri.parse(p)
