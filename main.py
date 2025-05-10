@@ -52,7 +52,7 @@ def uri_to_file(p: str) -> str | None:
         Logger.info("PYDBG 1  – jnius import 성공")
 
         act  = autoclass("org.kivy.android.PythonActivity").mActivity   # ← ②
-        #Uri  = autoclass("android.net.Uri")                             # ← ③
+        Uri  = autoclass("android.net.Uri")                             # ← ③
         #Cols = autoclass("android.provider.OpenableColumns")            # ← ④
         cr   = act.getContentResolver()
 
