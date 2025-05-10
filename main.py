@@ -6,6 +6,7 @@ from kivy.uix.label    import Label
 from kivy.uix.widget   import Widget
 from kivy.graphics import Line, Color
 import itertools, numpy as np
+from plyer import filechooser
 
 class Graph(Widget):
     def __init__(s,**kw):
@@ -32,9 +33,20 @@ class Demo(App):
         root.add_widget(Button(text="gen",on_press=self.gen))
         self.g=Graph(); root.add_widget(self.g)
         return root
+
+    def pick(self,*_):
+        filechooser.open_file(self.on_choose,multiple=True,native=False,
+                              filters=[("CSV","*.csv")])
+    def on_choose(self,sel):
+        self.lbl.text=str(sel)
+
+    
     def gen(self,*_):
         x=np.linspace(0,10,512); y=np.sin(x)
         self.g.update(list(zip(x,y)))
+
+
+
 
 if __name__=="__main__":
     Demo().run()
