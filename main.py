@@ -51,9 +51,9 @@ def uri_to_file(p: str) -> str | None:
         from jnius import autoclass, jarray            # ← ①
         Logger.info("PYDBG 1  – jnius import 성공")
 
-        act  = autoclass("org.kivy.android.PythonActivity").mActivity   # ← ②
-        Uri  = autoclass("android.net.Uri")                             # ← ③
-        Cols = autoclass("android.provider.OpenableColumns")            # ← ④
+        #act  = autoclass("org.kivy.android.PythonActivity").mActivity   # ← ②
+        #Uri  = autoclass("android.net.Uri")                             # ← ③
+        #Cols = autoclass("android.provider.OpenableColumns")            # ← ④
         cr   = act.getContentResolver()
 
         uri  = Uri.parse(p)
