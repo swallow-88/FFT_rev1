@@ -19,8 +19,11 @@ source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 
 
 
-requirements = python3,kivy,plyer,pyjnius,numpy,android
+requirements = python3,kivy,plyer,pyjnius,numpy,android,androidstorage
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
+
+
+
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
@@ -47,6 +50,9 @@ android.logcat_filters      = *:S python:D
 
 # ── python-for-android 설정 ──────────────────────────────────────────────────
 p4a.bootstrap               = sdl2
+p4a.extra_args = --service androidstorage
+
+
 #p4a.branch = stable
 
 # python-for-android develop 브랜치를 clone 하지 않도록 주석 처리!
