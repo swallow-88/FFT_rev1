@@ -1,125 +1,140 @@
 """
-step3_debug.py  –  “Android 코드 한 줄씩 열어 보기” 전용 최소 예제
+step3_debug_fixed.py  –  Android/데스크탑 겸용 · SAF 테스트용 최소 예제
 """
-import os, sys, traceback, urllib.parse
+
+# ────────────────────────────────────────────────────────────────
+# 0)  공통 모듈 import
+# ────────────────────────────────────────────────────────────────
+import os, sys, traceback, urllib.parse, uuid, csv, threading
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button   import Button
 from kivy.uix.label    import Label
 from kivy.utils        import platform
-from plyer             import filechooser
-from kivy.logger       import Logger
 from kivy.clock        import Clock
-from android import activity
-from jnius import autoclass, cast
+from kivy.logger       import Logger
+from plyer             import filechooser
 
-# 파일 맨 위쪽
+# ────────────────────────────────────────────────────────────────
+# 1)  dummy android  ―  recipe 가 없을 때도 죽지 않도록
+# ────────────────────────────────────────────────────────────────
 try:
-    import android                 # 정상일 때
-except ImportError:                # recipe 빠져 있을 때
-    import types, sys
+    import android              # recipe 가 있으면 OK
+except ImportError:             # 없으면 즉시 더미 삽입
+    import types
     android = types.ModuleType("android")
-    android.activity = None        # plyer 가 참조하는 attr 만 마련
+    android.activity = None     # plyer.filechooser 가 참조하는 속성
     sys.modules["android"] = android
 
-# ──────────────────────────────  전역 크래시 → logcat + /sdcard
-def _ex(et, ev, tb):
+# 이제부터는 언제든  from android import activity  해도 크래시 X
+if platform == "android":
+    from android import activity
+
+# pyjnius 존재 여부는 나중에 try/except 로 확인
+# ────────────────────────────────────────────────────────────────
+# 2)  전역 크래시 → /sdcard/step3_crash.log + logcat
+# ────────────────────────────────────────────────────────────────
+def _ex_hook(et, ev, tb):
     txt = "".join(traceback.format_exception(et, ev, tb))
-    try: open("/sdcard/step3_crash.log", "a").write(txt)
-    except: pass
+    try:
+        with open("/sdcard/step3_crash.log", "a") as fp:
+            fp.write(txt + "\n" + "="*70 + "\n")
+    except Exception:
+        pass
     Logger.error(txt)
-sys.excepthook = _ex
 
-ANDROID = platform == "android"             # 데스크탑 테스트도 OK
+sys.excepthook = _ex_hook
 
-# ──────────────────────────────  SAF / 전통 경로 처리
-def uri_to_file(p: str) -> str | None:
+# ────────────────────────────────────────────────────────────────
+# 3)  content:// (SAF) → 캐시 복사 or 파일 경로 변환
+# ────────────────────────────────────────────────────────────────
+def uri_to_file(source: str) -> str | None:
     """
-    p 가…
-      • file://…  → 실경로 반환
-      • /storage/emulated/…  → 그대로
-      • content://… → (안드로이드 블록을 열면) cache 로 복사
+    •  file://...          →  실제 경로
+    •  /storage/...        →  그대로 (존재 여부만 체크)
+    •  content://...       →  앱 cache 로 복사  (pyjnius 필요)
     실패 시 None
     """
-    if not p:
+    if not source:
         return None
 
-    # ─── file:// → 실제 경로 ───────────────────────────
-    if p.startswith("file://"):
-        real = urllib.parse.unquote(p[7:])
+    # file:// → 실제 경로 (URL-decode 포함)
+    if source.startswith("file://"):
+        real = urllib.parse.unquote(source[7:])
         return real if os.path.exists(real) else None
 
-    # ─── 전통 경로 (/storage/…) ────────────────────────
-    if not p.startswith("content://"):
-        return p if os.path.exists(p) else None
+    # 전통 경로는 그대로
+    if not source.startswith("content://"):
+        return source if os.path.exists(source) else None
 
-    # ------------------------------------------------------------------
-    # ▼▼▼ 아래 블록을 ‘한 줄씩’ 주석 해제해 가며 테스트하세요 ▼▼▼
-    # ------------------------------------------------------------------
-    
+    # ===== SAF  복사 =====
     try:
-        Logger.info("PYDBG 0  – jnius import 시도")
-        from jnius import autoclass, jarray            # ← ①
-        Logger.info("PYDBG 1  – jnius import 성공")
+        from jnius import autoclass, jarray    # pyjnius 필요
+        act  = autoclass("org.kivy.android.PythonActivity").mActivity
+        Uri  = autoclass("android.net.Uri")
+        Cols = autoclass("android.provider.OpenableColumns")
 
-        act  = autoclass("org.kivy.android.PythonActivity").mActivity   # ← ②
-        #Uri  = autoclass("android.net.Uri")                             # ← ③
-        #Cols = autoclass("android.provider.OpenableColumns")            # ← ④
         cr   = act.getContentResolver()
+        uri  = Uri.parse(source)
 
-        uri  = Uri.parse(p)
+        # 파일 이름 구하기
         name = "tmp"
         c = cr.query(uri, [Cols.DISPLAY_NAME], None, None, None)
         if c and c.moveToFirst():
             name = c.getString(0)
-        if c: c.close()
+        if c:
+            c.close()
 
-        Logger.info(f"PYDBG 2  – SAF filename = {name}")
-
-        ist = cr.openInputStream(uri)
-        dst = os.path.join(
+        dst_path = os.path.join(
             act.getCacheDir().getAbsolutePath(),
             f"{uuid.uuid4().hex}-{name}"
         )
 
-        #buf = jarray('b')(8192)                       # ← ⑤
-        with open(dst, "wb") as out:
+        istream = cr.openInputStream(uri)
+        buf     = jarray('b')(8192)
+        with open(dst_path, "wb") as out:
             while True:
-                n = ist.read(buf)
+                n = istream.read(buf)
                 if n == -1: break
                 out.write(bytes(buf[:n]))
-        ist.close()
-        Logger.info(f"PYDBG 3  – 복사 완료 {dst}")
-        return dst
+        istream.close()
+        Logger.info(f"SAF copy → {dst_path}")
+        return dst_path
+
     except Exception as e:
-        Logger.error(f"PYDBG ERR – SAF copy fail {e}")
+        Logger.error(f"SAF copy fail: {e}")
         return None
-    
-    # ------------------------------------------------------------------
-    Logger.info("PYDBG –  content:// but Android block 아직 OFF")
-    return None
-# ──────────────────────────────  Kivy UI
-class Demo(App):
+
+# ────────────────────────────────────────────────────────────────
+# 4)  Kivy UI  (파일 선택 결과만 표시)
+# ────────────────────────────────────────────────────────────────
+class DemoApp(App):
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
-        self.lbl = Label(text="pick csv"); root.add_widget(self.lbl)
-        root.add_widget(Button(text="Select", on_press=self.pick))
+        self.lbl = Label(text="Pick CSV"); root.add_widget(self.lbl)
+        root.add_widget(Button(text="Select",
+                               on_press=self.open_picker))
         return root
 
-    def pick(self,*_):
-        filechooser.open_file(self.on_pick, multiple=True,
+    def open_picker(self, *_):
+        # native=True  ➜ SAF 파일 피커,   False ➜ 전통 경로 피커
+        filechooser.open_file(self.on_selected,
+                              multiple=True,
                               filters=[("CSV","*.csv")],
-                              native=True)          # SAF 사용
+                              native=True)
 
-    def on_pick(self, sel):
-        Logger.info(f"PYDBG pick → {sel}")
-        if not sel:
+    def on_selected(self, selection):
+        Logger.info(f"PICK ⇒ {selection}")
+        if not selection:
             self.lbl.text = "취소됨"; return
-        paths=[]
-        for raw in sel:
-            real = uri_to_file(raw)
-            paths.append(real)
-        self.lbl.text = "\n".join(str(p) for p in paths)
 
-if __name__=="__main__":
-    Demo().run()
+        results = []
+        for s in selection:
+            real = uri_to_file(s)
+            results.append(real)
+
+        self.lbl.text = "\n".join(str(p) for p in results)
+
+# ────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    DemoApp().run()
