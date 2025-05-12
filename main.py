@@ -24,8 +24,18 @@ from plyer             import filechooser, toast
 ANDROID = platform == "android"
 if ANDROID:
     from androidstorage4kivy import SharedStorage
+
     from android.permissions import (
-        check_permission, request_permissions, Permission)
+            check_permission, request_permissions, Permission)
+    
+    # ↓ ask_perm() 안에서 요청 배열에 33+ 권한 추가
+    need = [Permission.READ_EXTERNAL_STORAGE,
+            Permission.WRITE_EXTERNAL_STORAGE]
+    if ANDROID_API >= 33:
+        need += [Permission.READ_MEDIA_IMAGES,
+                 Permission.READ_MEDIA_AUDIO,
+                 Permission.READ_MEDIA_VIDEO]   # ★ 이 세 줄
+
 
 # ─── SAF URI → 앱 캐시에 복사 (or file:// → 실경로) ──────────────────
 def uri2path(uri: str) -> str | None:
