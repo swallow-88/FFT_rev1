@@ -1,6 +1,10 @@
 # buildozer.spec
 
 [app]
+
+buildozer android clean   # 캐시-dist 초기화 (권장)
+buildozer -v android debug
+
 # ── 앱 기본 정보 ─────────────────────────────────────────────────────────────
 title               = FFTApp
 package.name        = fftapp
@@ -14,9 +18,6 @@ source.dir          = .
 source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 
 
-[app]
-buildozer android clean   # 캐시-dist 초기화 (권장)
-buildozer -v android debug
 
 requirements = python3,kivy,plyer,pyjnius,numpy,android
 android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
