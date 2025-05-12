@@ -10,6 +10,17 @@ from kivy.utils        import platform
 from plyer             import filechooser
 from kivy.logger       import Logger
 from kivy.clock        import Clock
+from android import activity
+from jnius import autoclass, cast
+
+# 파일 맨 위쪽
+try:
+    import android                 # 정상일 때
+except ImportError:                # recipe 빠져 있을 때
+    import types, sys
+    android = types.ModuleType("android")
+    android.activity = None        # plyer 가 참조하는 attr 만 마련
+    sys.modules["android"] = android
 
 # ──────────────────────────────  전역 크래시 → logcat + /sdcard
 def _ex(et, ev, tb):
