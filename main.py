@@ -45,10 +45,11 @@ def _ex_hook(et, ev, tb):
     Logger.error(txt)
 sys.excepthook = _ex_hook
 
+
 # ───── SAF content:// URI → 캐시 파일 복사 ──────────────────────
 def uri_to_file(p: str) -> str | None:
-    if not p:
-        return None
+    if not (ANDROID and p.startswith("content://")):
+        return p if p and os.path.exists(p) else None
     # file:// URI → 실경로
     if p.startswith("file://"):
         real = urllib.parse.unquote(p[7:])
@@ -83,9 +84,13 @@ def uri_to_file(p: str) -> str | None:
                 out.write(bytes(buf[:n]))
         ist.close()
         return dst
-    except Exception as e:
-        Logger.error(f"SAF copy fail: {e}")
+    except Exception:
+        Logger.exception("SAF copy fail")     # <-- 어떤 Exception 인지 바로 확인
         return None
+
+
+
+
 
 # ───── 간단 그래프 위젯 (축/격자 생략 – 필요하면 이전 코드에서 대체) ──
 class Graph(Widget):
@@ -190,13 +195,18 @@ class FFTApp(App):
             filechooser.open_file(self.on_choose,
                                   multiple=True,
                                   filters=[("CSV", "*.csv")],
-                                  native=False)      # 내부 chooser
-        except Exception as e:
-            Logger.warning(f"native=False chooser error {e}; fallback SAF")
-            filechooser.open_file(self.on_choose,
-                                  multiple=True,
-                                  filters=[("CSV", "*.csv")],
-                                  native=True)       # SAF picker
+                                  native=False)
+        except Exception:
+            Logger.exception("open_file failed")     # <-- 반드시 logcat에 찍힘
+            self.log("internal chooser 오류 – SAF로 재시도")
+            try:
+                filechooser.open_file(self.on_choose,
+                                      multiple=True,
+                                      filters=[("CSV","*.csv")],
+                                      native=True)
+            except Exception:
+                Logger.exception("SAF chooser failed")   # ← 여기까지 오면 chooser 문제
+                self.log("파일 선택기를 열 수 없습니다")
 
     def on_choose(self, sel):
         self.log(f"Choose → {sel}")
