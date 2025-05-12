@@ -16,7 +16,7 @@ source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 
 [app]
 requirements = python3,kivy,plyer,pyjnius,numpy,android
-android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
