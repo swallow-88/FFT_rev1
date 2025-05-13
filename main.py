@@ -22,8 +22,13 @@ from plyer             import filechooser, toast
 
 # ─── Android / androidstorage ──────────────────────────────────────────
 ANDROID = platform == "android"
+SharedStorage = None
 if ANDROID:
-    from androidstorage4kivy import SharedStorage
+    try:
+        from androidstorage4kivy import SharedStorage
+    except ModuleNotFoundError as e:
+        Logger.error(f"androidstorage4kivy missing: {e}")
+        ANDROID = False        # → 데스크탑 모드로 계속 실행
 
     from android.permissions import (
             check_permission, request_permissions, Permission)
