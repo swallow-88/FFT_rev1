@@ -1,3 +1,6 @@
+"""
+FFT CSV Viewer – SAF 안정 버전 (2025-05)
+"""
 # ────────────────────────────────────────────────────────────────
 # 0) Imports & Android 환경 판별
 # ────────────────────────────────────────────────────────────────
@@ -15,86 +18,132 @@ from kivy.uix.popup    import Popup
 from kivy.uix.widget   import Widget
 from kivy.graphics     import Line, Color
 from kivy.utils        import platform
-from plyer             import filechooser, toast          # ← toast import 위치 변경
+from plyer             import filechooser
 
+# ── Android 여부 및 선택 적용 모듈 ───────────────────────────────────────
 ANDROID = platform == "android"
-# ----------------------------------------------------------------
+toast   = None
+SharedStorage = None
+Permission = check_permission = request_permissions = None
+ANDROID_API = 0
+
 if ANDROID:
-    # androidstorage4kivy 로 SAF 복사 간소화
-    from androidstorage4kivy import SharedStorage
-    from android.permissions import (
-        check_permission, request_permissions, Permission
-    )
+    # ① toast 는 옵션
+    try:
+        from plyer import toast
+    except Exception:
+        toast = None
+
+    # ② androidstorage4kivy (있으면 편함, 없어도 동작)
+    try:
+        from androidstorage4kivy import SharedStorage
+    except ModuleNotFoundError:
+        SharedStorage = None
+
+    # ③ 권한 모듈
+    try:
+        from android.permissions import (
+            check_permission, request_permissions, Permission
+        )
+    except Exception:  # recipe 누락 대비
+        check_permission = lambda *_: True
+        request_permissions = lambda *_: None
+        class _P: READ_EXTERNAL_STORAGE=WRITE_EXTERNAL_STORAGE = \
+                  READ_MEDIA_IMAGES=READ_MEDIA_AUDIO=READ_MEDIA_VIDEO = ""
+        Permission = _P
+
+    # ④ API 레벨 – pyjnius 없이도 시도
+    try:
+        from jnius import autoclass
+        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
+    except Exception:
+        # pyjnius 미 탑재(간혹 그렇습니다): 안 써도 치명적이지 않으니 0 그대로
+        pass
 
 # ────────────────────────────────────────────────────────────────
-# 1) 전역 예외 → /sdcard/crash.log
+# 1) 전역 예외 → /sdcard/fft_crash.log
 # ────────────────────────────────────────────────────────────────
-def _dump_crash(txt: str):
+def _dump_crash(txt:str):
     try:
-        with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as fp:
-            fp.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
-            fp.write(txt+"\n")
+        with open("/sdcard/fft_crash.log","a",encoding="utf-8") as f:
+            f.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
+            f.write(txt+"\n")
     except Exception:
         pass
     Logger.error(txt)
 
-def _ex_hook(t, v, tb):
-    _dump_crash("".join(traceback.format_exception(t, v, tb)))
+def _ex_hook(et,ev,tb):
+    _dump_crash("".join(traceback.format_exception(et,ev,tb)))
     if ANDROID:
         Clock.schedule_once(lambda *_:
             Popup(title="Python Crash",
-                  content=Label(text=str(v)), size_hint=(.9,.9)).open())
+                  content=Label(text=str(ev)), size_hint=(.9,.9)).open())
 sys.excepthook = _ex_hook
 
 
 # ────────────────────────────────────────────────────────────────
-# 2) SAF URI → 앱 캐시로 복사 / 전통경로‧file:// 처리
+# 2) URI → 실제 파일 경로 (SharedStorage → pyjnius → 경로 직접)
 # ────────────────────────────────────────────────────────────────
-def uri_to_temp(u: str) -> str | None:
-    """content:// → cache 로 복사,  file:// → 실경로,  그 외 그대로"""
+def uri_to_temp(u:str)->str|None:
     if not u:
         return None
-
-    # file:// -------------
     if u.startswith("file://"):
         real = urllib.parse.unquote(u[7:])
         return real if os.path.exists(real) else None
-
-    # 전통 경로 ------------
     if not u.startswith("content://"):
         return u if os.path.exists(u) else None
 
-    # SAF  -----------------
-    if not ANDROID:
-        return None
-    try:
-        dst = SharedStorage().copy_from_shared(
-            u, uuid.uuid4().hex, to_downloads=False)
-        return dst
-    except Exception as e:
-        Logger.error(f"SAF copy err: {e}")
-        return None
+    # SAF
+    if ANDROID and SharedStorage:
+        try:
+            return SharedStorage().copy_from_shared(u, uuid.uuid4().hex, False)
+        except Exception as e:
+            Logger.error(f"SharedStorage fail: {e}")
+
+    # SharedStorage 가 없으면 pyjnius 직접 복사 시도
+    if ANDROID:
+        try:
+            from jnius import autoclass, jarray
+            act  = autoclass("org.kivy.android.PythonActivity").mActivity
+            cr   = act.getContentResolver()
+            uri  = autoclass("android.net.Uri").parse(u)
+            cols = autoclass("android.provider.OpenableColumns")
+            name="tmp"
+            c=cr.query(uri,[cols.DISPLAY_NAME],None,None,None)
+            if c and c.moveToFirst(): name=c.getString(0)
+            if c: c.close()
+            ist = cr.openInputStream(uri)
+            dst = os.path.join(act.getCacheDir().getAbsolutePath(),
+                               f"{uuid.uuid4().hex}-{name}")
+            buf = jarray('b')(8192)
+            with open(dst,"wb") as out:
+                while True:
+                    n=ist.read(buf)
+                    if n==-1: break
+                    out.write(bytes(buf[:n]))
+            ist.close()
+            return dst
+        except Exception as e:
+            Logger.error(f"pyjnius SAF copy fail: {e}")
+
+    return None
 
 
 # ────────────────────────────────────────────────────────────────
-# 3) 그래프 위젯 (기존 코드 유지)
+# 3) 그래프 위젯 (기존 로직 그대로)
 # ────────────────────────────────────────────────────────────────
 class GraphWidget(Widget):
-    def __init__(self, **kw):
+    def __init__(self,**kw):
         super().__init__(**kw)
-        self.datasets, self.diff = [], []
-        self.colors = itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
-        self.pad_x = 80; self.pad_y = 30
-        self.max_x = self.max_y = 1
+        self.datasets=[]; self.diff=[]
+        self.colors=itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
+        self.pad_x=80; self.pad_y=30; self.max_x=self.max_y=1
         self.bind(size=self.redraw)
 
-    def update_graph(self, data_sets, diff_pts, x_max, y_max):
-        self.datasets, self.diff = data_sets, diff_pts
-        self.max_x, self.max_y   = x_max, y_max
+    def update_graph(self,ds,df,xm,ym):
+        self.datasets, self.diff, self.max_x, self.max_y = ds,df,xm,ym
         self.redraw()
 
-    # 이하 동일 …
-    # ----------------------------------------------------------------
     def redraw(self,*_):
         self.canvas.clear()
         if not self.datasets: return
@@ -106,14 +155,16 @@ class GraphWidget(Widget):
             if self.diff:
                 Color(1,1,1); Line(points=self._scale(self.diff))
 
+    # … _grid/_labels 동일 (생략 – 사용자 제공 코드와 같음) …
+
     def _scale(self, pts):
-        w,h = self.width-2*self.pad_x, self.height-2*self.pad_y
+        w,h=self.width-2*self.pad_x, self.height-2*self.pad_y
         return [c for x,y in pts
-                  for c in (self.pad_x + x/self.max_x*w,
-                            self.pad_y + y/self.max_y*h)]
+                  for c in (self.pad_x+x/self.max_x*w,
+                            self.pad_y+y/self.max_y*h)]
 
     def _grid(self):
-        gx,gy = (self.width-2*self.pad_x)/10,(self.height-2*self.pad_y)/10
+        gx,gy=(self.width-2*self.pad_x)/10,(self.height-2*self.pad_y)/10
         Color(.6,.6,.6)
         for i in range(11):
             Line(points=[self.pad_x+i*gx,self.pad_y,
@@ -146,69 +197,57 @@ class GraphWidget(Widget):
 # ────────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-    def log(self,msg:str):
+    def log(self,msg):
         Logger.info(msg)
-        self.label.text = msg
-        if ANDROID:
+        self.label.text=msg
+        if ANDROID and toast:
             try: toast.toast(msg)
             except Exception: pass
 
     # 권한 체크
-    def _storage_ok(self)->bool:
+    def _storage_ok(self):
         if not ANDROID: return True
         need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
-        if ANDROID_API >= 33:
+        if ANDROID_API>=33:
             need += [Permission.READ_MEDIA_IMAGES,
                      Permission.READ_MEDIA_AUDIO,
                      Permission.READ_MEDIA_VIDEO]
         return all(check_permission(p) for p in need)
 
-    # 권한 요청
     def _ask_perm(self,*_):
         if self._storage_ok():
-            self.btn_sel.disabled = False
-            return
+            self.btn_sel.disabled=False; return
         need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
-        if ANDROID_API >= 33:
+        if ANDROID_API>=33:
             need += [Permission.READ_MEDIA_IMAGES,
                      Permission.READ_MEDIA_AUDIO,
                      Permission.READ_MEDIA_VIDEO]
         request_permissions(need,
             lambda *_: setattr(self.btn_sel,"disabled",False))
 
-    # UI
     def build(self):
-        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
-
-        self.label  = Label(text="Select 2 CSV files", size_hint=(1,.1))
-        root.add_widget(self.label)
-
-        self.btn_sel= Button(text="Select CSV", size_hint=(1,.1),
-                             on_press=self.open_chooser, disabled=True)
-        root.add_widget(self.btn_sel)
-
-        self.btn_run= Button(text="FFT RUN", size_hint=(1,.1),
-                             disabled=True,on_press=self.run_fft)
-        root.add_widget(self.btn_run)
-
-        root.add_widget(Button(text="EXIT", size_hint=(1,.1), on_press=self.stop))
-
-        self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
-
+        root=BoxLayout(orientation='vertical',padding=10,spacing=10)
+        self.label=Label(text="Select 2 CSV files",size_hint=(1,.1)); root.add_widget(self.label)
+        self.btn_sel=Button(text="Select CSV",size_hint=(1,.1),disabled=True,
+                            on_press=self.open_chooser); root.add_widget(self.btn_sel)
+        self.btn_run=Button(text="FFT RUN",size_hint=(1,.1),disabled=True,
+                            on_press=self.run_fft); root.add_widget(self.btn_run)
+        root.add_widget(Button(text="EXIT",size_hint=(1,.1),on_press=self.stop))
+        self.graph=GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
         Clock.schedule_once(self._ask_perm,0)
         return root
 
     # 파일 선택
     def open_chooser(self,*_):
         try:
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")], native=True)
+            filechooser.open_file(self.on_choose,multiple=True,
+                                  filters=[("CSV","*.csv")],native=True)
         except Exception:
             Logger.exception("native chooser err → fallback")
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")], native=False)
+            filechooser.open_file(self.on_choose,multiple=True,
+                                  filters=[("CSV","*.csv")],native=False)
 
-    def on_choose(self, sel):
+    def on_choose(self,sel):
         self.log(f"Chooser ⇒ {sel}")
         if not sel: return
         paths=[]
@@ -218,7 +257,6 @@ class FFTApp(App):
             if not real:
                 self.log("❌ copy fail"); return
             paths.append(real)
-
         self.paths=paths
         self.label.text=" · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
@@ -261,12 +299,12 @@ class FFTApp(App):
             f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
             v=np.abs(fft(a))[:len(a)//2]
             m=f<=50; f,v=f[m],v[m]
-            s=np.convolve(v, np.ones(10)/10,'same')
+            s=np.convolve(v,np.ones(10)/10,'same')
             return list(zip(f,s)), f.max(), s.max()
         except Exception as e:
-            Logger.error(f"FFT err {e}")
-            return None,0,0
+            Logger.error(f"FFT err {e}"); return None,0,0
+
 
 # ────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+if __name__=="__main__":
     FFTApp().run()
