@@ -53,7 +53,7 @@ android.logcat_filters      = *:S python:D
 
 # ── python-for-android 설정 ──────────────────────────────────────────────────
 p4a.bootstrap               = sdl2
-p4a.extra_args = --service androidstorage
+#p4a.extra_args = --service androidstorage
 
 
 #p4a.branch = stable
