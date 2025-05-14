@@ -1,134 +1,91 @@
 """
-FFT CSV Viewer – SAF 안정 버전 (2025-05)
+FFT CSV Viewer  –  안정화 패치:  native=False → native=True Fallback
 """
-# ────────────────────────────────────────────────────────────────
-# 0) Imports & Android 환경 판별
-# ────────────────────────────────────────────────────────────────
+
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
 from numpy.fft import fft
-
-from kivy.app    import App
-from kivy.clock  import Clock
+from kivy.app import App
+from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button   import Button
-from kivy.uix.label    import Label
-from kivy.uix.popup    import Popup
-from kivy.uix.widget   import Widget
-from kivy.graphics     import Line, Color
-from kivy.utils        import platform
-from plyer             import filechooser
+from kivy.uix.button  import Button
+from kivy.uix.label   import Label
+from kivy.uix.popup   import Popup
+from kivy.uix.widget  import Widget
+from kivy.graphics    import Line, Color
+from kivy.utils       import platform
+from plyer import filechooser
+# ←  toast 는 기기에 없을 수도 있으니 optional import
+try:
+    from plyer import toast
+except Exception:
+    toast = None
 
-# ── Android 여부 및 선택 적용 모듈 ───────────────────────────────────────
+# -------------------- Android modules (optional) -------------------------
 ANDROID = platform == "android"
-toast   = None
 SharedStorage = None
 Permission = check_permission = request_permissions = None
 ANDROID_API = 0
-
 if ANDROID:
-    # ① toast 는 옵션
-    try:
-        from plyer import toast
-    except Exception:
-        toast = None
-
-    # ② androidstorage4kivy (있으면 편함, 없어도 동작)
     try:
         from androidstorage4kivy import SharedStorage
-    except ModuleNotFoundError:
+    except Exception:
         SharedStorage = None
-
-    # ③ 권한 모듈
     try:
         from android.permissions import (
-            check_permission, request_permissions, Permission
-        )
-    except Exception:  # recipe 누락 대비
+            check_permission, request_permissions, Permission)
+    except Exception:
+        # 권한 모듈이 없다면 ‘허용되어 있다’고 가정
         check_permission = lambda *_: True
         request_permissions = lambda *_: None
-        class _P: READ_EXTERNAL_STORAGE=WRITE_EXTERNAL_STORAGE = \
-                  READ_MEDIA_IMAGES=READ_MEDIA_AUDIO=READ_MEDIA_VIDEO = ""
+        class _P:          # 빈 Permission 더미
+            READ_EXTERNAL_STORAGE=WRITE_EXTERNAL_STORAGE=""
+            READ_MEDIA_IMAGES=READ_MEDIA_AUDIO=READ_MEDIA_VIDEO=""
         Permission = _P
-
-    # ④ API 레벨 – pyjnius 없이도 시도
     try:
         from jnius import autoclass
         ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
     except Exception:
-        # pyjnius 미 탑재(간혹 그렇습니다): 안 써도 치명적이지 않으니 0 그대로
-        pass
+        ANDROID_API = 0
+else:
+    toast = None
+# ------------------------------------------------------------------------
 
-# ────────────────────────────────────────────────────────────────
-# 1) 전역 예외 → /sdcard/fft_crash.log
-# ────────────────────────────────────────────────────────────────
-def _dump_crash(txt:str):
+def _dump_crash(msg:str):
     try:
         with open("/sdcard/fft_crash.log","a",encoding="utf-8") as f:
             f.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
-            f.write(txt+"\n")
+            f.write(msg+"\n")
     except Exception:
         pass
-    Logger.error(txt)
+    Logger.error(msg)
 
-def _ex_hook(et,ev,tb):
+def _ex(et,ev,tb):
     _dump_crash("".join(traceback.format_exception(et,ev,tb)))
     if ANDROID:
         Clock.schedule_once(lambda *_:
             Popup(title="Python Crash",
                   content=Label(text=str(ev)), size_hint=(.9,.9)).open())
-sys.excepthook = _ex_hook
+sys.excepthook = _ex
 
-
-# ────────────────────────────────────────────────────────────────
-# 2) URI → 실제 파일 경로 (SharedStorage → pyjnius → 경로 직접)
-# ────────────────────────────────────────────────────────────────
-def uri_to_temp(u:str)->str|None:
-    if not u:
-        return None
+# -------------------- SAF URI → 캐시 --------------------------------------
+def uri_to_file(u:str)->str|None:
+    if not u: return None
     if u.startswith("file://"):
         real = urllib.parse.unquote(u[7:])
         return real if os.path.exists(real) else None
     if not u.startswith("content://"):
         return u if os.path.exists(u) else None
-
     # SAF
     if ANDROID and SharedStorage:
         try:
-            return SharedStorage().copy_from_shared(u, uuid.uuid4().hex, False)
+            return SharedStorage().copy_from_shared(
+                u, uuid.uuid4().hex, to_downloads=False)
         except Exception as e:
             Logger.error(f"SharedStorage fail: {e}")
-
-    # SharedStorage 가 없으면 pyjnius 직접 복사 시도
-    if ANDROID:
-        try:
-            from jnius import autoclass, jarray
-            act  = autoclass("org.kivy.android.PythonActivity").mActivity
-            cr   = act.getContentResolver()
-            uri  = autoclass("android.net.Uri").parse(u)
-            cols = autoclass("android.provider.OpenableColumns")
-            name="tmp"
-            c=cr.query(uri,[cols.DISPLAY_NAME],None,None,None)
-            if c and c.moveToFirst(): name=c.getString(0)
-            if c: c.close()
-            ist = cr.openInputStream(uri)
-            dst = os.path.join(act.getCacheDir().getAbsolutePath(),
-                               f"{uuid.uuid4().hex}-{name}")
-            buf = jarray('b')(8192)
-            with open(dst,"wb") as out:
-                while True:
-                    n=ist.read(buf)
-                    if n==-1: break
-                    out.write(bytes(buf[:n]))
-            ist.close()
-            return dst
-        except Exception as e:
-            Logger.error(f"pyjnius SAF copy fail: {e}")
-
+    # pyjnius 백업 경로 (생략 가능)
     return None
-
-
 # ────────────────────────────────────────────────────────────────
 # 3) 그래프 위젯 (기존 로직 그대로)
 # ────────────────────────────────────────────────────────────────
@@ -197,14 +154,14 @@ class GraphWidget(Widget):
 # ────────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-    def log(self,msg):
+    def log(self,msg:str):
         Logger.info(msg)
-        self.label.text=msg
-        if ANDROID and toast:
+        self.label.text = msg
+        if toast:
             try: toast.toast(msg)
             except Exception: pass
 
-    # 권한 체크
+    # 권한
     def _storage_ok(self):
         if not ANDROID: return True
         need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
@@ -225,35 +182,45 @@ class FFTApp(App):
         request_permissions(need,
             lambda *_: setattr(self.btn_sel,"disabled",False))
 
+    # ---------- UI ----------
     def build(self):
-        root=BoxLayout(orientation='vertical',padding=10,spacing=10)
-        self.label=Label(text="Select 2 CSV files",size_hint=(1,.1)); root.add_widget(self.label)
-        self.btn_sel=Button(text="Select CSV",size_hint=(1,.1),disabled=True,
+        root=BoxLayout(orientation="vertical",padding=10,spacing=10)
+        self.label=Label(text="Select CSV",size_hint=(1,.1)); root.add_widget(self.label)
+        self.btn_sel=Button(text="Select CSV",disabled=True,size_hint=(1,.1),
                             on_press=self.open_chooser); root.add_widget(self.btn_sel)
-        self.btn_run=Button(text="FFT RUN",size_hint=(1,.1),disabled=True,
+        self.btn_run=Button(text="FFT RUN",disabled=True,size_hint=(1,.1),
                             on_press=self.run_fft); root.add_widget(self.btn_run)
         root.add_widget(Button(text="EXIT",size_hint=(1,.1),on_press=self.stop))
         self.graph=GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
         Clock.schedule_once(self._ask_perm,0)
         return root
 
-    # 파일 선택
+    # ---------- 파일 선택 ----------
     def open_chooser(self,*_):
+        """1차: native=False,  실패 시 native=True"""
         try:
-            filechooser.open_file(self.on_choose,multiple=True,
-                                  filters=[("CSV","*.csv")],native=True)
+            filechooser.open_file(self.on_choose,
+                                  multiple=True,
+                                  filters=[("CSV","*.csv")],
+                                  native=False)          # ⚑ 먼저 전통 방식
         except Exception:
-            Logger.exception("native chooser err → fallback")
-            filechooser.open_file(self.on_choose,multiple=True,
-                                  filters=[("CSV","*.csv")],native=False)
+            Logger.exception("legacy chooser failed")
+            try:
+                filechooser.open_file(self.on_choose,
+                                      multiple=True,
+                                      filters=[("CSV","*.csv")],
+                                      native=True)       # ⚑ SAF fallback
+            except Exception:
+                Logger.exception("SAF chooser failed")
+                self.log("파일 선택기를 열 수 없습니다")
 
     def on_choose(self,sel):
-        self.log(f"Chooser ⇒ {sel}")
+        self.log(f"{sel}")
         if not sel: return
         paths=[]
         for raw in sel[:2]:
-            real=uri_to_temp(raw)
-            Logger.info(f"COPY {raw} → {real}")
+            real = uri_to_file(raw)
+            Logger.info(f"copy {raw} → {real}")
             if not real:
                 self.log("❌ copy fail"); return
             paths.append(real)
@@ -261,7 +228,7 @@ class FFTApp(App):
         self.label.text=" · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
 
-    # FFT
+    # ---------- FFT ----------
     def run_fft(self,*_):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg,daemon=True).start()
@@ -292,8 +259,8 @@ class FFTApp(App):
             t,a=[],[]
             with open(path) as f:
                 for r in csv.reader(f):
-                    try: t.append(float(r[0])); a.append(float(r[1]))
-                    except: pass
+                    try:t.append(float(r[0]));a.append(float(r[1]))
+                    except:pass
             if len(a)<2: raise ValueError
             dt=(t[-1]-t[0])/len(a)
             f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
@@ -302,8 +269,8 @@ class FFTApp(App):
             s=np.convolve(v,np.ones(10)/10,'same')
             return list(zip(f,s)), f.max(), s.max()
         except Exception as e:
-            Logger.error(f"FFT err {e}"); return None,0,0
-
+            Logger.error(f"FFT err {e}")
+            return None,0,0
 
 # ────────────────────────────────────────────────────────────────
 if __name__=="__main__":
