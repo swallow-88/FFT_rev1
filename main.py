@@ -20,20 +20,16 @@ from kivy.uix.filechooser import FileChooserIconView
 from kivy.uix.popup import Popup
 
 
-# ←  toast 는 기기에 없을 수도 있으니 optional import
-try:
-    from plyer import toast
-    if ANDROID:
-    from androidstorage4kivy import SharedStorage
-except Exception:
-    toast = None
-
 # -------------------- Android modules (optional) -------------------------
 ANDROID = platform == "android"
 SharedStorage = None
 Permission = check_permission = request_permissions = None
 ANDROID_API = 0
 if ANDROID:
+    try:                        # toast
+        from plyer import toast
+    except Exception:           # 기기에 따라 없을 수도 있음
+        toast = None     
     try:
         from androidstorage4kivy import SharedStorage
     except Exception:
@@ -175,7 +171,11 @@ class FFTApp(App):
             need += [Permission.READ_MEDIA_IMAGES,
                      Permission.READ_MEDIA_AUDIO,
                      Permission.READ_MEDIA_VIDEO]
-        return all(check_permission(p) for p in need)
+        ok = all(check_permission(p) for p in need)
+        if not ok:
+            request_permissions(need, lambda *_: None)
+        return ok
+
 
     def _ask_perm(self,*_):
         if self._storage_ok():
@@ -230,14 +230,15 @@ class FFTApp(App):
             return
         except Exception as e:
             self.log(f"plyer native=True err: {e}")
-    
-        # ③ plyer native=False ---------------------------
+
         try:
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV", "*.csv")], native=False)
+            filechooser.open_file(self.on_pick, multiple=True,
+                                  filters=None, native=True)
             return
-        except Exception as e:
-            self.log(f"plyer native=False err: {e}")
+        except Exception:
+            Logger.exception("SAF chooser fail")
+        
+    
     
         # ▣▣▣ ④ 최종 Fallback – Kivy FileChooser ▣▣▣
         chooser = FileChooserIconView(path="/storage/emulated/0",
