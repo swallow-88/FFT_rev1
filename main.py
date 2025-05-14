@@ -22,6 +22,7 @@ from kivy.uix.popup import Popup
 
 # -------------------- Android modules (optional) -------------------------
 ANDROID = platform == "android"
+toast = None
 SharedStorage = None
 Permission = check_permission = request_permissions = None
 ANDROID_API = 0
@@ -178,15 +179,28 @@ class FFTApp(App):
 
 
     def _ask_perm(self,*_):
-        if self._storage_ok():
+        if not ANDROID:          # 데스크탑
             self.btn_sel.disabled=False; return
+
         need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
         if ANDROID_API>=33:
-            need += [Permission.READ_MEDIA_IMAGES,
-                     Permission.READ_MEDIA_AUDIO,
-                     Permission.READ_MEDIA_VIDEO]
-        request_permissions(need,
-            lambda *_: setattr(self.btn_sel,"disabled",False))
+            need+=[Permission.READ_MEDIA_IMAGES,
+                   Permission.READ_MEDIA_AUDIO,
+                   Permission.READ_MEDIA_VIDEO]
+
+        if all(check_permission(p) for p in need):
+            self.btn_sel.disabled=False
+            return
+
+        # callback 안에서 버튼 해제
+        def _cb(perms, grants):
+            if any(grants):   # 최소 하나라도 OK 면 버튼 활성
+                self.btn_sel.disabled=False
+            else:
+                self.log("권한 거부 – 파일을 열 수 없습니다")
+
+        request_permissions(need, _cb)
+
 
     # ---------- UI ----------
     def build(self):
@@ -205,53 +219,30 @@ class FFTApp(App):
     # open_chooser() 부분만 교체
     def open_chooser(self, *_):
     # ① SharedStorage SAF ----------------------------
-        if ANDROID:
+           # 1) SharedStorage SAF (Android 11+) -------------
+        if ANDROID and SharedStorage:
             try:
-                # MIME 'text/*' :  csv, txt, json …
-                SharedStorage().open_file(
-                    callback=self.on_choose,
-                    multiple=True,
-                    mime_type="text/*")
-            except Exception as e:
-                Logger.exception("SAF picker failed")
-                self.log(f"파일 선택기를 열 수 없습니다: {e}")
-        else:        # PC‧Mac 테스트용
-            from plyer import filechooser
-            filechooser.open_file(self.on_choose,
-                                  multiple=True,
-                                  filters=[("CSV","*.csv")])
+                SharedStorage().open_file(self.on_pick, multiple=True,
+                                          mime_type="text/*")
+                return
+            except Exception:
+                Logger.exception("SharedStorage picker fail")
 
-        
-
-        # ② plyer native=True ----------------------------
-        try:
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV", "*.csv")], native=True)
-            return
-        except Exception as e:
-            self.log(f"plyer native=True err: {e}")
-
+        # 2) plyer legacy chooser (native=False) ----------
         try:
             filechooser.open_file(self.on_pick, multiple=True,
-                                  filters=None, native=True)
+                                  filters=[("CSV","*.csv")], native=False)
             return
         except Exception:
-            Logger.exception("SAF chooser fail")
-        
-    
-    
-        # ▣▣▣ ④ 최종 Fallback – Kivy FileChooser ▣▣▣
-        chooser = FileChooserIconView(path="/storage/emulated/0",
-                                      filters=["*.csv"])
-        pop = Popup(title="Pick CSV", content=chooser,
-                    size_hint=(.9, .9))
-    
-        def _file_done(instance, selection):
-            pop.dismiss()
-            self.on_choose(selection)
-        chooser.bind(on_submit=lambda inst,sel,*__: _file_done(inst, sel))
+            Logger.exception("legacy chooser fail")
+
+        # 3) Fallback – Kivy FileChooser ------------------
+        chooser = FileChooserIconView(path="/storage/emulated/0", filters=["*.csv"])
+        pop = Popup(title="Pick CSV", content=chooser, size_hint=(.9,.9))
+        chooser.bind(on_submit=lambda inst,sel,*__: (pop.dismiss(), self.on_pick(sel)))
         pop.open()
-        
+
+          
     def on_choose(self,sel):
         self.log(f"{sel}")
         if not sel: return
