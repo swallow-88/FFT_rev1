@@ -222,15 +222,14 @@ class FFTApp(App):
            # 1) SharedStorage SAF (Android 11+) -------------
         if ANDROID and SharedStorage:
             try:
-                SharedStorage().open_file(self.on_pick, multiple=True,
-                                          mime_type="*/*")
+                SharedStorage().open_file(self.on_choose, multiple=True)
                 return
             except Exception:
                 Logger.exception("SharedStorage picker fail")
 
         # 2) plyer legacy chooser (native=False) ----------
         try:
-            filechooser.open_file(self.on_pick, multiple=True,
+            filechooser.open_file(self.on_choose, multiple=True,
                                   filters=[("CSV","*.csv")], native=False)
             return
         except Exception:
