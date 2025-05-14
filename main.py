@@ -197,22 +197,31 @@ class FFTApp(App):
 
     # ---------- 파일 선택 ----------
     def open_chooser(self,*_):
-        """1차: native=False,  실패 시 native=True"""
-        try:
-            filechooser.open_file(self.on_choose,
-                                  multiple=True,
-                                  filters=[("CSV","*.csv")],
-                                  native=False)          # ⚑ 먼저 전통 방식
-        except Exception:
-            Logger.exception("legacy chooser failed")
+        # 1) SharedStorage SAF 피커 (가장 안정적)
+        if ANDROID and SharedStorage:
             try:
-                filechooser.open_file(self.on_choose,
-                                      multiple=True,
-                                      filters=[("CSV","*.csv")],
-                                      native=True)       # ⚑ SAF fallback
-            except Exception:
-                Logger.exception("SAF chooser failed")
-                self.log("파일 선택기를 열 수 없습니다")
+                SharedStorage().open_file(callback=self.on_choose,
+                                          multiple=True,
+                                          mime_type="text/*")
+                return
+            except Exception as e:
+                Logger.error(f"SharedStorage picker err: {e}")
+
+        # 2) plyer native=True
+        try:
+            filechooser.open_file(self.on_choose,multiple=True,
+                                  filters=[("CSV","*.csv")],native=True)
+            return
+        except Exception as e:
+            Logger.error(f"plyer native=True err: {e}")
+
+        # 3) plyer native=False
+        try:
+            filechooser.open_file(self.on_choose,multiple=True,
+                                  filters=[("CSV","*.csv")],native=False)
+        except Exception as e:
+            Logger.error(f"plyer native=False err: {e}")
+            self.log("파일 선택기를 열 수 없습니다")
 
     def on_choose(self,sel):
         self.log(f"{sel}")
