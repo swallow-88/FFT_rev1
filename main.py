@@ -218,29 +218,51 @@ class FFTApp(App):
     # ---------- 파일 선택 ----------
     # open_chooser() 부분만 교체
     def open_chooser(self, *_):
-    # ① SharedStorage SAF ----------------------------
-           # 1) SharedStorage SAF (Android 11+) -------------
-        if ANDROID and SharedStorage:
-            try:
-                SharedStorage().open_file(self.on_choose, multiple=True)
-                return
-            except Exception:
-                Logger.exception("SharedStorage picker fail")
-
-        # 2) plyer legacy chooser (native=False) ----------
+        """
+        1) Android 11+ 에서 '모든 파일' 접근이 꺼져 있으면
+           설정 화면으로 보내서 켜도록 안내
+        2) 그 뒤 경로 기반 chooser(native=False) 로 열기
+        """
+        if ANDROID:
+            # Android 11+ : MANAGE_EXTERNAL_STORAGE 체크
+            import jnius, android
+            Env   = jnius.autoclass("android.os.Environment")
+            if not Env.isExternalStorageManager():
+                # 안내 모달
+                mv = ModalView(size_hint=(.8,.3))
+                box=BoxLayout(orientation='vertical',spacing=10,padding=10)
+                box.add_widget(Label(text="⚠️  CSV 파일을 보려면\n"
+                                          "앱에 '모든 파일' 접근을 허용해야 합니다.",
+                                      halign="center"))
+                box.add_widget(Button(text="권한 설정으로 이동",
+                                      size_hint=(1,.4),
+                                      on_press=lambda *_: (
+                                          mv.dismiss(),
+                                          self._goto_allfiles_permission()
+                                      )))
+                mv.add_widget(box); mv.open(); return
+    
+        # 권한 OK → 경로 기반 chooser
         try:
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")], native=False)
-            return
+            filechooser.open_file(self.on_choose,
+                                  multiple=True,
+                                  filters=[("CSV","*.csv")],
+                                  native=False,          # ★ 중요
+                                  path="/storage/emulated/0/Download")  # 시작 폴더
         except Exception:
             Logger.exception("legacy chooser fail")
+            self.log("파일 선택기를 열 수 없습니다")
 
-        # 3) Fallback – Kivy FileChooser ------------------
-        chooser = FileChooserIconView(path="/storage/emulated/0", filters=["*.csv"])
-        pop = Popup(title="Pick CSV", content=chooser, size_hint=(.9,.9))
-        chooser.bind(on_submit=lambda inst,sel,*__: (pop.dismiss(), self.on_pick(sel)))
-        pop.open()
-
+    def _goto_allfiles_permission(self):
+        import jnius
+        Intent   = jnius.autoclass("android.content.Intent")
+        Settings = jnius.autoclass("android.provider.Settings")
+        Uri      = jnius.autoclass("android.net.Uri")
+        act      = jnius.autoclass("org.kivy.android.PythonActivity").mActivity
+        uri = Uri.fromParts("package", act.getPackageName(), None)
+        intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri)
+        act.startActivity(intent)
+    # ------------------------------
           
     def on_choose(self,sel):
         self.log(f"{sel}")
