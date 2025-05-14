@@ -16,6 +16,10 @@ from kivy.uix.widget  import Widget
 from kivy.graphics    import Line, Color
 from kivy.utils       import platform
 from plyer import filechooser
+from kivy.uix.filechooser import FileChooserIconView
+from kivy.uix.popup import Popup
+
+
 # ←  toast 는 기기에 없을 수도 있으니 optional import
 try:
     from plyer import toast
@@ -197,36 +201,46 @@ class FFTApp(App):
 
     # ---------- 파일 선택 ----------
     # open_chooser() 부분만 교체
-    def open_chooser(self,*_):
-        # 1) SharedStorage SAF
-        if ANDROID and SharedStorage:
+    def open_chooser(self, *_):
+    # ① SharedStorage SAF ----------------------------
+        if ANDROID:
             try:
-                SharedStorage().open_file(callback=self.on_choose,
-                                          multiple=True,
-                                          mime_type="text/*")
+                from androidstorage4kivy import SharedStorage
+                SharedStorage().open_file(
+                    callback=self.on_choose,
+                    multiple=True,
+                    mime_type="text/*")
                 return
             except Exception as e:
-                err = f"SharedStorage picker err: {e}"
-                Logger.error(err)
-                self.log(err)                    # ★ 화면·토스트로도 출력
+                self.log(f"SAF picker err: {e}")
     
-        # 2) plyer native=True
+        # ② plyer native=True ----------------------------
         try:
             filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")], native=True)
+                                  filters=[("CSV", "*.csv")], native=True)
             return
         except Exception as e:
-            err = f"plyer native=True err: {e}"
-            Logger.error(err); self.log(err)
+            self.log(f"plyer native=True err: {e}")
     
-        # 3) plyer native=False
+        # ③ plyer native=False ---------------------------
         try:
             filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")], native=False)
+                                  filters=[("CSV", "*.csv")], native=False)
+            return
         except Exception as e:
-            err = f"plyer native=False err: {e}"
-            Logger.error(err); self.log(err)
-            self.log("파일 선택기를 열 수 없습니다")
+            self.log(f"plyer native=False err: {e}")
+    
+        # ▣▣▣ ④ 최종 Fallback – Kivy FileChooser ▣▣▣
+        chooser = FileChooserIconView(path="/storage/emulated/0",
+                                      filters=["*.csv"])
+        pop = Popup(title="Pick CSV", content=chooser,
+                    size_hint=(.9, .9))
+    
+        def _file_done(instance, selection):
+            pop.dismiss()
+            self.on_choose(selection)
+        chooser.bind(on_submit=lambda inst,sel,*__: _file_done(inst, sel))
+        pop.open()
         
     def on_choose(self,sel):
         self.log(f"{sel}")
