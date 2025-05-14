@@ -27,22 +27,17 @@ SharedStorage = None
 Permission = check_permission = request_permissions = None
 ANDROID_API = 0
 if ANDROID:
-    try:                        # toast
-        from plyer import toast
-    except Exception:           # 기기에 따라 없을 수도 있음
-        toast = None     
-    try:
-        from androidstorage4kivy import SharedStorage
-    except Exception:
-        SharedStorage = None
+    try: from plyer import toast
+    except Exception: toast = None
+    try: from androidstorage4kivy import SharedStorage
+    except Exception: SharedStorage = None
     try:
         from android.permissions import (
             check_permission, request_permissions, Permission)
     except Exception:
-        # 권한 모듈이 없다면 ‘허용되어 있다’고 가정
         check_permission = lambda *_: True
         request_permissions = lambda *_: None
-        class _P:          # 빈 Permission 더미
+        class _P:
             READ_EXTERNAL_STORAGE=WRITE_EXTERNAL_STORAGE=""
             READ_MEDIA_IMAGES=READ_MEDIA_AUDIO=READ_MEDIA_VIDEO=""
         Permission = _P
@@ -202,37 +197,35 @@ class FFTApp(App):
         request_permissions(need, _cb)
 
 
-    # ---------- UI ----------
+      # -------- UI --------
     def build(self):
-        root=BoxLayout(orientation="vertical",padding=10,spacing=10)
-        self.label=Label(text="Select CSV",size_hint=(1,.1)); root.add_widget(self.label)
-        self.btn_sel=Button(text="Select CSV",disabled=True,size_hint=(1,.1),
-                            on_press=self.open_chooser); root.add_widget(self.btn_sel)
-        self.btn_run=Button(text="FFT RUN",disabled=True,size_hint=(1,.1),
-                            on_press=self.run_fft); root.add_widget(self.btn_run)
-        root.add_widget(Button(text="EXIT",size_hint=(1,.1),on_press=self.stop))
-        self.graph=GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
-        Clock.schedule_once(self._ask_perm,0)
+        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        self.label   = Label(text="Select 2 CSV files", size_hint=(1,.1))
+        self.btn_sel = Button(text="Select CSV", disabled=True,size_hint=(1,.1),
+                              on_press=self.open_chooser)
+        self.btn_run = Button(text="FFT RUN",   disabled=True,size_hint=(1,.1),
+                              on_press=self.run_fft)
+
+        root.add_widget(self.label)
+        root.add_widget(self.btn_sel)
+        root.add_widget(self.btn_run)
+        root.add_widget(Button(text="EXIT", size_hint=(1,.1), on_press=self.stop))
+        self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
+
+        Clock.schedule_once(self._ask_perm, 0)
         return root
 
-    # ---------- 파일 선택 ----------
-    # open_chooser() 부분만 교체
+    # -------- 파일 선택 ----------
     def open_chooser(self, *_):
-        """
-        1) Android 11+ 에서 '모든 파일' 접근이 꺼져 있으면
-           설정 화면으로 보내서 켜도록 안내
-        2) 그 뒤 경로 기반 chooser(native=False) 로 열기
-        """
+        # ① Android 11+ 모든-파일 접근 안내
         if ANDROID:
-            # Android 11+ : MANAGE_EXTERNAL_STORAGE 체크
-            import jnius, android
-            Env   = jnius.autoclass("android.os.Environment")
+            from jnius import autoclass
+            Env = autoclass("android.os.Environment")
             if not Env.isExternalStorageManager():
-                # 안내 모달
-                mv = ModalView(size_hint=(.8,.3))
-                box=BoxLayout(orientation='vertical',spacing=10,padding=10)
-                box.add_widget(Label(text="⚠️  CSV 파일을 보려면\n"
-                                          "앱에 '모든 파일' 접근을 허용해야 합니다.",
+                mv  = ModalView(size_hint=(.8,.35))
+                box = BoxLayout(orientation='vertical', spacing=10, padding=10)
+                box.add_widget(Label(text="⚠️ CSV 파일을 보려면\n"
+                                          "'모든 파일' 접근을 허용해야 합니다.",
                                       halign="center"))
                 box.add_widget(Button(text="권한 설정으로 이동",
                                       size_hint=(1,.4),
@@ -240,43 +233,42 @@ class FFTApp(App):
                                           mv.dismiss(),
                                           self._goto_allfiles_permission()
                                       )))
-                mv.add_widget(box); mv.open(); return
-    
-        # 권한 OK → 경로 기반 chooser
+                mv.add_widget(box); mv.open()
+                return
+
+        # ② 경로 기반 chooser (native=False)
         try:
-            filechooser.open_file(self.on_choose,
-                                  multiple=True,
+            filechooser.open_file(self.on_choose, multiple=True,
                                   filters=[("CSV","*.csv")],
-                                  native=False,          # ★ 중요
-                                  path="/storage/emulated/0/Download")  # 시작 폴더
+                                  native=False,
+                                  path="/storage/emulated/0/Download")
         except Exception:
             Logger.exception("legacy chooser fail")
             self.log("파일 선택기를 열 수 없습니다")
 
     def _goto_allfiles_permission(self):
-        import jnius
-        Intent   = jnius.autoclass("android.content.Intent")
-        Settings = jnius.autoclass("android.provider.Settings")
-        Uri      = jnius.autoclass("android.net.Uri")
-        act      = jnius.autoclass("org.kivy.android.PythonActivity").mActivity
+        from jnius import autoclass
+        Intent   = autoclass("android.content.Intent")
+        Settings = autoclass("android.provider.Settings")
+        Uri      = autoclass("android.net.Uri")
+        act      = autoclass("org.kivy.android.PythonActivity").mActivity
         uri = Uri.fromParts("package", act.getPackageName(), None)
-        intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri)
-        act.startActivity(intent)
-    # ------------------------------
-          
-    def on_choose(self,sel):
-        self.log(f"{sel}")
+        act.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
+
+    # -------- 선택 결과 처리 ----------
+    def on_choose(self, sel):
+        self.log(str(sel))
         if not sel: return
         paths=[]
         for raw in sel[:2]:
             real = uri_to_file(raw)
-            Logger.info(f"copy {raw} → {real}")
+            Logger.info(f"COPY {raw} → {real}")
             if not real:
                 self.log("❌ copy fail"); return
             paths.append(real)
-        self.paths=paths
-        self.label.text=" · ".join(os.path.basename(p) for p in paths)
-        self.btn_run.disabled=False
+        self.paths = paths
+        self.label.text = " · ".join(os.path.basename(p) for p in paths)
+        self.btn_run.disabled = False
 
     # ---------- FFT ----------
     def run_fft(self,*_):
