@@ -196,8 +196,9 @@ class FFTApp(App):
         return root
 
     # ---------- 파일 선택 ----------
+    # open_chooser() 부분만 교체
     def open_chooser(self,*_):
-        # 1) SharedStorage SAF 피커 (가장 안정적)
+        # 1) SharedStorage SAF
         if ANDROID and SharedStorage:
             try:
                 SharedStorage().open_file(callback=self.on_choose,
@@ -205,24 +206,28 @@ class FFTApp(App):
                                           mime_type="text/*")
                 return
             except Exception as e:
-                Logger.error(f"SharedStorage picker err: {e}")
-
+                err = f"SharedStorage picker err: {e}"
+                Logger.error(err)
+                self.log(err)                    # ★ 화면·토스트로도 출력
+    
         # 2) plyer native=True
         try:
-            filechooser.open_file(self.on_choose,multiple=True,
-                                  filters=[("CSV","*.csv")],native=True)
+            filechooser.open_file(self.on_choose, multiple=True,
+                                  filters=[("CSV","*.csv")], native=True)
             return
         except Exception as e:
-            Logger.error(f"plyer native=True err: {e}")
-
+            err = f"plyer native=True err: {e}"
+            Logger.error(err); self.log(err)
+    
         # 3) plyer native=False
         try:
-            filechooser.open_file(self.on_choose,multiple=True,
-                                  filters=[("CSV","*.csv")],native=False)
+            filechooser.open_file(self.on_choose, multiple=True,
+                                  filters=[("CSV","*.csv")], native=False)
         except Exception as e:
-            Logger.error(f"plyer native=False err: {e}")
+            err = f"plyer native=False err: {e}"
+            Logger.error(err); self.log(err)
             self.log("파일 선택기를 열 수 없습니다")
-
+        
     def on_choose(self,sel):
         self.log(f"{sel}")
         if not sel: return
