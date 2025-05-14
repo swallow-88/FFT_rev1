@@ -23,6 +23,8 @@ from kivy.uix.popup import Popup
 # ←  toast 는 기기에 없을 수도 있으니 optional import
 try:
     from plyer import toast
+    if ANDROID:
+    from androidstorage4kivy import SharedStorage
 except Exception:
     toast = None
 
@@ -205,15 +207,22 @@ class FFTApp(App):
     # ① SharedStorage SAF ----------------------------
         if ANDROID:
             try:
-                from androidstorage4kivy import SharedStorage
+                # MIME 'text/*' :  csv, txt, json …
                 SharedStorage().open_file(
                     callback=self.on_choose,
                     multiple=True,
                     mime_type="text/*")
-                return
             except Exception as e:
-                self.log(f"SAF picker err: {e}")
-    
+                Logger.exception("SAF picker failed")
+                self.log(f"파일 선택기를 열 수 없습니다: {e}")
+        else:        # PC‧Mac 테스트용
+            from plyer import filechooser
+            filechooser.open_file(self.on_choose,
+                                  multiple=True,
+                                  filters=[("CSV","*.csv")])
+
+        
+
         # ② plyer native=True ----------------------------
         try:
             filechooser.open_file(self.on_choose, multiple=True,
