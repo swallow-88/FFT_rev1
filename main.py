@@ -223,7 +223,7 @@ class FFTApp(App):
         if ANDROID and SharedStorage:
             try:
                 SharedStorage().open_file(self.on_pick, multiple=True,
-                                          mime_type="text/*")
+                                          mime_type="*/*")
                 return
             except Exception:
                 Logger.exception("SharedStorage picker fail")
