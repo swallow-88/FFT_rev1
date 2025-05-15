@@ -24,15 +24,16 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy
 
 #androidstorage4kivy@https://github.com/kivy-garden/androidstorage4kivy/archive/master.zip
 
-android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE#,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
+#android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+#,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
 
-#android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
 
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
-android.minapi              = 30 #24
+android.minapi              = 30
 #android.add_manifest_xml = True
 android.archs                = armeabi-v7a,arm64-v8a
 android.ndk = 25.2.9519653
