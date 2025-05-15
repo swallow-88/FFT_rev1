@@ -37,7 +37,7 @@ android.minapi              = 30
 #android.add_manifest_xml = True
 android.archs                = armeabi-v7a,arm64-v8a
 android.ndk = 25.2.9519653
-android.ndk_api             = 24
+android.ndk_api             = 30
 
 # ── Build Tools 버전 고정 ──────────────────────────────────────────────────────
 android.build_tools_version = 33.0.2
