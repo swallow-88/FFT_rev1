@@ -177,8 +177,8 @@ class FFTApp(App):
     def _ask_perm(self,*_):
         if not ANDROID:          # 데스크탑
             self.btn_sel.disabled=False; return
-
-        need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+            
+        need=[Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE, Permission.MANAGE_EXTERNAL_STORAGE]
         if ANDROID_API>=33:
             need+=[Permission.READ_MEDIA_IMAGES,
                    Permission.READ_MEDIA_AUDIO,
@@ -189,22 +189,27 @@ class FFTApp(App):
             return
 
         # callback 안에서 버튼 해제
-        def _cb(perms, grants):
-            if any(grants):   # 최소 하나라도 OK 면 버튼 활성
-                self.btn_sel.disabled=False
-            else:
-                self.log("권한 거부 – 파일을 열 수 없습니다")
 
-        request_permissions(need, _cb)
+        def _cb(perms, grants):
+            # ② 권한이 하나라도 OK 면 Select CSV 를 활성화
+            allowed = any(grants)
+            self.btn_sel.disabled = not allowed
+            if not allowed:
+                self.log("❌ 저장소 권한이 거부되었습니다")
+    
+        if all(check_permission(p) for p in need):
+            self.btn_sel.disabled = False
+        else:
+            request_permissions(need, _cb)
 
 
       # -------- UI --------
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
         self.label   = Label(text="Select 2 CSV files", size_hint=(1,.1))
-        self.btn_sel = Button(text="Select CSV", disabled=True,size_hint=(1,.1),
+        self.btn_sel = Button(text="Select CSV", disabled=False,size_hint=(1,.1),
                               on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",   disabled=True,size_hint=(1,.1),
+        self.btn_run = Button(text="FFT RUN",   disabled=False,size_hint=(1,.1),
                               on_press=self.run_fft)
 
         root.add_widget(self.label)
@@ -274,15 +279,19 @@ class FFTApp(App):
 
     # -------- 선택 결과 처리 ----------
     def on_choose(self, sel):
-        self.log(str(sel))
-        if not sel: return
-        paths=[]
+        Logger.info(f"선택 결과: {sel}")
+        if not sel:
+            self.log("선택이 취소됐습니다"); return
+    
+        paths = []
         for raw in sel[:2]:
             real = uri_to_file(raw)
-            Logger.info(f"COPY {raw} → {real}")
+            Logger.info(f"{raw} → {real}")
             if not real:
-                self.log("❌ copy fail"); return
+                self.log("❌ 복사 실패"); return
             paths.append(real)
+    
+        # ③ 경로 확보 성공 → RUN 버튼 활성화
         self.paths = paths
         self.label.text = " · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled = False
