@@ -29,10 +29,11 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy
 android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 
 
+
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
 android.minapi              = 30 #24
-android.add_manifest_xml = True
+#android.add_manifest_xml = True
 android.archs                = armeabi-v7a,arm64-v8a
 android.ndk = 25.2.9519653
 android.ndk_api             = 24
