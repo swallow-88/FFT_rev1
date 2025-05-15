@@ -18,6 +18,7 @@ from kivy.utils       import platform
 from plyer import filechooser
 from kivy.uix.filechooser import FileChooserIconView
 from kivy.uix.popup import Popup
+from kivy.uix.modalview import ModalView     # ← 파일 맨 위에 이미 들어 있어야 합니다
 
 
 # -------------------- Android modules (optional) -------------------------
@@ -217,35 +218,51 @@ class FFTApp(App):
 
     # -------- 파일 선택 ----------
     def open_chooser(self, *_):
-        # ① Android 11+ 모든-파일 접근 안내
-        if ANDROID:
-            from jnius import autoclass
-            Env = autoclass("android.os.Environment")
-            if not Env.isExternalStorageManager():
-                mv  = ModalView(size_hint=(.8,.35))
-                box = BoxLayout(orientation='vertical', spacing=10, padding=10)
-                box.add_widget(Label(text="⚠️ CSV 파일을 보려면\n"
-                                          "'모든 파일' 접근을 허용해야 합니다.",
-                                      halign="center"))
-                box.add_widget(Button(text="권한 설정으로 이동",
-                                      size_hint=(1,.4),
-                                      on_press=lambda *_: (
-                                          mv.dismiss(),
-                                          self._goto_allfiles_permission()
-                                      )))
-                mv.add_widget(box); mv.open()
-                return
+        """
+        - Android 11(API 30)+ 에서 '모든 파일' 접근 OFF → 설정화면 안내
+        - 그 외 또는 OFF 체크 실패 시 바로 경로 기반 chooser(native=False) 실행
+        모든 예외는 로깅만 하고 앱을 종료하지 않는다.
+        """
+        # ① Android 11+ '모든-파일' 접근 여부 확인
+        if ANDROID and ANDROID_API >= 30:
+            try:
+                from jnius import autoclass
+                Env = autoclass("android.os.Environment")
+                if not Env.isExternalStorageManager():
+                    # 안내 모달
+                    mv  = ModalView(size_hint=(.8,.35))
+                    box = BoxLayout(orientation='vertical',
+                                    spacing=10, padding=10)
+                    box.add_widget(Label(
+                        text="⚠️  CSV 파일을 보려면\n"
+                             "'모든 파일' 접근 권한이 필요합니다.",
+                        halign="center"))
+                    box.add_widget(Button(
+                        text="권한 설정으로 이동",
+                        size_hint=(1,.4),
+                        on_press=lambda *_: (
+                            mv.dismiss(),
+                            self._goto_allfiles_permission()
+                        )))
+                    mv.add_widget(box); mv.open()
+                    return          # 설정 화면으로 보내고 함수 종료
+            except Exception:
+                Logger.exception("ALL-FILES check failed (무시하고 진행)")
 
-        # ② 경로 기반 chooser (native=False)
+        # ② 권한/체크 문제 없이 여기로 오면 바로 chooser 호출
         try:
-            filechooser.open_file(self.on_choose, multiple=True,
-                                  filters=[("CSV","*.csv")],
-                                  native=False,
-                                  path="/storage/emulated/0/Download")
+            filechooser.open_file(
+                self.on_choose,
+                multiple=True,
+                filters=[("CSV", "*.csv")],
+                native=False,                       # SAF 대신 경로 기반
+                path="/storage/emulated/0/Download" # 첫 폴더
+            )
         except Exception:
-            Logger.exception("legacy chooser fail")
+            Logger.exception("filechooser 실패")
             self.log("파일 선택기를 열 수 없습니다")
 
+    
     def _goto_allfiles_permission(self):
         from jnius import autoclass
         Intent   = autoclass("android.content.Intent")
