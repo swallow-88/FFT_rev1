@@ -152,19 +152,49 @@ class GraphWidget(Widget):
                                       size_hint=(None,None), size=(60,20),
                                       pos=(x,y)))
 
-    def redraw(self,*_):
+    def redraw(self, *_):
+        # 0) 캔버스 ‧ 예전 피크 라벨 초기화
         self.canvas.clear()
+        for w in list(self.children):
+            if getattr(w, "_peak", False):        # 이전에 그려둔 ▲ 라벨
+                self.remove_widget(w)
+
         if not self.datasets:
             return
+
+        peaks = []          # [(freq_x, amp_y), …]  파일별 최대점
+
         with self.canvas:
-            self._grid(); self._labels()
-            # ✔︎ 3) 고정 색상 + 굵기
+            self._grid()
+            self._labels()
+
+            # 1) 데이터선 + 최고점 추출 ---------------------------------
             for idx, pts in enumerate(self.datasets):
+                # 선 색·굵기
                 Color(*self.COLORS[idx % len(self.COLORS)])
                 Line(points=self._scale(pts), width=self.LINE_W)
+
+                # 최고 진폭 위치
+                fx, fy = max(pts, key=lambda p: p[1])
+                peaks.append((fx, fy))
+
+            # diff(흰선)
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
+
+        # 2) ▲ xx.x Hz  주석 라벨 추가 ----------------------------------
+        for fx, fy in peaks:
+            sx, sy = self._scale([(fx, fy)])[0:2]   # 화면 좌표 변환
+            lbl = Label(text=f"▲ {fx:.1f} Hz",
+                        size_hint=(None, None), size=(90, 20),
+                        pos=(sx - 25, sy + 6))
+            lbl._peak = True                        # 다음 redraw 때 구분용
+            self.add_widget(lbl)
+
+
+
+
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
 
