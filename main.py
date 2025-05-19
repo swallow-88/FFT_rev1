@@ -93,32 +93,43 @@ def uri_to_file(u: str) -> str | None:
             Logger.error(f"SAF copy fail: {e}")
     return None
 
-# ── 아주 단순한 그래프 위젯 ─────────────────────────────────────────
+# ── 간단 그래프 ──────────────────────────────────────────────────
 class GraphWidget(Widget):
     pad_x, pad_y = 80, 30
+
+    # ✔︎ 1) 색상‧선굵기 고정
+    COLORS   = [(0,1,0), (1,0,0)]   # 1번: 녹색, 2번: 빨강
+    DIFF_CLR = (1,1,1)              # diff(절대값)―흰색
+    LINE_W   = 2.5                  # 선 굵기
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.datasets, self.diff = [], []
-        self.colors = itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
-        self.max_x = self.max_y = 1
+        self.max_x = 50             # ✔︎ 2) x축 0‒50 Hz 고정
+        self.max_y = 1
         self.bind(size=self.redraw)
 
-    def update_graph(self, ds, df, xm, ym):
-        self.datasets, self.diff, self.max_x, self.max_y = ds, df, xm, ym
+    def update_graph(self, ds, df, _xm, ym):
+        self.datasets, self.diff = ds, df
+        self.max_y = max(ym, 1e-3)  # y축은 넘겨준 값 사용
         self.redraw()
 
+    # ---------- 내부 ---------- #
     def _scale(self, pts):
         w, h = self.width-2*self.pad_x, self.height-2*self.pad_y
-        return [c for x,y in pts
-                  for c in (self.pad_x+x/self.max_x*w,
-                            self.pad_y+y/self.max_y*h)]
+        return [c for x, y in pts
+                  for c in (self.pad_x + x/self.max_x*w,
+                            self.pad_y + y/self.max_y*h)]
 
     def _grid(self):
-        gx, gy = (self.width-2*self.pad_x)/10, (self.height-2*self.pad_y)/10
+        gx, gy = (self.width-2*self.pad_x)/5, (self.height-2*self.pad_y)/10
         Color(.6,.6,.6)
-        for i in range(11):
+        # 세로선: 0,10,20,30,40,50 Hz
+        for i in range(6):
             Line(points=[self.pad_x+i*gx, self.pad_y,
                          self.pad_x+i*gx, self.height-self.pad_y])
+        # 가로선 10개
+        for i in range(11):
             Line(points=[self.pad_x, self.pad_y+i*gy,
                          self.width-self.pad_x, self.pad_y+i*gy])
 
@@ -126,18 +137,20 @@ class GraphWidget(Widget):
         for w in list(self.children):
             if isinstance(w, Label):
                 self.remove_widget(w)
+        # x축 10 Hz 간격
+        for i, hz in enumerate(range(0, 51, 10)):
+            x = self.pad_x + i*(self.width-2*self.pad_x)/5 - 20
+            self.add_widget(Label(text=f"{hz} Hz",
+                                  size_hint=(None,None), size=(60,20),
+                                  pos=(x, self.pad_y-30)))
+        # y축(좌/우) 0‒1 범위 0.1 간격
         for i in range(11):
-            freq = self.max_x*i/10
-            x = self.pad_x + i*(self.width-2*self.pad_x)/10 - 20
-            y = self.pad_y - 30
-            self.add_widget(Label(text=f"{freq:.1f} Hz",
-                                  size_hint=(None,None), size=(70,20), pos=(x,y)))
-        for i in range(11):
-            mag = self.max_y*i/10
-            y   = self.pad_y + i*(self.height-2*self.pad_y)/10 - 10
+            mag = i/10*self.max_y
+            y = self.pad_y + i*(self.height-2*self.pad_y)/10 - 10
             for x in (self.pad_x-70, self.width-self.pad_x+20):
                 self.add_widget(Label(text=f"{mag:.1e}",
-                                      size_hint=(None,None), size=(70,20), pos=(x,y)))
+                                      size_hint=(None,None), size=(60,20),
+                                      pos=(x,y)))
 
     def redraw(self,*_):
         self.canvas.clear()
@@ -145,12 +158,13 @@ class GraphWidget(Widget):
             return
         with self.canvas:
             self._grid(); self._labels()
-            col = self.colors
-            for pts in self.datasets:
-                Color(*next(col)); Line(points=self._scale(pts))
+            # ✔︎ 3) 고정 색상 + 굵기
+            for idx, pts in enumerate(self.datasets):
+                Color(*self.COLORS[idx % len(self.COLORS)])
+                Line(points=self._scale(pts), width=self.LINE_W)
             if self.diff:
-                Color(1,1,1); Line(points=self._scale(self.diff))
-
+                Color(*self.DIFF_CLR)
+                Line(points=self._scale(self.diff), width=self.LINE_W)
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
 
