@@ -161,10 +161,12 @@ class FFTApp(App):
 
     # --- 저장소 권한 -----------------------------------------------------
     def _ask_perm(self,*_):
-        if not ANDROID:
+
+        if not ANDROID or SharedStorage:
             self.btn_sel.disabled = False
             return
 
+        
         need = [Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE]
 
