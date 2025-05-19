@@ -1,15 +1,14 @@
 """
-FFT CSV Viewer  –  Android 11+ ‘모든-파일’ 권한 + SAF / 경로-chooser 안정판
+FFT CSV Viewer – Android 11+ ‘모든-파일’ 권한 & SAF / 경로 chooser 안정판
 """
 
-# ── 기본 import ────────────────────────────────────────────────────────
+# ── 기본 import ──────────────────────────────────────────────────────────
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
-from numpy.fft import fft
-
-from kivy.app           import App
-from kivy.clock         import Clock
-from kivy.logger        import Logger
+from numpy.fft       import fft
+from kivy.app        import App
+from kivy.clock      import Clock
+from kivy.logger     import Logger
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button    import Button
 from kivy.uix.label     import Label
@@ -20,12 +19,13 @@ from kivy.graphics      import Line, Color
 from kivy.utils         import platform
 from plyer              import filechooser
 
-# ── Android 관련 (없으면 더미) ───────────────────────────────────────────
-ANDROID      = platform == "android"
-toast        = None
+# ── Android 모듈 (없으면 더미) ────────────────────────────────────────────
+ANDROID = platform == "android"
+
+toast = None
 SharedStorage = None
 Permission = check_permission = request_permissions = None
-ANDROID_API  = 0
+ANDROID_API = 0
 
 if ANDROID:
     try: from plyer import toast
@@ -37,9 +37,9 @@ if ANDROID:
     try:
         from android.permissions import (
             check_permission, request_permissions, Permission)
-    except Exception:                                # PC 에서 빌드 시 더미
-        check_permission  = lambda *_: True
-        request_permissions = lambda *_1, *_2: None
+    except Exception:
+        check_permission     = lambda *a, **k: True
+        request_permissions  = lambda *a, **k: None
         class _P:
             READ_EXTERNAL_STORAGE = WRITE_EXTERNAL_STORAGE = ""
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
@@ -53,15 +53,15 @@ if ANDROID:
         ANDROID_API = 0
 else:
     toast = None
-# ────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------
 
 
 # ── 전역 크래시 로그 → /sdcard/fft_crash.log ────────────────────────────
 def _dump_crash(txt:str):
     try:
-        with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as fp:
-            fp.write("\n" + "="*60 + "\n" +
-                     datetime.datetime.now().isoformat() + "\n" + txt + "\n")
+        with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as f:
+            f.write("\n" + "="*60 + "\n" +
+                    datetime.datetime.now().isoformat() + "\n" + txt + "\n")
     except Exception:
         pass
     Logger.error(txt)
@@ -71,8 +71,7 @@ def _ex_hook(et, ev, tb):
     if ANDROID:
         Clock.schedule_once(lambda *_:
             Popup(title="Python Crash",
-                  content=Label(text=str(ev)),
-                  size_hint=(.9,.9)).open())
+                  content=Label(text=str(ev)), size_hint=(.9,.9)).open())
 sys.excepthook = _ex_hook
 
 
@@ -98,7 +97,7 @@ class GraphWidget(Widget):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.datasets, self.diff = [], []
-        self.colors = itertools.cycle([(1,0,0), (0,1,0), (0,0,1)])
+        self.colors = itertools.cycle([(1,0,0),(0,1,0),(0,0,1)])
         self.pad_x = 80; self.pad_y = 30
         self.max_x = self.max_y = 1
         self.bind(size=self.redraw)
@@ -118,7 +117,7 @@ class GraphWidget(Widget):
             if self.diff:
                 Color(1,1,1); Line(points=self._scale(self.diff))
 
-    # 내부 도우미 ----------------------------------------------------------
+    # 도우미 --------------------------------------------------------------
     def _scale(self, pts):
         w,h = self.width-2*self.pad_x, self.height-2*self.pad_y
         return [c for x,y in pts
@@ -138,44 +137,39 @@ class GraphWidget(Widget):
         for w in list(self.children):
             if isinstance(w, Label): self.remove_widget(w)
         for i in range(11):
-            freq = self.max_x/10*i
-            x = self.pad_x + i*(self.width-2*self.pad_x)/10 - 20
-            y = self.pad_y - 30
+            freq=self.max_x/10*i
+            x=self.pad_x+i*(self.width-2*self.pad_x)/10-20
+            y=self.pad_y-30
             self.add_widget(Label(text=f"{freq:.1f} Hz",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(x,y)))
+                                  size_hint=(None,None), size=(60,20), pos=(x,y)))
         for i in range(11):
-            mag = self.max_y/10*i
-            y = self.pad_y + i*(self.height-2*self.pad_y)/10 - 10
-            self.add_widget(Label(text=f"{mag:.1e}",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(self.pad_x-70, y)))
-            self.add_widget(Label(text=f"{mag:.1e}",
-                                  size_hint=(None,None), size=(60,20),
-                                  pos=(self.width-self.pad_x+20, y)))
+            mag=self.max_y/10*i
+            y=self.pad_y+i*(self.height-2*self.pad_y)/10-10
+            for x in (self.pad_x-70, self.width-self.pad_x+20):
+                self.add_widget(Label(text=f"{mag:.1e}",
+                                      size_hint=(None,None), size=(60,20), pos=(x,y)))
 
 
 # ── 메인 앱 ────────────────────────────────────────────────────────────────
 class FFTApp(App):
 
-    # small logger --------------------------------------------------------
-    def log(self, msg:str):
+    def log(self,msg:str):
         Logger.info(msg)
         self.label.text = msg
         if toast:
             try: toast.toast(msg)
             except Exception: pass
 
-    # 권한 요청 ------------------------------------------------------------
+    # 저장소 권한 ----------------------------------------------------------
     def _ask_perm(self,*_):
         if not ANDROID:
             self.btn_sel.disabled = False
             return
 
-        need = [Permission.READ_EXTERNAL_STORAGE,
-                Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.MANAGE_EXTERNAL_STORAGE]
-        if ANDROID_API >= 33:
+        need=[Permission.READ_EXTERNAL_STORAGE,
+              Permission.WRITE_EXTERNAL_STORAGE,
+              Permission.MANAGE_EXTERNAL_STORAGE]
+        if ANDROID_API>=33:
             need += [Permission.READ_MEDIA_IMAGES,
                      Permission.READ_MEDIA_AUDIO,
                      Permission.READ_MEDIA_VIDEO]
@@ -193,10 +187,10 @@ class FFTApp(App):
     # UI ------------------------------------------------------------------
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
-        self.label   = Label(text="Pick 1 – 2 CSV files", size_hint=(1,.1))
+        self.label   = Label(text="Pick 1–2 CSV files", size_hint=(1,.1))
         self.btn_sel = Button(text="Select CSV", disabled=True, size_hint=(1,.1),
                               on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",   disabled=True, size_hint=(1,.1),
+        self.btn_run = Button(text="FFT RUN", disabled=True, size_hint=(1,.1),
                               on_press=self.run_fft)
 
         root.add_widget(self.label)
@@ -210,11 +204,8 @@ class FFTApp(App):
 
     # 파일 선택 -----------------------------------------------------------
     def open_chooser(self,*_):
-        """
-        Android 11+ ‘모든-파일’ 권한 확인 → SAF picker → 실패 시 경로-chooser
-        """
-        # Android 11+ : MANAGE_EXTERNAL_STORAGE 체크 ---------------------
-        if ANDROID and ANDROID_API >= 30:
+        # Android 11+ ‘모든-파일’ 권한 확인 ------------------------------
+        if ANDROID and ANDROID_API>=30:
             try:
                 from jnius import autoclass
                 Env = autoclass("android.os.Environment")
@@ -224,10 +215,10 @@ class FFTApp(App):
                     box.add_widget(Label(
                         text="⚠️  CSV 파일을 보려면\n'모든 파일' 접근 권한이 필요합니다.",
                         halign="center"))
-                    box.add_widget(Button(
-                        text="권한 설정으로 이동", size_hint=(1,.4),
-                        on_press=lambda *_:(mv.dismiss(),
-                                            self._goto_allfiles_permission())))
+                    box.add_widget(Button(text="권한 설정으로 이동",
+                                          size_hint=(1,.4),
+                                          on_press=lambda *_:(mv.dismiss(),
+                                              self._goto_allfiles_permission())))
                     mv.add_widget(box); mv.open()
                     return
             except Exception:
@@ -245,7 +236,7 @@ class FFTApp(App):
                 Logger.exception("SAF picker fail")
                 self.log(f"SAF 선택기 오류: {e}")
 
-        # ② legacy chooser ----------------------------------------------
+        # ② 경로-chooser -------------------------------------------------
         try:
             filechooser.open_file(
                 self.on_choose,
@@ -297,12 +288,12 @@ class FFTApp(App):
                 self.log("CSV parse err"); return
             res.append((pts,xm,ym))
 
-        if len(res) == 1:
-            pts,xm,ym = res[0]
+        if len(res)==1:
+            pts,xm,ym=res[0]
             Clock.schedule_once(lambda *_:
                 self.graph.update_graph([pts],[],xm,ym))
         else:
-            (f1,x1,y1),(f2,x2,y2) = res
+            (f1,x1,y1),(f2,x2,y2)=res
             diff=[(f1[i][0], abs(f1[i][1]-f2[i][1]))
                   for i in range(min(len(f1),len(f2)))]
             xm=max(x1,x2); ym=max(y1,y2,max(y for _,y in diff))
@@ -319,7 +310,7 @@ class FFTApp(App):
                 for r in csv.reader(f):
                     try: t.append(float(r[0])); a.append(float(r[1]))
                     except Exception: pass
-            if len(a) < 2: raise ValueError
+            if len(a)<2: raise ValueError
             dt=(t[-1]-t[0])/len(a)
             f=np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
             v=np.abs(fft(a))[:len(a)//2]
