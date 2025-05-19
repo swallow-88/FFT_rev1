@@ -340,7 +340,7 @@ class FFTApp(App):
             v=np.abs(fft(a))[:len(a)//2]
             m=f<=50; f,v=f[m],v[m]
             s=np.convolve(v, np.ones(10)/10, 'same')
-            return list(zip(f,s)), f.max(), s.max()
+            return list(zip(f,s)), 50, s.max()
         except Exception as e:
             Logger.error(f"FFT err {e}")
             return None,0,0
