@@ -242,12 +242,13 @@ class GraphWidget(Widget):
         self.redraw()
 
     # ── 좌표 변환 ────────────────────────────────────────────
+    # ─── 그래프 내부 좌표 변환 ─────────────────────────────
     def _scale(self, pts):
-        w, h = self.width-2*self.PAD_X, self.height-2*self.PAD_Y
-        return [c for x, y in pts
-                  for c in (self.PAD_X + x/self.max_x*w,
-                            self.PAD_Y + y/self.max_y*h)]
-
+        w, h = self.width-2*self.pad_x, self.height-2*self.pad_y
+        return [float(c)                                  # ← numpy → python float
+                for x, y in pts
+                for c in (self.pad_x + x/self.max_x*w,
+                           self.pad_y + y/self.max_y*h)]
     # ── 그리기 보조 ───────────────────────────────────────────
     def _grid(self):
         gx, gy = (self.width-2*self.PAD_X)/10, (self.height-2*self.PAD_Y)/10
