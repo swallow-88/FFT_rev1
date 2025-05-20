@@ -112,9 +112,21 @@ class GraphWidget(Widget):
 
     # ---------- 외부 호출 ----------
     def update_graph(self, ds, df, xm, ym):
-        self.datasets, self.diff = ds or [], df or []
-        self.max_x = xm if xm > 0 else 1
-        self.max_y = ym if ym > 0 else 1
+        # 데이터 유효성 1차 확인
+        ds = ds or []
+        ds = [p for p in ds if p]          # None 요소 제거
+        if not ds:
+            Logger.warning("Graph: empty dataset, skip draw")
+            return
+    
+        # diff 역시 리스트가 아닐 경우 방지
+        df = df if isinstance(df, list) else []
+    
+        # 0-division 가드
+        self.max_x = max(1e-6, xm)
+        self.max_y = max(1e-6, ym)
+    
+        self.datasets, self.diff = ds, df
         self.redraw()
 
     # ---------- 내부 도우미 ----------
