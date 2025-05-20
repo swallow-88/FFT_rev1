@@ -153,47 +153,55 @@ class GraphWidget(Widget):
                                       pos=(x,y)))
 
     def redraw(self, *_):
-        # 0) 캔버스 ‧ 예전 피크 라벨 초기화
+        # ─── 0) 캔버스 / 이전 라벨 초기화 ─────────────────────────────
         self.canvas.clear()
         for w in list(self.children):
-            if getattr(w, "_peak", False):        # 이전에 그려둔 ▲ 라벨
+            if getattr(w, "_peak", False):
                 self.remove_widget(w)
 
         if not self.datasets:
             return
 
-        peaks = []          # [(freq_x, amp_y), …]  파일별 최대점
+        peaks = []   # [(fx, fy, screen_x, screen_y)]
 
         with self.canvas:
             self._grid()
             self._labels()
 
-            # 1) 데이터선 + 최고점 추출 ---------------------------------
+            # ─── 1) 데이터선 + 최고점 찾기 ───────────────────────────
             for idx, pts in enumerate(self.datasets):
-                # 선 색·굵기
                 Color(*self.COLORS[idx % len(self.COLORS)])
                 Line(points=self._scale(pts), width=self.LINE_W)
 
-                # 최고 진폭 위치
-                fx, fy = max(pts, key=lambda p: p[1])
-                peaks.append((fx, fy))
+                fx, fy = max(pts, key=lambda p: p[1])   # 데이터 좌표
+                sx, sy = self._scale([(fx, fy)])[0:2]   # 화면 좌표
+                peaks.append((fx, fy, sx, sy))
 
-            # diff(흰선)
+            # diff(흰 선)
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
 
-        # 2) ▲ xx.x Hz  주석 라벨 추가 ----------------------------------
-        for fx, fy in peaks:
-            sx, sy = self._scale([(fx, fy)])[0:2]   # 화면 좌표 변환
+        # ─── 2) ▲ 피크 라벨 ─────────────────────────────────────────
+        for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None, None), size=(90, 20),
-                        pos=(sx - 25, sy + 6))
-            lbl._peak = True                        # 다음 redraw 때 구분용
+                        size_hint=(None, None), size=(90, 22),
+                        pos=(sx - 30, sy + 8))
+            lbl._peak = True
             self.add_widget(lbl)
 
+        # ─── 3) Δ 주파수 차 + 상태 판정 ────────────────────────────
+        if len(peaks) >= 2:
+            delta = abs(peaks[0][0] - peaks[1][0])  # 두 파일 피크 freq 차
+            status = "고장" if delta > 1.5 else "정상"
+            color  = (1, 0, 0, 1) if delta > 1.5 else (0, 1, 0, 1)  # RGBA
 
-
+            info = Label(text=f"Δ = {delta:.2f} Hz → {status}",
+                         size_hint=(None, None), size=(180, 24),
+                         pos=(self.pad_x, self.height - self.pad_y + 5),
+                         color=color)
+            info._peak = True
+            self.add_widget(info)
 
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
