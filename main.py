@@ -110,9 +110,14 @@ class GraphWidget(Widget):
         self.max_x = self.max_y = 1
         self.bind(size=self.redraw)
 
-    # ── 외부에서 호출 ─────────────────────────────────────────────
+
+    # ── 외부에서 호출 ────────────────────────────────
     def update_graph(self, ds, df, xm, ym):
-        self.datasets, self.diff, self.max_x, self.max_y = ds, df, xm, ym
+        self.datasets = ds
+        self.diff     = df
+        # ① 0 이면 1 로 바꿔 division-by-zero 방지
+        self.max_x    = xm if xm > 0 else 1
+        self.max_y    = ym if ym > 0 else 1
         self.redraw()
 
     # ── 내부 유틸 ────────────────────────────────────────────────
@@ -210,6 +215,9 @@ class GraphWidget(Widget):
                          color=clr)
             info._peak = True
             self.add_widget(info)
+
+
+
 
 
 # ── 메인 앱 ───────────────────────────────────────────────────────
