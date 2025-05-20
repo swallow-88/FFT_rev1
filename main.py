@@ -97,43 +97,45 @@ def uri_to_file(u: str) -> str | None:
 #  간단 그래프 위젯  –  고정 색상·굵기 / 피크·Δ(정상·고장) 표시 안정판
 # ────────────────────────────────────────────────────────────────
 class GraphWidget(Widget):
-    """두 FFT 곡선 + 차이선 + 피크 ▴ & Δ(정상/고장) 표기"""
-    COLORS   = [(0, 1, 0), (1, 0, 0)]     # 녹 / 빨
-    DIFF_CLR = (1, 1, 1)                  # 흰
-    LINE_W   = 2.2                        # 선 굵기
-    pad_x, pad_y = 80, 30                 # 여백
+    COLORS   = [(0,1,0), (1,0,0)]   # 녹 / 빨
+    DIFF_CLR = (1,1,1)
+    LINE_W   = 2.2
+    pad_x = 80; pad_y = 30
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.datasets: list[list[tuple[float,float]]] = []
         self.diff:     list[tuple[float,float]]       = []
         self.max_x = self.max_y = 1
-        # resize 될 때마다 다시 그림
         self.bind(size=self.redraw)
 
-    # ── 외부에서 데이터 주입 ────────────────────────────────────
+    # ---------- 외부 진입 ----------
     def update_graph(self, ds, df, xm, ym):
-        # ❶ 바로 그리면 size = (0,0) 인 경우가 있어 1 프레임 지연
-        def _do(*_):
-            self.datasets = ds or []
-            self.diff     = df or []
-            self.max_x    = xm if xm > 0 else 1
-            self.max_y    = ym if ym > 0 else 1
-            self.redraw()
-        Clock.schedule_once(_do, 0)
+        # 0 → 1 로 치환 (0 division 방지)
+        self.datasets = ds or []
+        self.diff     = df or []
+        self.max_x    = xm if xm > 0 else 1
+        self.max_y    = ym if ym > 0 else 1
+        # 크기 계산이 끝난 다음 frame 에 그리기
+        Clock.schedule_once(self.redraw, 0)
 
-    # ── 내부 유틸 ───────────────────────────────────────────────
+    # ---------- 내부 ----------
     def _scale(self, pts):
-        w = max(1, self.width  - 2*self.pad_x)       # ❷ 0 division 방지
+        w = max(1, self.width  - 2*self.pad_x)
         h = max(1, self.height - 2*self.pad_y)
-        return [c for x, y in pts
-                  for c in (self.pad_x + x/self.max_x * w,
-                            self.pad_y + y/self.max_y * h)]
+        out = []
+        for x,y in pts:
+            # NaN / inf 차단
+            if not (np.isfinite(x) and np.isfinite(y)):
+                continue
+            out += [self.pad_x + x/self.max_x*w,
+                    self.pad_y + y/self.max_y*h]
+        return out
 
     def _grid(self):
         gx = (self.width  - 2*self.pad_x)/10
         gy = (self.height - 2*self.pad_y)/10
-        Color(.6, .6, .6)
+        Color(.6,.6,.6)
         for i in range(11):
             Line(points=[self.pad_x+i*gx, self.pad_y,
                          self.pad_x+i*gx, self.height-self.pad_y])
@@ -141,36 +143,30 @@ class GraphWidget(Widget):
                          self.width-self.pad_x, self.pad_y+i*gy])
 
     def _labels(self):
-        # 축 레이블( _axis 플래그 ) 제거
+        # 기존 축 라벨 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
-
-        # X축 0~50 Hz, 10 Hz 간격
+        # X축 (0–50 Hz, 10 Hz 간격)
         for i in range(6):
             freq = 10*i
             x = self.pad_x + i*(self.width-2*self.pad_x)/5 - 18
-            lab = Label(text=f"{freq:d} Hz",
-                        size_hint=(None,None), size=(55,20),
-                        pos=(x, self.pad_y-28))
-            lab._axis = True
-            self.add_widget(lab)
-
-        # Y축 : 10 등분 지수
+            lab = Label(text=f"{freq:d} Hz", size_hint=(None,None),
+                        size=(55,20), pos=(x, self.pad_y-28))
+            lab._axis = True; self.add_widget(lab)
+        # Y축
         for i in range(11):
-            mag = self.max_y * i/10
-            y   = self.pad_y + i*(self.height-2*self.pad_y)/10 - 8
+            mag = self.max_y*i/10
+            y = self.pad_y + i*(self.height-2*self.pad_y)/10 - 8
             for x in (self.pad_x-68, self.width-self.pad_x+10):
-                lab = Label(text=f"{mag:.1e}",
-                            size_hint=(None,None), size=(65,20), pos=(x,y))
-                lab._axis = True
-                self.add_widget(lab)
+                lab = Label(text=f"{mag:.1e}", size_hint=(None,None),
+                            size=(65,20), pos=(x,y))
+                lab._axis = True; self.add_widget(lab)
 
-    # ── 메인 그리기 ───────────────────────────────────────────
-    def redraw(self, *_):
+    # ---------- 메인 그리기 ----------
+    def redraw(self,*_):
         self.canvas.clear()
-
-        # 피크·Δ 라벨(_peak) 제거
+        # peak/Δ 라벨 제거
         for w in list(self.children):
             if getattr(w, "_peak", False):
                 self.remove_widget(w)
@@ -178,51 +174,48 @@ class GraphWidget(Widget):
         if not self.datasets:
             return
 
-        peaks = []   # [(fx, fy, scr_x, scr_y)]
-
+        peaks = []
         with self.canvas:
-            self._grid()
-            self._labels()
+            self._grid(); self._labels()
 
-            # ── FFT 선 -------------------------------------------------
+            # FFT 선
             for idx, pts in enumerate(self.datasets):
-                if len(pts) < 2:          # ❸ point 부족 → skip
+                scaled = self._scale(pts)
+                if len(scaled) < 4:      # 포인트 부족 ⇒ skip
                     continue
                 Color(*self.COLORS[idx % len(self.COLORS)])
-                Line(points=self._scale(pts), width=self.LINE_W)
+                Line(points=scaled, width=self.LINE_W)
 
-                # 최고점 (peak)
+                # 최고점 (NaN 이 필터링 된 scaled 를 다시 찾기 어렵기 때문에
+                # 원본 pts 에서 계산)
                 fx, fy = max(pts, key=lambda p: p[1])
                 sx, sy = self._scale([(fx, fy)])[0:2]
                 peaks.append((fx, fy, sx, sy))
 
             # 차이선
-            if self.diff and len(self.diff) > 1:
+            scaled = self._scale(self.diff)
+            if len(scaled) >= 4:
                 Color(*self.DIFF_CLR)
-                Line(points=self._scale(self.diff), width=self.LINE_W)
+                Line(points=scaled, width=self.LINE_W)
 
-        # ── 피크 주파수 표시 -----------------------------------------
+        # 피크 라벨
         for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
                         size_hint=(None,None), size=(95,24),
                         pos=(sx-32, sy+6))
-            lbl._peak = True
-            self.add_widget(lbl)
+            lbl._peak = True; self.add_widget(lbl)
 
-        # ── Δ 값 + 상태 ---------------------------------------------
+        # Δ 라벨
         if len(peaks) >= 2:
-            delta  = abs(peaks[0][0] - peaks[1][0])
-            bad    = delta > 1.5
-            status = "고장" if bad else "정상"
-            clr    = (1,0,0,1) if bad else (0,1,0,1)
-
-            info = Label(text=f"Δ={delta:.2f} Hz  →  {status}",
+            delta = abs(peaks[0][0] - peaks[1][0])
+            bad   = delta > 1.5
+            clr   = (1,0,0,1) if bad else (0,1,0,1)
+            stat  = "고장" if bad else "정상"
+            info = Label(text=f"Δ={delta:.2f} Hz → {stat}",
                          size_hint=(None,None), size=(220,26),
-                         pos=(self.pad_x, self.height - self.pad_y + 4),
+                         pos=(self.pad_x, self.height-self.pad_y+4),
                          color=clr)
-            info._peak = True
-            self.add_widget(info)
-
+            info._peak = True; self.add_widget(info)
 
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
