@@ -6,6 +6,8 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
 
+import sounddevice as sd 
+
 from plyer import accelerometer      # 센서
 from collections import deque
 import queue, time
@@ -283,13 +285,31 @@ class GraphWidget(Widget):
         for i in range(11):
             mag = self.max_y*i/10
             y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
+            '''
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
                 y_lab = Label(text=f"{mag:.1e}",
                               size_hint=(None,None), size=(60,20),
                               pos=(x, y))
                 y_lab._axis = True
                 self.add_widget(y_lab)
-
+            '''
+            # ――― X축은 max_x(Hz)에 맞춰 자동 라벨 ────────────
+            if self.max_x <= 60:
+                step = 10      # 0-60 Hz  → 10 Hz 간격
+            elif self.max_x <= 600:
+                step = 100     # 0-600 Hz → 100 Hz 간격
+            else:
+                step = 300     # 0-1500 Hz → 300 Hz 간격
+    
+            n = int(self.max_x // step) + 1
+            for i in range(n):
+                x  = self.PAD_X + i*(self.width-2*self.PAD_X)/(n-1) - 20
+                hz = i*step
+                lbl = Label(text=f"{hz:d} Hz", size_hint=(None,None),
+                            size=(60,20), pos=(x, self.PAD_Y-28))
+                lbl._axis = True
+                self.add_widget(lbl)
+    
     # ── 메인 그리기 ───────────────────────────────────────────
     def redraw(self,*_):
         self.canvas.clear()
@@ -359,6 +379,9 @@ class FFTApp(App):
             'y': deque(maxlen=256),
             'z': deque(maxlen=256),
         }
+        self.mic_on   = False
+        self.mic_buf  = deque(maxlen=4096)
+        self.mic_stream = None
     
 
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
@@ -415,6 +438,74 @@ class FFTApp(App):
                 self.btn_rt.text = "Realtime FFT (OFF)"
         else:
             accelerometer.disable()
+
+
+    # 마이크 토글
+    # ─── ④·⑤·⑥번 : “마이크 관련” 메서드 묶음 ───────────
+    def toggle_mic(self, *_):
+        """UI 버튼 콜백 – ON/OFF 토글"""
+        self.mic_on = not self.mic_on
+        self.btn_mic.text = f"Mic FFT ({'ON' if self.mic_on else 'OFF'})"
+        if self.mic_on:
+            try:
+                self._start_mic_stream()          # ④
+            except Exception as e:
+                self.log(f"마이크 시작 실패: {e}")
+                self.mic_on = False
+                self.btn_mic.text = "Mic FFT (OFF)"
+        else:
+            self._stop_mic_stream()               # ④
+
+    # ④ 스트림 열고 닫기 -------------------------------------------------
+    def _start_mic_stream(self):
+        import sounddevice as sd                  # 파일 맨 위 import 권장
+        self.mic_stream = sd.InputStream(
+            samplerate=44100, channels=1, dtype='float32',
+            blocksize=512,
+            callback=self._on_mic_block)          # ⑤
+        self.mic_stream.start()
+        threading.Thread(target=self._mic_fft_loop,  # ⑥
+                         daemon=True).start()
+
+    def _stop_mic_stream(self):
+        try:
+            self.mic_stream.stop(); self.mic_stream.close()
+        except Exception:
+            pass
+
+    # ⑤ 오디오 콜백 -----------------------------------------------------
+    def _on_mic_block(self, in_data, frames, time_info, status):
+        if not self.mic_on:
+            return
+        # in_data.shape == (frames, 1)
+        self.mic_buf.extend(in_data[:, 0])
+
+    # ⑥ FFT 백그라운드 루프 --------------------------------------------
+    def _mic_fft_loop(self):
+        while self.mic_on:
+            time.sleep(0.25)
+            if len(self.mic_buf) < 2048:
+                continue
+            sig = np.array(self.mic_buf, dtype=float)
+            self.mic_buf.clear()
+
+            sig -= sig.mean(); sig *= np.hanning(len(sig))
+            n   = len(sig);  dt = 1/44100.0
+            freq = np.fft.fftfreq(n, d=dt)[:n//2]
+            amp  = np.abs(fft(sig))[:n//2]
+
+            mask = freq <= 1500
+            freq, amp = freq[mask], amp[mask]
+            smooth = np.convolve(amp, np.ones(16)/16, 'same')
+
+            pts  = list(zip(freq, smooth))
+            ymax = smooth.max()
+
+            Clock.schedule_once(lambda *_:
+                self.graph.update_graph([pts], [], 1500, ymax))
+
+
+  
     
     # ---------- ② 센서 polling ----------
     def _poll_accel(self, dt):
@@ -505,7 +596,12 @@ class FFTApp(App):
                               on_press=self.toggle_realtime)
         root.add_widget(self.btn_rt)
 
-        
+
+        self.btn_mic = Button(text="Mic FFT (OFF)", size_hint=(1,.1),
+                              on_press=self.toggle_mic)
+        root.add_widget(self.btn_mic)
+
+
         self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
         Clock.schedule_once(self._ask_perm, 0)
