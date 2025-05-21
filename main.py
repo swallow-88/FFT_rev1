@@ -431,25 +431,52 @@ class FFTApp(App):
     
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
+        """
+        0.5 s마다 X·Y·Z 각 축을 FFT 하고 그래프 3 개를 그려 준다.
+        · 표본 간격(dt)을 실측으로 계산 → 유령 2 Hz 제거
+        · DC 제거 + Hanning window 로 누수 감소
+        · 0–50 Hz 구간만 부드럽게(smooth) 표시
+        """
         while self.rt_on:
             time.sleep(0.5)
-            if min(len(b) for b in self.rt_buf.values()) < 64:
+
+            # 64 샘플 미만이면 건너뜀
+            if any(len(self.rt_buf[ax]) < 64 for ax in ('x', 'y', 'z')):
                 continue
-            datasets = []          # 각 축의 FFT 결과가 여기 모두 모임
-            ymax = 0
+
+            datasets = []   # 그래프 3 개(X,Y,Z)
+            ymax     = 0.0  # y축 최대
+            xmax     = 0.0  # x축(샘플링 주파수 절반)
+
             for axis in ('x', 'y', 'z'):
-                sig = np.asarray(self.rt_buf[axis], dtype=float)
+                # ── 타임스탬프·데이터 분리 ──────────────────────
+                ts, val = zip(*self.rt_buf[axis])      # 두 튜플로 분리
+                sig = np.asarray(val, dtype=float)
                 n   = len(sig)
-                dt  = 1/128.0
+
+                # ── 실측 dt 계산 ───────────────────────────────
+                dt = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 1/128.0
+
+                # ── 전처리 : DC 제거 + 윈도잉 ───────────────────
+                sig -= sig.mean()
+                sig *= np.hanning(n)
+
+                # ── FFT ───────────────────────────────────────
                 freq = np.fft.fftfreq(n, d=dt)[:n//2]
-                vals = np.abs(fft(sig))[:n//2]
-                mask = freq <= 50
-                smooth = np.convolve(vals[mask], np.ones(8)/8, 'same')
-                datasets.append(list(zip(freq[mask], smooth)))
+                amp  = np.abs(fft(sig))[:n//2]
+
+                mask = freq <= 50                # 0-50 Hz
+                freq, amp = freq[mask], amp[mask]
+
+                smooth = np.convolve(amp, np.ones(8)/8, 'same')
+
+                datasets.append(list(zip(freq, smooth)))
                 ymax = max(ymax, smooth.max())
-     
+                xmax = max(xmax, freq[-1])
+
+            # ── 메인 스레드에서 그래프 갱신 ─────────────────────
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph(datasets, [], 50, ymax))
+                self.graph.update_graph(datasets, [], xmax, ymax))
     
 
     # ── UI 구성 ────────────────────────────────────────────────
