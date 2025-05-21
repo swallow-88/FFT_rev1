@@ -271,7 +271,7 @@ class GraphWidget(Widget):
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
-
+        '''
         # X축 (10 Hz 간격, 0-50 Hz)
         for i in range(6):
             x_lab = Label(text=f"{i*10:d} Hz",
@@ -285,6 +285,7 @@ class GraphWidget(Widget):
         for i in range(11):
             mag = self.max_y*i/10
             y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
+        '''
             '''
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
                 y_lab = Label(text=f"{mag:.1e}",
@@ -293,22 +294,32 @@ class GraphWidget(Widget):
                 y_lab._axis = True
                 self.add_widget(y_lab)
             '''
-            # ――― X축은 max_x(Hz)에 맞춰 자동 라벨 ────────────
-            if self.max_x <= 60:
-                step = 10      # 0-60 Hz  → 10 Hz 간격
-            elif self.max_x <= 600:
-                step = 100     # 0-600 Hz → 100 Hz 간격
-            else:
-                step = 300     # 0-1500 Hz → 300 Hz 간격
+
+            # ── X축 : max_x 범위에 따라 간격 결정
+            if   self.max_x <=  60: step = 10
+            elif self.max_x <= 600: step = 100
+            else:                   step = 300          # 1500 Hz 까지
     
             n = int(self.max_x // step) + 1
             for i in range(n):
-                x  = self.PAD_X + i*(self.width-2*self.PAD_X)/(n-1) - 20
-                hz = i*step
-                lbl = Label(text=f"{hz:d} Hz", size_hint=(None,None),
-                            size=(60,20), pos=(x, self.PAD_Y-28))
+                x = self.PAD_X + i*(self.width-2*self.PAD_X)/(n-1) - 20
+                lbl = Label(text=f"{i*step:d} Hz",
+                            size_hint=(None,None), size=(60,20),
+                            pos=(x, self.PAD_Y-28))
                 lbl._axis = True
                 self.add_widget(lbl)
+    
+            # ── Y축 : 지수표기
+            for i in range(11):
+                mag = self.max_y * i / 10
+                y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
+                for x in (self.PAD_X-68, self.width-self.PAD_X+10):
+                    lbl = Label(text=f"{mag:.1e}",
+                                size_hint=(None,None), size=(60,20),
+                                pos=(x, y))
+                    lbl._axis = True
+                    self.add_widget(lbl)
+        
     
     # ── 메인 그리기 ───────────────────────────────────────────
     def redraw(self,*_):
