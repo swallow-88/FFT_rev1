@@ -219,7 +219,7 @@ class GraphWidget(Widget):
 '''
 
 class GraphWidget(Widget):
-    PAD_X, PAD_Y = 80, 30
+    pad_x, pad_y = 80, 30
     COLORS   = [(1, 0, 0), (0, 1, 0)]   # 1번=빨, 2번=초록
     DIFF_CLR = (1, 1, 1)
     LINE_W   = 2.5
