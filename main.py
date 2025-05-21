@@ -225,7 +225,7 @@ class GraphWidget(Widget):
 
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
-    COLORS   = [(1, 0, 0), (0, 1, 0)]   # 1번=빨, 2번=초록
+    COLORS   = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]   # 1번=빨, 2번=초록
     DIFF_CLR = (1, 1, 1)
     LINE_W   = 2.5
 
@@ -354,7 +354,11 @@ class FFTApp(App):
         super().__init__(**kwargs)
         # ── 실시간 가속도 FFT용 상태 ─────────────────────
         self.rt_on  = False               # 토글 상태
-        self.rt_buf = deque(maxlen=256)   # 가속도 버퍼
+        self.rt_buf = {
+            'x': deque(maxlen=256),
+            'y': deque(maxlen=256),
+            'z': deque(maxlen=256),
+        }
     
 
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
@@ -414,39 +418,38 @@ class FFTApp(App):
     
     # ---------- ② 센서 polling ----------
     def _poll_accel(self, dt):
-        if not self.rt_on:
-            return False                # Clock unschedule
+        if not self.rt_on or accelerometer is None:
+            return False
         try:
-            val = accelerometer.acceleration  # (x, y, z)
-            if val != (None, None, None):
-                # 단순합(진폭) 저장
-                self.rt_buf.append(sum(abs(v) for v in val))
+            x, y, z = accelerometer.acceleration
+            if None not in (x, y, z):
+                self.rt_buf['x'].append(x)
+                self.rt_buf['y'].append(y)
+                self.rt_buf['z'].append(z)
         except Exception:
             pass
     
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
         while self.rt_on:
-            time.sleep(0.5)               # 2Hz 로 FFT 갱신
-            if len(self.rt_buf) < 64:     # 샘플 부족
+            time.sleep(0.5)
+            if min(len(b) for b in self.rt_buf.values()) < 64:
                 continue
-            # 복사해서 계산
-            sig = np.array(self.rt_buf, dtype=float)
-            n   = len(sig)
-            dt  = 1/128.0                 # 샘플 간격(≈추정). 필요하면 가늠값 조정
-            freq = np.fft.fftfreq(n, d=dt)[:n//2]
-            vals = np.abs(fft(sig))[:n//2]
-    
-            mask = freq <= 50
-            freq, vals = freq[mask], vals[mask]
-            smooth = np.convolve(vals, np.ones(8)/8, 'same')
-    
-            pts = list(zip(freq, smooth))
-            mx_x, mx_y = 50, smooth.max()
-    
-            # 메인 쓰레드에서 그래프 갱신
+            datasets = []          # 각 축의 FFT 결과가 여기 모두 모임
+            ymax = 0
+            for axis in ('x', 'y', 'z'):
+                sig = np.asarray(self.rt_buf[axis], dtype=float)
+                n   = len(sig)
+                dt  = 1/128.0
+                freq = np.fft.fftfreq(n, d=dt)[:n//2]
+                vals = np.abs(fft(sig))[:n//2]
+                mask = freq <= 50
+                smooth = np.convolve(vals[mask], np.ones(8)/8, 'same')
+                datasets.append(list(zip(freq[mask], smooth)))
+                ymax = max(ymax, smooth.max())
+     
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts], [], mx_x, mx_y))
+                self.graph.update_graph(datasets, [], 50, ymax))
     
 
     # ── UI 구성 ────────────────────────────────────────────────
