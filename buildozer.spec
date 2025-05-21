@@ -20,14 +20,14 @@ source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 
 
 #requirements = python3,kivy,plyer,pyjnius,numpy,android
-requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy
+requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,sounddevice
 
 #androidstorage4kivy@https://github.com/kivy-garden/androidstorage4kivy/archive/master.zip
 
 #android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 #,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
 
-android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 
 
 
