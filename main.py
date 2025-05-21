@@ -349,6 +349,13 @@ class GraphWidget(Widget):
             self.add_widget(info)
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # ── 실시간 가속도 FFT용 상태 ─────────────────────
+        self.rt_on  = False               # 토글 상태
+        self.rt_buf = deque(maxlen=256)   # 가속도 버퍼
+    
 
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
     def log(self, msg: str):
@@ -385,10 +392,6 @@ class FFTApp(App):
             request_permissions(need, _cb)
 
 
-    # FFTApp 안에 새 속성 실시간 가속도 분석을 위해
-    self.rt_on = False           # 토글 상태
-    self.rt_q  = queue.Queue()   # 센서 → FFT 스레드
-    self.rt_buf = deque(maxlen=256)  # 가속도 버퍼 (2초*128Hz 가정)
     
     # ---------- ① 토글  ----------
     def toggle_realtime(self, *_):
