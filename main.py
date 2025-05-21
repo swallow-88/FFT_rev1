@@ -5,6 +5,11 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 # ── 표준 및 3rd-party ───────────────────────────────────────────────
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
+
+from plyer import accelerometer      # 센서
+from collections import deque
+import queue, time
+
 from numpy.fft import fft
 
 from kivy.app            import App
@@ -379,6 +384,68 @@ class FFTApp(App):
         else:
             request_permissions(need, _cb)
 
+
+    # FFTApp 안에 새 속성 실시간 가속도 분석을 위해
+    self.rt_on = False           # 토글 상태
+    self.rt_q  = queue.Queue()   # 센서 → FFT 스레드
+    self.rt_buf = deque(maxlen=256)  # 가속도 버퍼 (2초*128Hz 가정)
+    
+    # ---------- ① 토글  ----------
+    def toggle_realtime(self, *_):
+        self.rt_on = not self.rt_on
+        self.btn_rt.text = f"Realtime FFT ({'ON' if self.rt_on else 'OFF'})"
+    
+        if self.rt_on:
+            # 센서 시작 + 소비 스케줄
+            try:
+                accelerometer.enable()
+                Clock.schedule_interval(self._poll_accel, 0)     # 프레임마다 센서 읽기
+                threading.Thread(target=self._rt_fft_loop,
+                                 daemon=True).start()
+            except Exception as e:
+                self.log(f"센서 활성화 실패: {e}")
+                self.rt_on = False
+                self.btn_rt.text = "Realtime FFT (OFF)"
+        else:
+            accelerometer.disable()
+    
+    # ---------- ② 센서 polling ----------
+    def _poll_accel(self, dt):
+        if not self.rt_on:
+            return False                # Clock unschedule
+        try:
+            val = accelerometer.acceleration  # (x, y, z)
+            if val != (None, None, None):
+                # 단순합(진폭) 저장
+                self.rt_buf.append(sum(abs(v) for v in val))
+        except Exception:
+            pass
+    
+    # ---------- ③ FFT 백그라운드 ----------
+    def _rt_fft_loop(self):
+        while self.rt_on:
+            time.sleep(0.5)               # 2Hz 로 FFT 갱신
+            if len(self.rt_buf) < 64:     # 샘플 부족
+                continue
+            # 복사해서 계산
+            sig = np.array(self.rt_buf, dtype=float)
+            n   = len(sig)
+            dt  = 1/128.0                 # 샘플 간격(≈추정). 필요하면 가늠값 조정
+            freq = np.fft.fftfreq(n, d=dt)[:n//2]
+            vals = np.abs(fft(sig))[:n//2]
+    
+            mask = freq <= 50
+            freq, vals = freq[mask], vals[mask]
+            smooth = np.convolve(vals, np.ones(8)/8, 'same')
+    
+            pts = list(zip(freq, smooth))
+            mx_x, mx_y = 50, smooth.max()
+    
+            # 메인 쓰레드에서 그래프 갱신
+            Clock.schedule_once(lambda *_:
+                self.graph.update_graph([pts], [], mx_x, mx_y))
+    
+
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
@@ -392,6 +459,13 @@ class FFTApp(App):
         root.add_widget(self.btn_sel)
         root.add_widget(self.btn_run)
         root.add_widget(Button(text="EXIT", size_hint=(1,.1), on_press=self.stop))
+
+        # build() 안 – EXIT 버튼 위쪽에 추가, 실시간 가속도 분석을 위해
+        self.btn_rt  = Button(text="Realtime FFT (OFF)", size_hint=(1,.1),
+                              on_press=self.toggle_realtime)
+        root.add_widget(self.btn_rt)
+
+        
         self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
         Clock.schedule_once(self._ask_perm, 0)
