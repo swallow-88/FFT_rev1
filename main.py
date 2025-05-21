@@ -219,7 +219,7 @@ class GraphWidget(Widget):
 '''
 
 class GraphWidget(Widget):
-    pad_x, pad_y = 80, 30
+    PAD_X, PAD_Y = 80, 30
     COLORS   = [(1, 0, 0), (0, 1, 0)]   # 1번=빨, 2번=초록
     DIFF_CLR = (1, 1, 1)
     LINE_W   = 2.5
@@ -244,11 +244,11 @@ class GraphWidget(Widget):
     # ── 좌표 변환 ────────────────────────────────────────────
     # ─── 그래프 내부 좌표 변환 ─────────────────────────────
     def _scale(self, pts):
-        w, h = self.width-2*self.pad_x, self.height-2*self.pad_y
+        w, h = self.width-2*self.PAD_X, self.height-2*self.PAD_Y
         return [float(c)                                  # ← numpy → python float
                 for x, y in pts
-                for c in (self.pad_x + x/self.max_x*w,
-                           self.pad_y + y/self.max_y*h)]
+                for c in (self.PAD_X + x/self.max_x*w,
+                           self.PAD_Y + y/self.max_y*h)]
     # ── 그리기 보조 ───────────────────────────────────────────
     def _grid(self):
         gx, gy = (self.width-2*self.PAD_X)/10, (self.height-2*self.PAD_Y)/10
