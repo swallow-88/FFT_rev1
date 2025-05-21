@@ -418,16 +418,23 @@ class FFTApp(App):
     
     # ---------- ② 센서 polling ----------
     def _poll_accel(self, dt):
-        if not self.rt_on or accelerometer is None:
-            return False
+        """
+        매 프레임마다 센서를 읽어 각 축별 deque 에
+        (timestamp, 절대값(가속도)) 튜플을 저장.
+        """
+        if not self.rt_on:
+            return False  # Clock 에서 해제
+
         try:
-            x, y, z = accelerometer.acceleration
-            if None not in (x, y, z):
-                self.rt_buf['x'].append(x)
-                self.rt_buf['y'].append(y)
-                self.rt_buf['z'].append(z)
-        except Exception:
-            pass
+            ax, ay, az = accelerometer.acceleration
+            if None in (ax, ay, az):
+                return
+            now = time.time()
+            self.rt_buf['x'].append((now, abs(ax)))
+            self.rt_buf['y'].append((now, abs(ay)))
+            self.rt_buf['z'].append((now, abs(az)))
+        except Exception as e:
+            Logger.warning(f"accel read fail: {e}")
     
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
