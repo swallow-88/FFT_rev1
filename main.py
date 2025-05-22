@@ -30,13 +30,21 @@ from kivy.uix.widget     import Widget
 from kivy.uix.modalview  import ModalView
 from kivy.uix.popup      import Popup
 from kivy.graphics       import Line, Color
-from kivy.utils          import platform
 from plyer               import filechooser           # (SAF 실패 시 fallback)
 
 
 #오디오 활용
 #from jnius import autoclass, cast
 # 1) 맨 위쪽 ─ Android 용 import 는 조건부로!
+# --- 표준 -------------------------------------------------
+import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
+import numpy as np
+
+# ① Kivy platform 먼저!
+from kivy.utils import platform
+ANDROID = platform == "android"          # ★ 항상 최상단에서 정의
+
+# ② 이제 안심하고 조건부 import
 if ANDROID:
     from jnius import autoclass, cast, jarray        # ← 여기에만
     AudioRecord   = autoclass('android.media.AudioRecord')
