@@ -24,7 +24,7 @@ source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 # 기존
 #requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,sounddevice,python-sounddevice,portaudio
 # 변경
-requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy
+requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius
 #androidstorage4kivy@https://github.com/kivy-garden/androidstorage4kivy/archive/master.zip
 
 #android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
