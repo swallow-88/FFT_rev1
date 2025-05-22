@@ -33,6 +33,15 @@ from kivy.graphics       import Line, Color
 from kivy.utils          import platform
 from plyer               import filechooser           # (SAF 실패 시 fallback)
 
+
+#오디오 활용
+from jnius import autoclass, cast
+
+AudioRecord   = autoclass('android.media.AudioRecord')
+AudioFormat   = autoclass('android.media.AudioFormat')
+MediaRecorder = autoclass('android.media.MediaRecorder')
+ShortBuffer   = autoclass('java.nio.ShortBuffer')
+
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
 ANDROID = platform == "android"
 
@@ -269,7 +278,7 @@ class FFTApp(App):
             self.btn_sel.disabled = False
             return
 
-        need = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
+        need = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE, Permission.RECORD_AUDIO]
         MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
         if MANAGE:
             need.append(MANAGE)
@@ -310,73 +319,85 @@ class FFTApp(App):
             accelerometer.disable()
 
 
-    # 마이크 토글
-    # ─── ④·⑤·⑥번 : “마이크 관련” 메서드 묶음 ───────────
-    def toggle_mic(self, *_):
-        """UI 버튼 콜백 – ON/OFF 토글"""
-        self.mic_on = not self.mic_on
-        self.btn_mic.text = f"Mic FFT ({'ON' if self.mic_on else 'OFF'})"
-        if self.mic_on:
-            try:
-                self._start_mic_stream()          # ④
-            except Exception as e:
-                self.log(f"마이크 시작 실패: {e}")
-                self.mic_on = False
-                self.btn_mic.text = "Mic FFT (OFF)"
-        else:
-            self._stop_mic_stream()               # ④
 
-    # ④ 스트림 열고 닫기 -------------------------------------------------
-# ④ 스트림 열고 닫기 --------------------------------------------
-    def _start_mic_stream(self):
-        if not HAVE_SD:
-            self.log("⚠️  sounddevice 모듈이 없어 Mic FFT 를 사용할 수 없습니다")
-            return
-        self.mic_stream = sd.InputStream(
-            samplerate=44100, channels=1, dtype='float32',
-            blocksize=512, callback=self._on_mic_block)
-        self.mic_stream.start()
-        threading.Thread(target=self._mic_fft_loop, daemon=True).start()
+    SAMPLE_RATE   = 44100
+    MIC_BUF_FRMS  = 1024          # 한 번에 읽어 올 프레임 수
+    MIC_MAX_HZ    = 1500
 
-    def _stop_mic_stream(self):
+    def _mic_start(self):
+        """AudioRecord 열고 FFT 소비 스레드 기동"""
+        cfg_ch  = AudioFormat.CHANNEL_IN_MONO
+        cfg_fmt = AudioFormat.ENCODING_PCM_16BIT
+        min_buf = AudioRecord.getMinBufferSize(self.SAMPLE_RATE,
+                                               cfg_ch, cfg_fmt)
+        buf_sz  = max(min_buf, self.MIC_BUF_FRMS*2)   # short = 2바이트
+
+        self._j_rec = AudioRecord(MediaRecorder.AudioSource.MIC,
+                                  self.SAMPLE_RATE,
+                                  cfg_ch, cfg_fmt, buf_sz)
+        self._j_rec.startRecording()
+
+        self._mic_ring = deque(maxlen=4096)           # Python 측 버퍼
+        self._mic_on   = True
+        threading.Thread(target=self._mic_loop, daemon=True).start()
+
+    def _mic_stop(self):
+        self._mic_on = False
         try:
-            self.mic_stream.stop(); self.mic_stream.close()
+            self._j_rec.stop(); self._j_rec.release()
         except Exception:
             pass
 
-    # ⑤ 오디오 콜백 -----------------------------------------------------
-    def _on_mic_block(self, in_data, frames, time_info, status):
-        if not self.mic_on:
-            return
-        # in_data.shape == (frames, 1)
-        self.mic_buf.extend(in_data[:, 0])
+    def _mic_loop(self):
+        """백그라운드 – Java → numpy → FFT → 그래프"""
+        # Java short[] 를 한 번만 생성해서 재사용
+        j_short_arr = autoclass('jarray')('short')(self.MIC_BUF_FRMS)
+        np_int16    = np.empty(self.MIC_BUF_FRMS, dtype=np.int16)
 
-    # ⑥ FFT 백그라운드 루프 --------------------------------------------
-    def _mic_fft_loop(self):
-        while self.mic_on:
-            time.sleep(0.25)
-            if len(self.mic_buf) < 2048:
+        while self._mic_on:
+            # AudioRecord.read(short[] data, int offset, int size)
+            read = self._j_rec.read(j_short_arr, 0, self.MIC_BUF_FRMS)
+            if read <= 0:
                 continue
-            sig = np.array(self.mic_buf, dtype=float)
-            self.mic_buf.clear()
 
-            sig -= sig.mean(); sig *= np.hanning(len(sig))
-            n   = len(sig);  dt = 1/44100.0
-            freq = np.fft.fftfreq(n, d=dt)[:n//2]
-            amp  = np.abs(fft(sig))[:n//2]
+            # Java short[] → numpy 배열
+            ShortBuffer.wrap(j_short_arr).get(np_int16, 0, read)
+            self._mic_ring.extend(np_int16[:read])
 
-            mask = freq <= 1500
-            freq, amp = freq[mask], amp[mask]
-            smooth = np.convolve(amp, np.ones(16)/16, 'same')
+            if len(self._mic_ring) < 2048:
+                continue          # 샘플 부족 → 계속 읽기
 
-            pts  = list(zip(freq, smooth))
+            # -------- FFT --------
+            sig = np.array(self._mic_ring, dtype=float) / 32768.0
+            self._mic_ring.clear()
+
+            sig -= sig.mean()
+            sig *= np.hanning(len(sig))
+            n    = len(sig);  dt = 1.0 / self.SAMPLE_RATE
+            f    = np.fft.fftfreq(n, dt)[:n//2]
+            v    = np.abs(fft(sig))[:n//2]
+            m    = f <= self.MIC_MAX_HZ
+            f, v = f[m], v[m]
+            smooth = np.convolve(v, np.ones(16)/16, 'same')
+            pts    = list(zip(f, smooth))
+
             ymax = smooth.max()
-
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts], [], 1500, ymax))
+                self.graph.update_graph([pts], [], self.MIC_MAX_HZ, ymax))
+
+    def toggle_mic(self, *_):
+        if getattr(self, '_mic_on', False):
+            self._mic_stop()
+            self.btn_mic.text = "Mic FFT (OFF)"
+        else:
+            try:
+                self._mic_start()
+                self.btn_mic.text = "Mic FFT (ON)"
+            except Exception as e:
+                self.log(f"Mic start fail: {e}")
+                self.btn_mic.text = "Mic FFT (OFF)"
 
 
-  
     
     # ---------- ② 센서 polling ----------
     def _poll_accel(self, dt):
