@@ -36,9 +36,7 @@ from plyer               import filechooser           # (SAF 실패 시 fallback
 #오디오 활용
 #from jnius import autoclass, cast
 # 1) 맨 위쪽 ─ Android 용 import 는 조건부로!
-# --- 표준 -------------------------------------------------
-import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
-import numpy as np
+# --- 표준 ------------------------------------------------
 
 # ① Kivy platform 먼저!
 from kivy.utils import platform
@@ -173,32 +171,36 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # ① 기존 축 라벨 제거
+        """X-축은 max_x 에 따라 자동, Y-축은 지수표기"""
+        # 이전 축 라벨 삭제
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
-    
-        # ② X축 라벨 (max_x 크기에 따라 간격 조절)
-        if   self.max_x <=  60: step = 10
-        elif self.max_x <= 600: step = 100
-        else:                   step = 300            # 0-1500 Hz
-    
+
+        # ── X-축 -------------------------------------------------
+        if   self.max_x <=  60:
+            step = 10            # 0-60 Hz ⇒ 10 Hz 간격
+        elif self.max_x <= 600:
+            step = 100           # 0-600 Hz ⇒ 100 Hz
+        else:
+            step = 300           # 0-1500 Hz ⇒ 300 Hz
+
         nx = int(self.max_x // step) + 1
         for i in range(nx):
             x = self.PAD_X + i*(self.width-2*self.PAD_X)/(nx-1) - 20
             lbl = Label(text=f"{i*step:d} Hz",
-                        size_hint=(None,None), size=(60,20),
+                        size_hint=(None, None), size=(60, 20),
                         pos=(x, self.PAD_Y-28))
             lbl._axis = True
             self.add_widget(lbl)
-    
-        # ③ Y축 라벨 (좌·우, 지수 표기)
+
+        # ── Y-축 -------------------------------------------------
         for i in range(11):
             mag = self.max_y * i / 10
             y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
                 lbl = Label(text=f"{mag:.1e}",
-                            size_hint=(None,None), size=(60,20),
+                            size_hint=(None, None), size=(60, 20),
                             pos=(x, y))
                 lbl._axis = True
                 self.add_widget(lbl)
@@ -263,6 +265,11 @@ class GraphWidget(Widget):
             self.add_widget(info)
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
+    
+    SAMPLE_RATE   = 44100
+    MIC_BUF_FRMS  = 1024          # 한 번에 읽어 올 프레임 수
+    MIC_MAX_HZ    = 1500
+    
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -335,9 +342,7 @@ class FFTApp(App):
 
 
 
-    SAMPLE_RATE   = 44100
-    MIC_BUF_FRMS  = 1024          # 한 번에 읽어 올 프레임 수
-    MIC_MAX_HZ    = 1500
+
 
     def _mic_start(self):
         """AudioRecord 열고 FFT 소비 스레드 기동"""
