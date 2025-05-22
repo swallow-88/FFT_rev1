@@ -6,6 +6,14 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
 
+# ── 최상단 import 부분 -------------
+try:
+    import sounddevice as sd
+    HAVE_SD = True
+except Exception:
+    HAVE_SD = False
+
+
 from plyer import accelerometer      # 센서
 from collections import deque
 import queue, time
@@ -319,22 +327,16 @@ class FFTApp(App):
             self._stop_mic_stream()               # ④
 
     # ④ 스트림 열고 닫기 -------------------------------------------------
+# ④ 스트림 열고 닫기 --------------------------------------------
     def _start_mic_stream(self):
-        try:
-            import sounddevice as sd            # ← 여기서만 import
-        except ImportError:
-            self.log("⚠️  sounddevice 모듈이 없어서 Mic FFT를 사용할 수 없습니다")
-            self.mic_on = False
-            self.btn_mic.text = "Mic FFT (OFF)"
+        if not HAVE_SD:
+            self.log("⚠️  sounddevice 모듈이 없어 Mic FFT 를 사용할 수 없습니다")
             return
-          # 파일 맨 위 import 권장
         self.mic_stream = sd.InputStream(
             samplerate=44100, channels=1, dtype='float32',
-            blocksize=512,
-            callback=self._on_mic_block)          # ⑤
+            blocksize=512, callback=self._on_mic_block)
         self.mic_stream.start()
-        threading.Thread(target=self._mic_fft_loop,  # ⑥
-                         daemon=True).start()
+        threading.Thread(target=self._mic_fft_loop, daemon=True).start()
 
     def _stop_mic_stream(self):
         try:
@@ -466,8 +468,9 @@ class FFTApp(App):
         root.add_widget(self.btn_rt)
 
 
-        self.btn_mic = Button(text="Mic FFT (OFF)", size_hint=(1,.1),
-                              on_press=self.toggle_mic)
+        self.btn_mic = Button(text="Mic FFT (OFF)", size_hint=(1, .1),
+                              on_press=self.toggle_mic,
+                              disabled=not HAVE_SD)   # ← SD 없으면 버튼 비활성
         root.add_widget(self.btn_mic)
 
 
