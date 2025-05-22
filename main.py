@@ -35,13 +35,19 @@ from plyer               import filechooser           # (SAF 실패 시 fallback
 
 
 #오디오 활용
-from jnius import autoclass, cast
-
-AudioRecord   = autoclass('android.media.AudioRecord')
-AudioFormat   = autoclass('android.media.AudioFormat')
-MediaRecorder = autoclass('android.media.MediaRecorder')
-ShortBuffer   = autoclass('java.nio.ShortBuffer')
-
+#from jnius import autoclass, cast
+# 1) 맨 위쪽 ─ Android 용 import 는 조건부로!
+if ANDROID:
+    from jnius import autoclass, cast, jarray        # ← 여기에만
+    AudioRecord   = autoclass('android.media.AudioRecord')
+    AudioFormat   = autoclass('android.media.AudioFormat')
+    MediaRecorder = autoclass('android.media.MediaRecorder')
+    ShortBuffer   = autoclass('java.nio.ShortBuffer')
+else:
+    # PC 빌드-타임에는 dummy 로 채워 두면 컴파일만 통과함
+    autoclass = cast = jarray = lambda *a, **k: None
+    AudioRecord = AudioFormat = MediaRecorder = ShortBuffer = None
+    
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
 ANDROID = platform == "android"
 
@@ -72,6 +78,7 @@ if ANDROID:
         class _P:
             READ_EXTERNAL_STORAGE = WRITE_EXTERNAL_STORAGE = ""
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
+            RECORD_AUDIO = ""
         Permission = _P
 
     try:
