@@ -6,8 +6,6 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
 
-import sounddevice as sd 
-
 from plyer import accelerometer      # 센서
 from collections import deque
 import queue, time
@@ -143,59 +141,36 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 기존 축 레이블 제거
+        # ① 기존 축 라벨 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
-        
-        # X축 (10 Hz 간격, 0-50 Hz)
-        #for i in range(6):
-        #    x_lab = Label(text=f"{i*10:d} Hz",
-        #                  size_hint=(None,None), size=(60,20),
-        #                  pos=(self.PAD_X+i*(self.width-2*self.PAD_X)/5-20,
-        #                       self.PAD_Y-28))
-        #    x_lab._axis = True
-        #    self.add_widget(x_lab)
-
-        # Y축 (지수표기)
-        #for i in range(11):
-        #    mag = self.max_y*i/10
-        #    y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
-        
-            
-        #    for x in (self.PAD_X-68, self.width-self.PAD_X+10):
-        #        y_lab = Label(text=f"{mag:.1e}",
-        #                      size_hint=(None,None), size=(60,20),
-        #                      pos=(x, y))
-        #        y_lab._axis = True
-        #        self.add_widget(y_lab)
-            
-
-            # ── X축 : max_x 범위에 따라 간격 결정
-            if   self.max_x <=  60: step = 10
-            elif self.max_x <= 600: step = 100
-            else:                   step = 300          # 1500 Hz 까지
     
-            n = int(self.max_x // step) + 1
-            for i in range(n):
-                x = self.PAD_X + i*(self.width-2*self.PAD_X)/(n-1) - 20
-                lbl = Label(text=f"{i*step:d} Hz",
+        # ② X축 라벨 (max_x 크기에 따라 간격 조절)
+        if   self.max_x <=  60: step = 10
+        elif self.max_x <= 600: step = 100
+        else:                   step = 300            # 0-1500 Hz
+    
+        nx = int(self.max_x // step) + 1
+        for i in range(nx):
+            x = self.PAD_X + i*(self.width-2*self.PAD_X)/(nx-1) - 20
+            lbl = Label(text=f"{i*step:d} Hz",
+                        size_hint=(None,None), size=(60,20),
+                        pos=(x, self.PAD_Y-28))
+            lbl._axis = True
+            self.add_widget(lbl)
+    
+        # ③ Y축 라벨 (좌·우, 지수 표기)
+        for i in range(11):
+            mag = self.max_y * i / 10
+            y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
+            for x in (self.PAD_X-68, self.width-self.PAD_X+10):
+                lbl = Label(text=f"{mag:.1e}",
                             size_hint=(None,None), size=(60,20),
-                            pos=(x, self.PAD_Y-28))
+                            pos=(x, y))
                 lbl._axis = True
                 self.add_widget(lbl)
-    
-            # ── Y축 : 지수표기
-            for i in range(11):
-                mag = self.max_y * i / 10
-                y   = self.PAD_Y + i*(self.height-2*self.PAD_Y)/10 - 8
-                for x in (self.PAD_X-68, self.width-self.PAD_X+10):
-                    lbl = Label(text=f"{mag:.1e}",
-                                size_hint=(None,None), size=(60,20),
-                                pos=(x, y))
-                    lbl._axis = True
-                    self.add_widget(lbl)
-        
+            
     
     # ── 메인 그리기 ───────────────────────────────────────────
     def redraw(self,*_):
@@ -345,7 +320,14 @@ class FFTApp(App):
 
     # ④ 스트림 열고 닫기 -------------------------------------------------
     def _start_mic_stream(self):
-        import sounddevice as sd                  # 파일 맨 위 import 권장
+        try:
+            import sounddevice as sd            # ← 여기서만 import
+        except ImportError:
+            self.log("⚠️  sounddevice 모듈이 없어서 Mic FFT를 사용할 수 없습니다")
+            self.mic_on = False
+            self.btn_mic.text = "Mic FFT (OFF)"
+            return
+          # 파일 맨 위 import 권장
         self.mic_stream = sd.InputStream(
             samplerate=44100, channels=1, dtype='float32',
             blocksize=512,
