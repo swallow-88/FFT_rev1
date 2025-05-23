@@ -1,124 +1,129 @@
 """
-FFT CSV / Accel / Mic Viewer  – Android SAF & 권한 대응 안정판
+FFT CSV / Accel / Mic Viewer  –  Android SAF & Permission ready
+(2025-05 안정판)
 """
 
-# ──────────────────── 표준 라이브러리 ────────────────────
-import os, csv, sys, traceback, threading, itertools, datetime
-import urllib.parse, uuid, time
+# ─────────────── 기본·3rd-party ───────────────
+import os, csv, sys, traceback, threading, datetime, uuid, urllib.parse, time
 from collections import deque
-
-# ──────────────────── 과학 계열 ──────────────────────────
-import numpy as np
+import itertools, numpy as np
 from numpy.fft import fft
 
-# ──────────────────── Kivy / Plyer ───────────────────────
-from kivy.app import App
-from kivy.clock import Clock
-from kivy.logger import Logger
+from kivy.app      import App
+from kivy.clock    import Clock
+from kivy.logger   import Logger
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.widget import Widget
+from kivy.uix.label     import Label
+from kivy.uix.button    import Button
+from kivy.uix.widget    import Widget
 from kivy.uix.modalview import ModalView
-from kivy.uix.popup import Popup
-from kivy.graphics import Line, Color
-from kivy.utils import platform
-from plyer import filechooser, accelerometer
+from kivy.uix.popup     import Popup
+from kivy.graphics      import Line, Color
+from kivy.utils         import platform
+from plyer              import filechooser, accelerometer
 
-# ──────────────────── Android 전용 (있을 때) ─────────────
-ANDROID = platform == "android"
-toast = None
-SharedStorage = Permission = check_permission = request_permissions = None
-ANDROID_API = 0
-if ANDROID:
-    try:  from plyer import toast
-    except Exception: toast = None
-    try:  from androidstorage4kivy import SharedStorage
-    except Exception: SharedStorage = None
-    try:
-        from android.permissions import (Permission,
-                                          check_permission,
-                                          request_permissions)
-    except Exception:
-        # 빌드에 permissions recipe가 없으면 더미로 채움
-        class _P: READ_EXTERNAL_STORAGE=WRITE_EXTERNAL_STORAGE=READ_MEDIA_AUDIO=MANAGE_EXTERNAL_STORAGE=""
-        Permission=_P; check_permission=lambda *a,**k:True; request_permissions=lambda *a,**k:None
-    try:
-        from jnius import autoclass
-        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
-    except Exception:
-        ANDROID_API = 0
-
-# ──────────────────── 마이크 모듈 (선택) ──────────────────
+# 데스크톱 테스트용 optional
 try:
-    import sounddevice as sd          # 안드로이드에선 p4a recipe 필요
-    HAS_SD = True
+    import sounddevice as sd      # 윈/맥/리눅스에서만 사용
 except Exception:
     sd = None
-    HAS_SD = False                     # 모듈 없으면 마이크 기능 숨김
 
-# ═══════════════ 예외 → /sdcard/fft_crash.log ═════════════
-def _dump_crash(txt):
+# ─────────────── Android 특수 모듈 ─────────────
+ANDROID   = platform == "android"
+toast     = None
+SharedStorage = None
+Permission = check_permission = request_permissions = None
+ANDROID_API = 0
+
+if ANDROID:
+    from jnius import autoclass, cast
+
+    try:
+        from plyer import toast
+    except: pass
+
+    try:
+        from androidstorage4kivy import SharedStorage
+    except: pass
+
+    try:
+        from android.permissions import (check_permission,
+                                          request_permissions,
+                                          Permission)
+    except Exception:
+        # recipe 미포함 빌드 대비
+        class _Dummy: READ_EXTERNAL_STORAGE = WRITE_EXTERNAL_STORAGE = ""
+        Permission = _Dummy
+        check_permission  = lambda *a, **k: True
+        request_permissions = lambda *a, **k: None
+
+    try:
+        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
+    except: pass
+
+# ─────────────── 공통 유틸 ─────────────────────
+def _dump(txt:str):
+    """치명적 예외를 /sdcard/fft_crash.log 에 저장"""
     try:
         with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as fp:
-            fp.write("\n" + "="*60 + "\n" +
-                     datetime.datetime.now().isoformat() + "\n" + txt + "\n")
-    except Exception:
-        pass
+            fp.write("\n"+"="*60+"\n"+datetime.datetime.now().isoformat()+"\n")
+            fp.write(txt+"\n")
+    except: pass
     Logger.error(txt)
 
-def _ex(et, ev, tb):
-    _dump_crash("".join(traceback.format_exception(et, ev, tb)))
+def _ex(et,ev,tb):
+    _dump("".join(traceback.format_exception(et,ev,tb)))
     if ANDROID:
         Clock.schedule_once(lambda *_:
             Popup(title="Python Crash",
-                  content=Label(text=str(ev)),
-                  size_hint=(.9,.9)).open())
+                  content=Label(text=str(ev)), size_hint=(.9,.9)).open())
 sys.excepthook = _ex
 
-# ═══════════════ SAF URI → 캐시 경로 ══════════════════════
+
+# ─────────────── SAF helper ───────────────────
 def uri_to_file(u:str)->str|None:
-    if not u:                               return None
+    """SAF uri → 실제 파일(캐시 복사) path"""
+    if not u: return None
     if u.startswith("file://"):
-        p = urllib.parse.unquote(u[7:])
-        return p if os.path.exists(p) else None
-    if not u.startswith("content://"):       # 일반 경로
+        p = urllib.parse.unquote(u[7:]);  return p if os.path.exists(p) else None
+    if not u.startswith("content://"):   # 경로 문자열
         return u if os.path.exists(u) else None
-    if ANDROID and SharedStorage:            # SAF 복사
+    if ANDROID and SharedStorage:
         try:
-            return SharedStorage().copy_from_shared(u, uuid.uuid4().hex,
-                                                    to_downloads=False)
+            return SharedStorage().copy_from_shared(
+                u, uuid.uuid4().hex, to_downloads=False)
         except Exception as e:
-            Logger.error(f"SAF copy fail: {e}")
+            Logger.error(f"SharedStorage copy fail: {e}")
     return None
 
-# ═══════════════ 그래프 위젯 ══════════════════════════════
-class GraphWidget(Widget):
-    PAD_X, PAD_Y = 80, 30
-    COLORS   = [(1,0,0), (0,1,0), (0,0,1)]    # 빨·초·파
-    DIFF_CLR = (1,1,1)
-    LINE_W   = 2.4
 
-    def __init__(self, **kw):
+# ─────────────── 그래프 위젯 ───────────────────
+class GraphWidget(Widget):
+    PAD_X,PAD_Y = 80,30
+    COLORS  = [(1,0,0),(0,1,0),(0,0,1)]   # 빨/초/파
+    LINE_W  = 2.5
+    DIFF_CLR= (1,1,1)
+
+    def __init__(self,**kw):
         super().__init__(**kw)
-        self.datasets=[];  self.diff=[]
+        self.datasets=[]; self.diff=[]
         self.max_x=self.max_y=1
         self.bind(size=self.redraw)
 
-    def update_graph(self, ds, df, xm, ym):
-        self.max_x=max(1e-6,float(xm)); self.max_y=max(1e-6,float(ym))
-        self.datasets=[d for d in (ds or []) if d]
-        self.diff=df or []
+    def update_graph(self,ds,df,xm,ym):
+        self.datasets = [p for p in (ds or []) if p]
+        self.diff     = df or []
+        self.max_x    = max(1e-6,float(xm))
+        self.max_y    = max(1e-6,float(ym))
         self.redraw()
 
-    # ───────── 좌표 변환 ─────────
+    # ---------- 내부 그리기 ----------
     def _scale(self,pts):
         w,h=self.width-2*self.PAD_X, self.height-2*self.PAD_Y
         return [c for x,y in pts
                   for c in (self.PAD_X+x/self.max_x*w,
                             self.PAD_Y+y/self.max_y*h)]
 
-    # ───────── 눈금/라벨 ─────────
     def _grid(self):
         gx,gy=(self.width-2*self.PAD_X)/10,(self.height-2*self.PAD_Y)/10
         Color(.6,.6,.6)
@@ -129,29 +134,29 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X,self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 기존 축 라벨 제거
         for w in list(self.children):
             if getattr(w,"_axis",False): self.remove_widget(w)
 
-        # X축 자동 간격
-        step=10 if self.max_x<=60 else 100 if self.max_x<=600 else 300
+        # X 축 : max_x 범위 따라 간격 결정
+        if   self.max_x<=60:  step=10
+        elif self.max_x<=600: step=100
+        else:                 step=300
         n=int(self.max_x//step)+1
         for i in range(n):
-            x=self.PAD_X+i*(self.width-2*self.PAD_X)/(max(1,n-1))-20
-            lab=Label(text=f"{i*step:d} Hz",size_hint=(None,None),
-                      size=(60,20),pos=(x,self.PAD_Y-28)); lab._axis=True
-            self.add_widget(lab)
+            x=self.PAD_X+i*(self.width-2*self.PAD_X)/(n-1)-20
+            lbl=Label(text=f"{i*step} Hz",size_hint=(None,None),
+                      size=(60,20),pos=(x,self.PAD_Y-28)); lbl._axis=True
+            self.add_widget(lbl)
 
-        # Y축
+        # Y 축
         for i in range(11):
             mag=self.max_y*i/10
             y=self.PAD_Y+i*(self.height-2*self.PAD_Y)/10-8
-            for x in (self.PAD_X-68, self.width-self.PAD_X+10):
-                lab=Label(text=f"{mag:.1e}",size_hint=(None,None),
-                          size=(60,20),pos=(x,y)); lab._axis=True
-                self.add_widget(lab)
+            for x in (self.PAD_X-68,self.width-self.PAD_X+10):
+                lbl=Label(text=f"{mag:.1e}",size_hint=(None,None),
+                          size=(60,20),pos=(x,y)); lbl._axis=True
+                self.add_widget(lbl)
 
-    # ───────── 전체 그리기 ─────────
     def redraw(self,*_):
         self.canvas.clear()
         for w in list(self.children):
@@ -162,148 +167,153 @@ class GraphWidget(Widget):
         with self.canvas:
             self._grid(); self._labels()
             for idx,pts in enumerate(self.datasets):
+                if not pts: continue
                 Color(*self.COLORS[idx%len(self.COLORS)])
                 Line(points=self._scale(pts),width=self.LINE_W)
-                try:
-                    fx,fy=max(pts,key=lambda p:p[1])
-                    sx,sy=self._scale([(fx,fy)])[0:2]
-                    peaks.append((fx,fy,sx,sy))
-                except ValueError: pass
+                fx,fy=max(pts,key=lambda p:p[1]); sx,sy=self._scale([(fx,fy)])[0:2]
+                peaks.append((fx,sx,sy))
             if self.diff:
-                Color(*self.DIFF_CLR)
-                Line(points=self._scale(self.diff),width=self.LINE_W)
+                Color(*self.DIFF_CLR); Line(points=self._scale(self.diff),width=self.LINE_W)
 
-        for fx,_,sx,sy in peaks:
-            lab=Label(text=f"▲ {fx:.1f} Hz",size_hint=(None,None),
-                      size=(85,22),pos=(sx-28,sy+6)); lab._peak=True
-            self.add_widget(lab)
+        for fx,sx,sy in peaks:
+            lbl=Label(text=f"▲ {fx:.1f} Hz",size_hint=(None,None),
+                      size=(80,22),pos=(sx-30,sy+6)); lbl._peak=True
+            self.add_widget(lbl)
 
-        if len(peaks)>=2:
-            delta=abs(peaks[0][0]-peaks[1][0])
-            bad=delta>1.5
-            clr=(1,0,0,1) if bad else (0,1,0,1)
-            info=Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
-                       size_hint=(None,None),size=(190,24),
-                       pos=(self.PAD_X,self.height-self.PAD_Y+6),
-                       color=clr); info._peak=True
-            self.add_widget(info)
 
-# ═══════════════ 메인 App ══════════════════════════════════
+# ─────────────── Mic(안드) 래퍼 ───────────────
+if ANDROID:
+    class AndroidMic:
+        """단순 16 kHz mono PCM 스트림 → deque 로 push"""
+        RATE   = 16000
+        CHUNK  = 1024
+
+        def __init__(self, dq:deque):
+            self.dq=dq
+            self._rec=None
+
+        def start(self):
+            AudioRecord      = autoclass("android.media.AudioRecord")
+            MediaRecorder    = autoclass("android.media.MediaRecorder")
+            AudioFormat      = autoclass("android.media.AudioFormat")
+            buf_size = AudioRecord.getMinBufferSize(
+                self.RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT)
+            self._rec = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                self.RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                max(buf_size, self.CHUNK*2))
+            self._rec.startRecording()
+            threading.Thread(target=self._loop,daemon=True).start()
+
+        def _loop(self):
+            import array, struct
+            data=array.array('h',[0]*self.CHUNK)
+            while self._rec and self._rec.getRecordingState()==3:
+                read=self._rec.read(data,0,len(data))
+                if read>0:
+                    # 정규화 (-1..1)
+                    self.dq.extend([s/32768.0 for s in data[:read]])
+
+        def stop(self):
+            try:
+                self._rec.stop(); self._rec.release()
+            except Exception: pass
+            self._rec=None
+else:
+    AndroidMic=None
+
+
+# ─────────────── 메인 앱 ──────────────────────
 class FFTApp(App):
-    # ───── 초기화 ─────
     def __init__(self,**kw):
         super().__init__(**kw)
-        self.paths=[]
-        # 가속도
+        # accel
         self.rt_on=False
-        self.rt_buf={ax:deque(maxlen=256) for ax in ('x','y','z')}
-        # 마이크
+        self.rt_buf={ax:deque(maxlen=256) for ax in "xyz"}
+        # mic
         self.mic_on=False
-        self.mic_buf=deque(maxlen=44100)          # 1 초 44.1 k 샘플
-        self.mic_thread=None
+        self.mic_buf=deque(maxlen=4096)
+        self._mic=None   # AndroidMic or sounddevice.stream
 
-    # ───── Util log ─────
+    # ---------- 공통 로그 ----------
     def log(self,msg):
         Logger.info(msg); self.label.text=msg
-        if toast:
+        if toast: 
             try: toast.toast(msg)
-            except Exception: pass
+            except: pass
 
-    # ───── 권한 체크 (파일 I/O) ─────
-    def _ask_perm(self,*_):
-        if not ANDROID or SharedStorage:
-            self.btn_sel.disabled=False; return
-        need=[Permission.READ_EXTERNAL_STORAGE,Permission.WRITE_EXTERNAL_STORAGE]
-        if getattr(Permission,"MANAGE_EXTERNAL_STORAGE",None):
-            need.append(Permission.MANAGE_EXTERNAL_STORAGE)
-        def _cb(p,g):
-            self.btn_sel.disabled=not any(g)
-            if not any(g): self.log("저장소 권한 거부됨")
-        if all(check_permission(p) for p in need):
-            self.btn_sel.disabled=False
-        else:
-            request_permissions(need,_cb)
-
-    # ═══════ UI 빌드 ═══════
+    # ---------- UI ----------
     def build(self):
         root=BoxLayout(orientation="vertical",padding=10,spacing=10)
-        self.label=Label(text="Pick 1 or 2 CSV files",size_hint=(1,.1))
+        self.label=Label(text="Pick CSV or use sensors",size_hint=(1,.1))
         self.btn_sel=Button(text="Select CSV",disabled=True,size_hint=(1,.1),
                             on_press=self.open_chooser)
         self.btn_run=Button(text="FFT RUN",disabled=True,size_hint=(1,.1),
                             on_press=self.run_fft)
+        self.btn_rt =Button(text="Realtime Accel FFT (OFF)",size_hint=(1,.1),
+                            on_press=self.toggle_rt)
+        self.btn_mic=Button(text="Mic FFT (OFF)",size_hint=(1,.1),
+                            on_press=self.toggle_mic)
         root.add_widget(self.label); root.add_widget(self.btn_sel)
-        root.add_widget(self.btn_run)
-        self.btn_rt=Button(text="Realtime FFT (OFF)",size_hint=(1,.1),
-                           on_press=self.toggle_realtime)
-        root.add_widget(self.btn_rt)
-
-        # 마이크 버튼 (sounddevice 가 있을 때만 활성)
-        if HAS_SD:
-            self.btn_mic=Button(text="Mic FFT (OFF)",size_hint=(1,.1),
-                                on_press=self.toggle_mic)
-        else:
-            self.btn_mic=Button(text="Mic FFT (미지원)",size_hint=(1,.1),
-                                disabled=True)
+        root.add_widget(self.btn_run); root.add_widget(self.btn_rt)
         root.add_widget(self.btn_mic)
-
         root.add_widget(Button(text="EXIT",size_hint=(1,.1),on_press=self.stop))
         self.graph=GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
         Clock.schedule_once(self._ask_perm,0)
         return root
 
-    # ═══════ 파일 선택 ═══════
+    # ---------- 권한 ----------
+    def _ask_perm(self,*_):
+        if not ANDROID:
+            self.btn_sel.disabled=False; return
+        need=[Permission.READ_EXTERNAL_STORAGE,Permission.WRITE_EXTERNAL_STORAGE]
+        aud = getattr(Permission,"RECORD_AUDIO",None)
+        if aud: need.append(aud)
+        if all(check_permission(p) for p in need):
+            self.btn_sel.disabled=False
+        else:
+            request_permissions(need, lambda *_: setattr(self.btn_sel,"disabled",False))
+
+    # ---------- CSV ----------
     def open_chooser(self,*_):
-        if ANDROID and ANDROID_API>=30:
-            from jnius import autoclass
-            Env=autoclass("android.os.Environment")
-            if not Env.isExternalStorageManager():
-                self.log("설정→모든파일 권한 필요"); return
         if ANDROID and SharedStorage:
             try:
-                SharedStorage().open_file(callback=self.on_choose,
-                                          multiple=True,mime_type="text/*")
-                return
-            except Exception as e: self.log(f"SAF fail {e}")
-        filechooser.open_file(on_selection=self.on_choose,multiple=True,
-                              filters=[("CSV","*.csv")],native=False)
+                SharedStorage().open_file(callback=self.on_choose,multiple=True,mime_type="text/*"); return
+            except: pass
+        filechooser.open_file(on_selection=self.on_choose,multiple=True,filters=[("CSV","*.csv")])
 
     def on_choose(self,sel):
         if not sel: return
-        self.paths=[]
-        for raw in sel[:2]:
-            real=uri_to_file(raw)
-            if not real: self.log("복사 실패"); return
-            self.paths.append(real)
-        self.label.text=" · ".join(os.path.basename(p) for p in self.paths)
+        self.paths=[uri_to_file(u) for u in sel[:2]]
+        self.label.text=" · ".join(os.path.basename(p) for p in self.paths if p)
         self.btn_run.disabled=False
 
-    # ═══════ CSV FFT ═══════
     def run_fft(self,*_):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg,daemon=True).start()
 
     def _fft_bg(self):
-        res=[]
+        out=[]; diff=[]
         for p in self.paths:
-            pts,xm,ym=self.csv_fft(p)
-            if pts is None: self.log("CSV parse err"); return
-            res.append((pts,xm,ym))
-        if len(res)==1:
-            pts,xm,ym=res[0]
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts],[],xm,ym))
+            pts,xm,ym=self._csv_fft(p)
+            if pts is None: self.log("CSV parse error"); return
+            out.append((pts,xm,ym))
+        if len(out)==1:
+            pts,xm,ym=out[0]
+            Clock.schedule_once(lambda *_:self.graph.update_graph([pts],[],xm,ym))
         else:
-            (f1,x1,y1),(f2,x2,y2)=res
-            diff=[(f1[i][0],abs(f1[i][1]-f2[i][1]))
-                  for i in range(min(len(f1),len(f2)))]
-            xm=max(x1,x2); ym=max(y1,y2,max(y for _,y in diff))
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([f1,f2],diff,xm,ym))
+            (p1,x1,y1),(p2,x2,y2)=out
+            diff=[(p1[i][0],abs(p1[i][1]-p2[i][1])) for i in range(min(len(p1),len(p2)))]
+            mx=max(x1,x2); my=max(y1,y2,max(v for _,v in diff))
+            Clock.schedule_once(lambda *_:self.graph.update_graph([p1,p2],diff,mx,my))
         Clock.schedule_once(lambda *_: setattr(self.btn_run,"disabled",False))
 
     @staticmethod
-    def csv_fft(path):
+    def _csv_fft(path):
         try:
             t,a=[],[]
             with open(path) as f:
@@ -315,92 +325,94 @@ class FFTApp(App):
             f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
             v=np.abs(fft(a))[:len(a)//2]
             m=f<=50; f,v=f[m],v[m]
-            s=np.convolve(v,np.ones(10)/10,'same')
-            return list(zip(f,s)), 50, s.max()
+            v=np.convolve(v,np.ones(10)/10,'same')
+            return list(zip(f,v)),50,v.max()
         except Exception as e:
-            Logger.error(f"CSV FFT err {e}"); return None,0,0
+            Logger.error(f"csv_fft err {e}"); return None,0,0
 
-    # ═══════ 가속도 실시간 ═══════
-    def toggle_realtime(self,*_):
+    # ---------- Realtime Accel ----------
+    def toggle_rt(self,*_):
         self.rt_on=not self.rt_on
-        self.btn_rt.text=f"Realtime FFT ({'ON' if self.rt_on else 'OFF'})"
-        if self.rt_on:                              # 시작
-            accelerometer.enable()
-            Clock.schedule_interval(self._poll_accel,0)
-            threading.Thread(target=self._rt_fft_loop,daemon=True).start()
-        else:                                       # 중지
-            try: accelerometer.disable()
-            except Exception: pass
+        self.btn_rt.text=f"Realtime Accel FFT ({'ON' if self.rt_on else 'OFF'})"
+        if self.rt_on:
+            try:
+                accelerometer.enable()
+                Clock.schedule_interval(self._poll_accel,0)
+                threading.Thread(target=self._rt_loop,daemon=True).start()
+            except Exception as e:
+                self.log(str(e)); self.toggle_rt()
+        else:
+            accelerometer.disable()
 
     def _poll_accel(self,dt):
         if not self.rt_on: return False
-        try:
-            ax,ay,az=accelerometer.acceleration
-            if None in (ax,ay,az): return
-            now=time.time()
-            self.rt_buf['x'].append((now,abs(ax)))
-            self.rt_buf['y'].append((now,abs(ay)))
-            self.rt_buf['z'].append((now,abs(az)))
-        except Exception as e:
-            Logger.warning(f"acc read fail {e}")
+        ax,ay,az=accelerometer.acceleration
+        if None in (ax,ay,az): return
+        now=time.time()
+        for v,k in zip((ax,ay,az),"xyz"):
+            self.rt_buf[k].append((now,abs(v)))
 
-    def _rt_fft_loop(self):
+    def _rt_loop(self):
         while self.rt_on:
-            time.sleep(1)                           # 1 초 윈도우
-            if any(len(self.rt_buf[a])<128 for a in ('x','y','z')):
-                continue
-            datasets=[]; ymax=0
-            for axis in ('x','y','z'):
-                ts,val=zip(*self.rt_buf[axis])
-                sig=np.asarray(val,float); n=len(sig)
-                dt=(ts[-1]-ts[0])/(n-1)
-                sig-=sig.mean(); sig*=np.hanning(n)
-                freq=np.fft.fftfreq(n,d=dt)[:n//2]
-                amp =np.abs(fft(sig))[:n//2]
-                m=freq<=50; freq,amp=freq[m],amp[m]
-                sm=np.convolve(amp,np.ones(8)/8,'same')
-                datasets.append(list(zip(freq,sm)))
-                ymax=max(ymax,sm.max())
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph(datasets,[],50,ymax))
+            time.sleep(0.5)
+            if any(len(self.rt_buf[k])<64 for k in "xyz"): continue
+            ds=[]; ymax=0
+            for k in "xyz":
+                ts,val=zip(*self.rt_buf[k]); sig=np.asarray(val)
+                sig-=sig.mean(); sig*=np.hanning(len(sig))
+                dt=(ts[-1]-ts[0])/(len(sig)-1)
+                f=np.fft.fftfreq(len(sig),d=dt)[:len(sig)//2]
+                a=np.abs(fft(sig))[:len(sig)//2]
+                m=f<=50; f,a=f[m],a[m]
+                a=np.convolve(a,np.ones(8)/8,'same')
+                ds.append(list(zip(f,a))); ymax=max(ymax,a.max())
+            Clock.schedule_once(lambda *_: self.graph.update_graph(ds,[],50,ymax))
 
-    # ═══════ 마이크 실시간 (sounddevice 있을 때) ═══════
+    # ---------- Mic ----------
     def toggle_mic(self,*_):
-        if not HAS_SD: return
         self.mic_on=not self.mic_on
         self.btn_mic.text=f"Mic FFT ({'ON' if self.mic_on else 'OFF'})"
         if self.mic_on:
             try:
-                self.stream=sd.InputStream(samplerate=44100,channels=1,
-                                           blocksize=2048,dtype='float32',
-                                           callback=self._on_mic_block)
-                self.stream.start()
-                self.mic_thread=threading.Thread(target=self._mic_fft_loop,
-                                                 daemon=True); self.mic_thread.start()
+                self._start_mic()
             except Exception as e:
-                self.log(f"Mic start fail {e}"); self.mic_on=False
-                self.btn_mic.text="Mic FFT (OFF)"
+                self.log(f"Mic start fail: {e}"); self.toggle_mic()
         else:
-            try: self.stream.stop(); self.stream.close()
-            except Exception: pass
+            self._stop_mic()
 
-    def _on_mic_block(self,in_data,frames,_,__):
-        if self.mic_on: self.mic_buf.extend(in_data[:,0])
+    def _start_mic(self):
+        if ANDROID:
+            self._mic=AndroidMic(self.mic_buf); self._mic.start()
+        else:
+            if sd is None: raise RuntimeError("sounddevice not installed")
+            self._mic=sd.InputStream(samplerate=44100,channels=1,blocksize=1024,
+                                      callback=lambda d,f,ti,st: self.mic_buf.extend(d[:,0]))
+            self._mic.start()
+        threading.Thread(target=self._mic_loop,daemon=True).start()
 
-    def _mic_fft_loop(self):
+    def _stop_mic(self):
+        if not self._mic: return
+        if ANDROID:
+            self._mic.stop()
+        else:
+            try: self._mic.stop(); self._mic.close()
+            except: pass
+        self._mic=None
+
+    def _mic_loop(self):
+        rate=16000 if ANDROID else 44100
         while self.mic_on:
-            time.sleep(1)                   # 1 초마다
-            if len(self.mic_buf)<44100: continue
-            sig=np.array([self.mic_buf.popleft() for _ in range(44100)])
+            time.sleep(0.25)
+            if len(self.mic_buf)<2048: continue
+            sig=np.array([self.mic_buf.popleft() for _ in range(len(self.mic_buf))])
             sig-=sig.mean(); sig*=np.hanning(len(sig))
-            freq=np.fft.fftfreq(len(sig),d=1/44100)[:len(sig)//2]
-            amp =np.abs(fft(sig))[:len(sig)//2]
-            m=freq<=1500; freq,amp=freq[m],amp[m]
-            sm=np.convolve(amp,np.ones(16)/16,'same')
-            ymax=sm.max()
+            f=np.fft.fftfreq(len(sig),d=1/rate)[:len(sig)//2]
+            a=np.abs(fft(sig))[:len(sig)//2]
+            m=f<=1500; f,a=f[m],a[m]
+            a=np.convolve(a,np.ones(16)/16,'same')
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph([list(zip(freq,sm))],[],1500,ymax))
+                self.graph.update_graph([list(zip(f,a))],[],1500,a.max()))
 
-# ═══════════════ 실행 ═════════════════════════════════════
+# ─────────────── 런 ───────────────────────────
 if __name__=="__main__":
     FFTApp().run()
