@@ -29,7 +29,7 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius,port
 
 #android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 #,READ_MEDIA_IMAGES,READ_MEDIA_AUDIO,READ_MEDIA_VIDEO
-
+p4a.local_recipes = recipes
 android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 
 
