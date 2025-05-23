@@ -24,7 +24,7 @@ source.include_exts = py,kv,atlas,png,jpg,ttf,CSV
 # 기존
 #requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,sounddevice,python-sounddevice,portaudio
 # 변경
-requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius
+requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius,portaudio,sounddevice
 #androidstorage4kivy@https://github.com/kivy-garden/androidstorage4kivy/archive/master.zip
 
 #android.permissions = READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
@@ -33,6 +33,7 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius
 android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 
 
+# 필요하다면 ant, gradle, ndk 버전은 그대로 두세요
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
 android.api                 = 33
