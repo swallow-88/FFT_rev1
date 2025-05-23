@@ -6,6 +6,12 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 import os, csv, sys, traceback, threading, itertools, datetime, uuid, urllib.parse
 import numpy as np
 
+try:                                      # ★ 추가
+    import sounddevice as sd              # 데스크톱 · 안드로이드 p4a recipe 가 있을 때만
+except Exception:
+    sd = None
+
+
 from plyer import accelerometer      # 센서
 from collections import deque
 import queue, time
@@ -363,7 +369,14 @@ class FFTApp(App):
             'y': deque(maxlen=256),
             'z': deque(maxlen=256),
         }
-    
+
+
+        #### ★ 추가 : 마이크 FFT 상태 ####
+        self.mic_on   = False
+        self.mic_buf  = deque(maxlen=44_100)   # 1 s 창(44 kHz × 1 s)
+        self.mic_sr   = 44_100                 # 고정 샘플레이트
+        self.mic_strm = None
+        ###################################
 
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
     def log(self, msg: str):
@@ -512,7 +525,18 @@ class FFTApp(App):
                               on_press=self.toggle_realtime)
         root.add_widget(self.btn_rt)
 
+
+        # 마이크 FFT 버튼: sounddevice 가 있을 때만
+        if sd is not None:
+            self.btn_mic = Button(text="Mic FFT (OFF)",
+                                  size_hint=(1,.1), on_press=self.toggle_mic)
+        else:
+            self.btn_mic = Button(text="Mic FFT (N/A)",
+                                  size_hint=(1,.1), disabled=True)
+        root.add_widget(self.btn_mic)
         
+
+       
         self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
         Clock.schedule_once(self._ask_perm, 0)
@@ -642,6 +666,82 @@ class FFTApp(App):
         except Exception as e:
             Logger.error(f"FFT err {e}")
             return None,0,0
+
+    #### -------------------------------------------------- ####
+    #### ★  마이크 FFT 토글 & 처리 메서드  #####################
+    #### -------------------------------------------------- ####
+    def toggle_mic(self, *_):
+        """Mic FFT 버튼 콜백 – ON/OFF"""
+        if sd is None:
+            self.log("❌ sounddevice 모듈이 없습니다")
+            return
+        self.mic_on  = not self.mic_on
+        self.btn_mic.text = f"Mic FFT ({'ON' if self.mic_on else 'OFF'})"
+        if self.mic_on:
+            try:
+                self._start_mic_stream()
+            except Exception as e:
+                self.log(f"마이크 시작 실패: {e}")
+                self.mic_on = False
+                self.btn_mic.text = "Mic FFT (OFF)"
+        else:
+            self._stop_mic_stream()
+
+    # 스트림 열기/닫기 --------------------------------------------------
+    def _start_mic_stream(self):
+        self.mic_buf.clear()
+        self.mic_strm = sd.InputStream(samplerate=self.mic_sr,
+                                       channels=1, dtype='float32',
+                                       blocksize=1024,
+                                       callback=self._on_mic_block)
+        self.mic_strm.start()
+        threading.Thread(target=self._mic_fft_loop,
+                         daemon=True).start()
+
+    def _stop_mic_stream(self):
+        try:
+            self.mic_strm.stop(); self.mic_strm.close()
+        except Exception:
+            pass
+        self.mic_on = False
+        self.btn_mic.text = "Mic FFT (OFF)"
+
+    # 오디오 콜백 – 버퍼에 샘플 푸시 -------------------------------
+    def _on_mic_block(self, in_data, frames, time_info, status):
+        if self.mic_on:
+            self.mic_buf.extend(in_data[:,0])
+
+    # 백그라운드 FFT 루프 ------------------------------------------
+    def _mic_fft_loop(self):
+        """
+        1 s(44100 샘플) 모을 때마다 0–1500 Hz FFT → 그래프
+        """
+        win = self.mic_sr               # 1 초
+        while self.mic_on:
+            time.sleep(0.1)
+            if len(self.mic_buf) < win:
+                continue
+            # 1 초 창 가져오고 버퍼 비우기
+            sig = np.array([self.mic_buf.popleft() for _ in range(win)],
+                           dtype=float)
+            sig -= sig.mean()
+            sig *= np.hanning(len(sig))
+
+            freq = np.fft.rfftfreq(len(sig), d=1/self.mic_sr)
+            amp  = np.abs(np.fft.rfft(sig))
+
+            mask = freq <= 1500
+            freq, amp = freq[mask], amp[mask]
+            amp  = np.convolve(amp, np.ones(16)/16, 'same')
+
+            pts = list(zip(freq, amp))
+            ymax = amp.max()
+
+            # 그래프 갱신 (메인 스레드)
+            Clock.schedule_once(lambda *_:
+                self.graph.update_graph([pts], [], 1500, ymax))
+    #### -------------------------------------------------- ####
+
 
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
