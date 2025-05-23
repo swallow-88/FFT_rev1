@@ -31,6 +31,46 @@ from kivy.graphics       import Line, Color
 from kivy.utils          import platform
 from plyer               import filechooser           # (SAF 실패 시 fallback)
 
+
+from jnius import autoclass, cast
+import numpy as np, threading, time
+
+# JAVA 클래스 핸들
+AudioRecord   = autoclass('android.media.AudioRecord')
+MediaRecorder = autoclass('android.media.MediaRecorder')
+AudioFormat   = autoclass('android.media.AudioFormat')
+
+SR   = 11025                      # 샘플레이트 (낮출수록 CPU↓)
+CHAN = AudioFormat.CHANNEL_IN_MONO
+FMT  = AudioFormat.ENCODING_PCM_16BIT
+BUF  = AudioRecord.getMinBufferSize(SR, CHAN, FMT)
+
+rec  = AudioRecord(MediaRecorder.AudioSource.DEFAULT,
+                   SR, CHAN, FMT, BUF)
+
+rec.startRecording()
+
+self.mic_on = True
+buf = np.zeros(BUF//2, dtype=np.int16)   # short == 2byte
+
+def _mic_loop():
+    win = []
+    while self.mic_on:
+        read = rec.read(buf, buf.size)
+        if read > 0:
+            win.extend(buf[:read])
+            # 4096 샘플 쌓이면 FFT
+            if len(win) >= 4096:
+                sig = np.array(win[:4096], dtype=np.float32) / 32768.0
+                win = win[2048:]          # 50 % overlap
+                _do_fft(sig)              # → 그래프 갱신
+        else:
+            time.sleep(0.01)
+
+threading.Thread(target=_mic_loop, daemon=True).start()
+
+
+
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
 ANDROID = platform == "android"
 
@@ -54,6 +94,12 @@ if ANDROID:
     try:
         from android.permissions import (
             check_permission, request_permissions, Permission)
+        def _ask_audio_perm(self):
+            if check_permission(Permission.RECORD_AUDIO):
+                self._start_mic()
+            else:
+                request_permissions([Permission.RECORD_AUDIO], lambda *_: self._start_mic())
+        
     except Exception:
         # permissions recipe 가 없는 빌드용 더미
         check_permission = lambda *a, **kw: True
@@ -62,6 +108,7 @@ if ANDROID:
             READ_EXTERNAL_STORAGE = WRITE_EXTERNAL_STORAGE = ""
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
         Permission = _P
+
 
     try:
         from jnius import autoclass
@@ -104,130 +151,6 @@ def uri_to_file(u: str) -> str | None:
             Logger.error(f"SAF copy fail: {e}")
     return None
 
-'''
-#  간단 그래프 위젯  –  고정 색상·굵기 / 피크·Δ(정상·고장) 표시 안정판
-# ────────────────────────────────────────────────────────────────
-class GraphWidget(Widget):
-    """2 개의 FFT 곡선을 그리고, 각 곡선의 **최대 피크 주파수**를 그래프
-    위에 표시한다."""
-    pad_x, pad_y = 80, 30
-    COLORS  = [(1, 0, 0),   # 첫 번째 CSV  → 빨간색
-               (0, 1, 0)]   # 두 번째 CSV  → 녹  색
-    LINE_W  = 2.4           # 선 굵기
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.datasets, self.diff = [], []
-        self.max_x = self.max_y = 1
-        self.bind(size=self.redraw)
-
-    # ---------- 외부 호출 ----------
-    def update_graph(self, ds, df, xm, ym):
-        # 데이터 유효성 1차 확인
-        ds = ds or []
-        ds = [p for p in ds if p]          # None 요소 제거
-        if not ds:
-            Logger.warning("Graph: empty dataset, skip draw")
-            return
-    
-        # diff 역시 리스트가 아닐 경우 방지
-        df = df if isinstance(df, list) else []
-    
-        # 0-division 가드
-        self.max_x = max(1e-6, xm)
-        self.max_y = max(1e-6, ym)
-    
-        self.datasets, self.diff = ds, df
-        self.redraw()
-
-    # ---------- 내부 도우미 ----------
-    def _scale(self, pts):
-        w, h = max(1, self.width-2*self.pad_x), max(1, self.height-2*self.pad_y)
-        out = []
-        for x, y in pts:
-            out += [self.pad_x + x/self.max_x*w,
-                    self.pad_y + y/self.max_y*h]
-        return out
-
-    def _grid(self):
-        gx, gy = (self.width-2*self.pad_x)/10, (self.height-2*self.pad_y)/10
-        Color(.6, .6, .6)
-        for i in range(11):
-            Line(points=[self.pad_x+i*gx, self.pad_y,
-                         self.pad_x+i*gx, self.height-self.pad_y])
-            Line(points=[self.pad_x, self.pad_y+i*gy,
-                         self.width-self.pad_x, self.pad_y+i*gy])
-
-    def _labels(self):
-        # 기존 축 라벨 제거
-        for w in list(self.children):
-            if getattr(w, "_axis", False):
-                self.remove_widget(w)
-
-        # X축: 0–50 Hz, 10 Hz 간격
-        for i in range(6):
-            freq = 10 * i
-            x = self.pad_x + i*(self.width-2*self.pad_x)/5 - 18
-            lab = Label(text=f"{freq:d} Hz", size_hint=(None,None),
-                        size=(55,20), pos=(x, self.pad_y-28))
-            lab._axis = True
-            self.add_widget(lab)
-
-        # Y축(좌·우)
-        for i in range(11):
-            mag = self.max_y*i/10
-            y   = self.pad_y + i*(self.height-2*self.pad_y)/10 - 8
-            for x in (self.pad_x-68, self.width-self.pad_x+10):
-                lab = Label(text=f"{mag:.1e}", size_hint=(None,None),
-                            size=(65,20), pos=(x,y))
-                lab._axis = True
-                self.add_widget(lab)
-
-    # ---------- 메인 그리기 ----------
-    def redraw(self, *_):
-        self.canvas.clear()
-
-        # 이전 피크 라벨 제거
-        for w in list(self.children):
-            if getattr(w, "_peak", False):
-                self.remove_widget(w)
-
-        if not self.datasets:
-            return
-
-        peaks = []   # [(fx, fy, sx, sy)]
-
-        with self.canvas:
-            self._grid()
-            self._labels()
-
-            # FFT 곡선
-            for idx, pts in enumerate(self.datasets):
-                scaled = self._scale(pts)
-                if len(scaled) < 4:
-                    continue                      # 점 2개 미만이면 skip
-                Color(*self.COLORS[idx % len(self.COLORS)])
-                Line(points=scaled, width=self.LINE_W)
-
-                # 최고점
-                fx, fy = max(pts, key=lambda p: p[1])
-                sx, sy = self._scale([(fx, fy)])[0:2]
-                peaks.append((fx, sx, sy))
-
-            # 차이선(흰색) — 필요하면 사용
-            if self.diff:
-                diff_scaled = self._scale(self.diff)
-                if len(diff_scaled) >= 4:
-                    Color(1,1,1); Line(points=diff_scaled, width=self.LINE_W)
-
-        # 피크 주파수 라벨
-        for fx, sx, sy in peaks:
-            lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None,None), size=(90,22),
-                        pos=(sx-30, sy+6))
-            lbl._peak = True
-            self.add_widget(lbl)
-'''
 
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
