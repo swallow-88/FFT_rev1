@@ -301,18 +301,16 @@ class GraphWidget(Widget):
                 lbl._axis = True
                 self.add_widget(lbl)
 
+
     def redraw(self, *_):
         try:
-            # 충분한 크기가 확보되지 않으면 건너뛰기
-            if self.width <= 2 * self.PAD_X or self.height <= 2 * self.PAD_Y:
+            if self.width <= 2*self.PAD_X or self.height <= 2*self.PAD_Y:
                 return
     
-            # ① 기존 축·피크 레이블만 제거
-            for child in list(self.children):
-                if getattr(child, "_axis", False) or getattr(child, "_peak", False):
-                    self.remove_widget(child)
+            # (1) 모든 자식 라벨·위젯 제거 → 누적 방지
+            self.clear_widgets()
     
-            # ② 캔버스 초기화
+            # (2) 캔버스 초기화
             self.canvas.clear()
     
             if not self.datasets:
@@ -320,28 +318,25 @@ class GraphWidget(Widget):
     
             peaks = []
             with self.canvas:
-                # 그리드
                 self._grid()
-                # 축 레이블 (Y축은 0%, 50%, 100% 기준)
-                self._labels()
+                self._labels()        # 축 라벨 새로 삽입 (_axis 태그 포함)
     
-                # 데이터 곡선 및 피크 위치 계산
                 for idx, pts in enumerate(self.datasets):
                     if not pts:
                         continue
                     Color(*self.COLORS[idx % len(self.COLORS)])
                     Line(points=self._scale(pts), width=self.LINE_W)
     
-                    # 피크 계산
                     fx, fy = max(pts, key=lambda p: p[1])
                     sx, sy = self._scale([(fx, fy)])[0:2]
                     peaks.append((fx, fy, sx, sy))
     
-                # 차이선 (필요 시)
                 if self.diff:
                     Color(*self.DIFF_CLR)
                     Line(points=self._scale(self.diff), width=self.LINE_W)
-    
+
+        # (3) 피크 및 Δ 라벨 새
+   
             # ③ 피크 라벨 추가
             for fx, fy, sx, sy in peaks:
                 lbl = Label(
@@ -427,11 +422,36 @@ class FFTApp(App):
 
     
     # ---------- ① 토글  ----------
+    # ---------- 실시간 FFT 토글 ----------
     def toggle_realtime(self, *_):
-        self.rt_on = not self.rt_on
+        """
+        ▶ 버튼을 누를 때마다 실시간 가속도 FFT ON/OFF 전환.
+        · Android 기기라면 가능한 한 빠른 센서 주기로 등록한다.
+        · 토글 ON 시 → 센서 enable + polling·FFT 스레드 시작
+        · 토글 OFF 시 → 센서 disable + 스레드 자동 종료
+        """
+        # 상태 반전
+        self.rt_on = not getattr(self, "rt_on", False)
         self.btn_rt.text = f"Realtime FFT ({'ON' if self.rt_on else 'OFF'})"
-    
+
         if self.rt_on:
+            # ── 1) 센서 최대 속도로 등록 (Android 전용) ──────────────────
+            if ANDROID:
+                try:
+                    from jnius import autoclass, cast
+                    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                    Context        = cast("android.content.Context",
+                                          PythonActivity.mActivity)
+                    SensorManager  = autoclass("android.hardware.SensorManager")
+                    sm     = Context.getSystemService(Context.SENSOR_SERVICE)
+                    accel  = sm.getDefaultSensor(SensorManager.SENSOR_ACCELEROMETER)
+                    # SENSOR_DELAY_FASTEST == 0
+                    sm.registerListener(PythonActivity.mActivity, accel,
+                                        SensorManager.SENSOR_DELAY_FASTEST)
+                except Exception as e:
+                    Logger.warning(f"FASTEST sensor register fail: {e}")
+
+            # ── 2) plyer accelerometer on ───────────────────────────────
             try:
                 accelerometer.enable()
             except (NotImplementedError, Exception) as e:
@@ -439,14 +459,18 @@ class FFTApp(App):
                 self.rt_on = False
                 self.btn_rt.text = "Realtime FFT (OFF)"
                 return
-    
+
+            # ── 3) Kivy Clock 로 polling, 별도 스레드로 FFT ───────────
             Clock.schedule_interval(self._poll_accel, 0)
             threading.Thread(target=self._rt_fft_loop, daemon=True).start()
+
         else:
+            # ── OFF : 센서·Clock·스레드 정리 ────────────────────────────
             try:
                 accelerometer.disable()
             except Exception:
                 pass
+            # Clock.schedule_interval 에서 _poll_accel 이 False 반환 → 자동 해제
         
     # ---------- ② 센서 polling ----------
     def _poll_accel(self, dt):
