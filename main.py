@@ -26,6 +26,10 @@ from kivy.utils          import platform
 from plyer               import filechooser           # (SAF 실패 시 fallback)
 import traceback
 
+DB_REF = 1.0
+DB_FLOOR = -120.0
+
+
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
 ANDROID = platform == "android"
 
@@ -165,17 +169,16 @@ class GraphWidget(Widget):
             self.add_widget(lbl)
 
         # Y축: 0%, 50%, 100% 위치에만 레이블
+        # Y축: 0 %, 50 %, 100 % 위치
         for frac in (0.0, 0.5, 1.0):
             mag   = self.max_y * frac
             y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
                 lbl = Label(
-                    text=f"{mag:.1e}",
+                    text=f"{mag:.0f} dB",            # ← 단위 변경
                     size_hint=(None,None), size=(60,20),
                     pos=(int(x), int(y_pos))
                 )
-                lbl._axis = True
-                self.add_widget(lbl)
 
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
@@ -209,12 +212,12 @@ class GraphWidget(Widget):
     
             # ── (3) 피크 라벨 ─────────────────────────────────────────
             for fx, fy, sx, sy in peaks:
-                lbl = Label(text=f"▲ {fx:.1f} Hz",
-                            size_hint=(None,None), size=(85,22),
-                            pos=(int(sx-28), int(sy+6)))
-                lbl._peak = True
-                self.add_widget(lbl)
-    
+                lbl = Label(
+                    text=f"▲ {fx:.1f} Hz  {fy:.0f} dB",   # Hz + dB
+                    size_hint=(None,None), size=(110,22),
+                    pos=(int(sx-40), int(sy+6))
+                )
+        
             # ── (4) Δ 표시 ───────────────────────────────────────────
             if len(peaks) >= 2:
                 delta = abs(peaks[0][0] - peaks[1][0])
@@ -368,20 +371,25 @@ class FFTApp(App):
                     sig = np.asarray(vals, dtype=float)
                     n   = self.RT_WIN
     
-                    # 평균 dt (실제 샘플 간격)
+                    # 평균 dt
                     dt  = (ts[-1] - ts[0]) / (n-1)
-    
                     freq = np.fft.fftfreq(n, d=dt)[:n//2]
                     amp  = np.abs(fft(sig))[:n//2]
     
+                    # -------- dB 변환 --------
+                    amp[amp == 0] = 1e-12                 # 0 방지
+                    db  = 20 * np.log10(amp / DB_REF)
+                    db  = np.clip(db, DB_FLOOR, None)      # 바닥 컷
+                    # -------------------------
+                    
                     mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq = freq[mask]
-                    smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
+                    smooth = np.convolve(db[mask], np.ones(8)/8, 'same')
     
                     datasets.append(list(zip(freq, smooth)))
                     ymax = max(ymax, smooth.max())
                     xmax = max(xmax, freq[-1])
-    
+        
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
                 )
@@ -520,26 +528,46 @@ class FFTApp(App):
     # ── CSV → FFT ────────────────────────────────────────────
     @staticmethod
     def csv_fft(path: str):
+        """
+        CSV 파일(첫 열: 시간[s], 두 번째 열: 값)에 대해
+        0–50 Hz 범위를 dB 스케일로 반환한다.
+        ─ 반환: ([(freq, dB), …], 50,  y_max_dB)
+        """
         try:
-            t,a=[],[]
-            with open(path) as f:
+            t, a = [], []
+            with open(path, newline="") as f:
                 for r in csv.reader(f):
                     try:
-                        t.append(float(r[0])); a.append(float(r[1]))
+                        t.append(float(r[0]))
+                        a.append(float(r[1]))
                     except Exception:
                         pass
-            if len(a)<2:
+    
+            if len(a) < 2:
                 raise ValueError("too few samples")
-            dt=(t[-1]-t[0])/len(a)
-            f=np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
-            v=np.abs(fft(a))[:len(a)//2]
-            m=f<=50; f,v=f[m],v[m]
-            s=np.convolve(v, np.ones(10)/10, 'same')
-            return list(zip(f,s)), 50, s.max()
+    
+            # ── FFT ──────────────────────────────────────────────
+            dt = (t[-1] - t[0]) / (len(a) - 1)
+            f  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
+            v  = np.abs(fft(a))[:len(a)//2]
+    
+            # ① dB 변환 --------------------------------------------------
+            v[v == 0] = 1e-12                       # 0 방지
+            db = 20 * np.log10(v / DB_REF)          # dB 값
+            db = np.clip(db, DB_FLOOR, None)        # 바닥 컷
+    
+            # ② 0–50 Hz 구간만 -----------------------------------------
+            mask = f <= 50
+            f, db = f[mask], db[mask]
+    
+            # ③ 스무딩 ---------------------------------------------------
+            s = np.convolve(db, np.ones(10) / 10, mode='same')
+    
+            return list(zip(f, s)), 50, s.max()
+    
         except Exception as e:
             Logger.error(f"FFT err {e}")
-            return None,0,0
-
+            return None, 0, 0
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     FFTApp().run()
