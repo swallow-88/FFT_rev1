@@ -240,13 +240,12 @@ class GraphWidget(Widget):
         self.bind(size=self.redraw)
 
     def update_graph(self, ds, df, xm, ym):
-        # ── X축 고정, Y축은 데이터 기반 최대값 ─────────────────
         self.max_x = float(self.MAX_FREQ)
         self.max_y = max(1e-6, float(ym))
-
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
-        self.redraw()
+    
+        Clock.schedule_once(lambda *_: self.redraw(), 0)
 
     def _scale(self, pts):
         w, h = self.width-2*self.PAD_X, self.height-2*self.PAD_Y
@@ -285,7 +284,10 @@ class GraphWidget(Widget):
             lbl = Label(
                 text=f"{int(x_val)} Hz",
                 size_hint=(None,None), size=(60,20),
-                pos=(x_pos, self.PAD_Y-28)
+                pos=(
+                    int(x_pos),
+                    int(self.PAD_Y - 28)
+                )
             )
             lbl._axis = True
             self.add_widget(lbl)
@@ -332,25 +334,30 @@ class GraphWidget(Widget):
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
 
-        # 피크 레이블
-        for fx, fy, sx, sy in peaks:
-            lbl = Label(
-                text=f"▲ {fx:.1f} Hz",
-                size_hint=(None,None), size=(85,22),
-                pos=(sx-28, sy+6)
-            )
-            lbl._peak = True
-            self.add_widget(lbl)
+            for fx, fy, sx, sy in peaks:
+                lbl = Label(
+                    text=f"▲ {fx:.1f} Hz",
+                    size_hint=(None,None), size=(85,22),
+                    pos=(
+                        int(sx - 28),
+                        int(sy + 6)
+                    )
+                )
+                lbl._peak = True
+                self.add_widget(lbl)
 
         # Δ 표시 (첫 두 곡선만)
         if len(peaks) >= 2:
             delta = abs(peaks[0][0] - peaks[1][0])
             bad   = delta > 1.5
             clr   = (1,0,0,1) if bad else (0,1,0,1)
-            info  = Label(
+            info = Label(
                 text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
                 size_hint=(None,None), size=(190,24),
-                pos=(self.PAD_X, self.height-self.PAD_Y+6),
+                pos=(
+                    int(self.PAD_X),
+                    int(self.height - self.PAD_Y + 6)
+                ),
                 color=clr
             )
             info._peak = True
