@@ -301,25 +301,21 @@ class GraphWidget(Widget):
                 lbl._axis = True
                 self.add_widget(lbl)
 
-
+    # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
         try:
             if self.width <= 2*self.PAD_X or self.height <= 2*self.PAD_Y:
                 return
     
-            # (1) 모든 자식 라벨·위젯 제거 → 누적 방지
             self.clear_widgets()
-    
-            # (2) 캔버스 초기화
             self.canvas.clear()
-    
             if not self.datasets:
                 return
     
             peaks = []
             with self.canvas:
                 self._grid()
-                self._labels()        # 축 라벨 새로 삽입 (_axis 태그 포함)
+                self._labels()
     
                 for idx, pts in enumerate(self.datasets):
                     if not pts:
@@ -334,38 +330,28 @@ class GraphWidget(Widget):
                 if self.diff:
                     Color(*self.DIFF_CLR)
                     Line(points=self._scale(self.diff), width=self.LINE_W)
-
-        # (3) 피크 및 Δ 라벨 새
-   
-            # ③ 피크 라벨 추가
+    
+            # ── (3) 피크 라벨 ─────────────────────────────────────────
             for fx, fy, sx, sy in peaks:
-                lbl = Label(
-                    text=f"▲ {fx:.1f} Hz",
-                    size_hint=(None, None),
-                    size=(85, 22),
-                    pos=(int(sx - 28), int(sy + 6))
-                )
+                lbl = Label(text=f"▲ {fx:.1f} Hz",
+                            size_hint=(None,None), size=(85,22),
+                            pos=(int(sx-28), int(sy+6)))
                 lbl._peak = True
                 self.add_widget(lbl)
     
-            # ④ Δ 표시 (첫 두 곡선만)
+            # ── (4) Δ 표시 ───────────────────────────────────────────
             if len(peaks) >= 2:
                 delta = abs(peaks[0][0] - peaks[1][0])
                 bad   = delta > 1.5
-                clr   = (1, 0, 0, 1) if bad else (0, 1, 0, 1)
-                info = Label(
-                    text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
-                    size_hint=(None, None),
-                    size=(190, 24),
-                    pos=(int(self.PAD_X), int(self.height - self.PAD_Y + 6)),
-                    color=clr
-                )
+                clr   = (1,0,0,1) if bad else (0,1,0,1)
+                info = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
+                             size_hint=(None,None), size=(190,24),
+                             pos=(int(self.PAD_X), int(self.height-self.PAD_Y+6)),
+                             color=clr)
                 info._peak = True
                 self.add_widget(info)
     
         except Exception as e:
-            # 예외 발생 시 파일에 기록하고 로그에도 출력
-            import traceback
             _dump_crash(f"redraw error: {e}\n{traceback.format_exc()}")
     
 # ── 메인 앱 ───────────────────────────────────────────────────────
@@ -492,26 +478,24 @@ class FFTApp(App):
         except Exception as e:
             Logger.warning(f"accel read fail: {e}")
     
-    # ---------- ③ FFT 백그라운드 ----------
+    # ---------- ③ FFT 백그라운드 ----------# ── 2) _rt_fft_loop – dt를 실측으로 계산 ───────────────────────────
     def _rt_fft_loop(self):
         while self.rt_on:
             try:
-                # 0.5 s 간격으로 FFT 실행
                 time.sleep(0.5)
-    
-                # 버퍼가 다 차지 않았으면 기다림
-                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x', 'y', 'z')):
+                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
                     continue
     
-                datasets = []
-                ymax = xmax = 0.0
-    
-                for axis in ('x', 'y', 'z'):
-                    _, vals = zip(*self.rt_buf[axis])
+                datasets = []; ymax = xmax = 0.0
+                for axis in ('x','y','z'):
+                    ts, vals = zip(*self.rt_buf[axis])
                     sig = np.asarray(vals, dtype=float)
                     n   = self.RT_WIN
     
-                    freq = np.fft.fftfreq(n, d=self.FIXED_DT)[:n//2]
+                    # 평균 dt (실제 샘플 간격)
+                    dt  = (ts[-1] - ts[0]) / (n-1)
+    
+                    freq = np.fft.fftfreq(n, d=dt)[:n//2]
                     amp  = np.abs(fft(sig))[:n//2]
     
                     mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
@@ -519,8 +503,8 @@ class FFTApp(App):
                     smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
     
                     datasets.append(list(zip(freq, smooth)))
-                    ymax = max(ymax, smooth.max() if len(smooth) else 0)
-                    xmax = max(xmax, freq[-1] if len(freq) else 0)
+                    ymax = max(ymax, smooth.max())
+                    xmax = max(xmax, freq[-1])
     
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
