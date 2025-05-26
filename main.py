@@ -224,28 +224,27 @@ class GraphWidget(Widget):
 '''
 
 
-
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
     COLORS   = [(1,0,0),(0,1,0),(0,0,1)]
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    MAX_FREQ = 50  # 고정 X축
-    # Y_DIVS 는 더 이상 사용하지 않습니다!
+    MAX_FREQ = 50  # X축 0–50Hz 고정
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.datasets, self.diff = [], []
+        self.datasets = []
+        self.diff     = []
         self.max_x = self.max_y = 1
         self.bind(size=lambda *a: Clock.schedule_once(lambda *_: self.redraw(), 0))
 
     def update_graph(self, ds, df, xm, ym):
+        # X축 고정, Y축은 데이터 기반 최대값
         self.max_x = float(self.MAX_FREQ)
         self.max_y = max(1e-6, float(ym))
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
-        # 메인 스레드에서 한 번만 redraw 예약
         Clock.schedule_once(lambda *_: self.redraw(), 0)
 
     def _scale(self, pts):
@@ -268,12 +267,12 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 기존 레이블 전부 제거
+        # 이전 축 레이블만 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
 
-        # X축 레이블 (0–50Hz)
+        # X축: 0,10,…,50 Hz
         step_x = self.MAX_FREQ / 5
         for i in range(6):
             x_val = i * step_x
@@ -299,15 +298,16 @@ class GraphWidget(Widget):
                 lbl._axis = True
                 self.add_widget(lbl)
 
-
     def redraw(self, *_):
-        # 충분한 크기가 확보되지 않으면 건너뛰기
+        # 크기 준비 안 됐으면 건너뛰기
         if self.width <= 2*self.PAD_X or self.height <= 2*self.PAD_Y:
             return
 
-        # ① 이전 그래프 레이블(축·피크) 모두 지우기
-        self.clear_widgets()
-        # ② 캔버스도 초기화
+        # ① 기존 축·피크 레이블만 제거
+        for child in list(self.children):
+            if getattr(child, "_axis", False) or getattr(child, "_peak", False):
+                self.remove_widget(child)
+        # ② 캔버스 초기화
         self.canvas.clear()
 
         if not self.datasets:
@@ -315,11 +315,10 @@ class GraphWidget(Widget):
 
         peaks = []
         with self.canvas:
-            # 그리드와 축 라벨
             self._grid()
             self._labels()
 
-            # 데이터 곡선 & 피크 위치 계산
+            # 데이터 곡선 및 피크 위치 계산
             for idx, pts in enumerate(self.datasets):
                 if not pts: continue
                 Color(*self.COLORS[idx % len(self.COLORS)])
@@ -333,7 +332,7 @@ class GraphWidget(Widget):
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
 
-        # 피크 레이블 (이제 매번 완전 새로 추가됨)
+        # 피크 레이블
         for fx, fy, sx, sy in peaks:
             lbl = Label(
                 text=f"▲ {fx:.1f} Hz",
@@ -356,22 +355,24 @@ class GraphWidget(Widget):
             )
             info._peak = True
             self.add_widget(info)
+
+
+
+
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
+    RT_WIN   = 256
+    FIXED_DT = 1.0 / 60.0  # 샘플링 간격 고정 (예: 60Hz)
+    MIN_FREQ = 1.0         # 피크 검색시 1Hz 미만 제거
 
-    RT_WIN = 256
-    FIXED_DT = 1.0/60.0
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # ── 실시간 가속도 FFT용 상태 ─────────────────────
-        self.rt_on  = False               # 토글 상태
+        # … 생략 …
         self.rt_buf = {
-            'x': deque(maxlen=256),
-            'y': deque(maxlen=256),
-            'z': deque(maxlen=256),
+            'x': deque(maxlen=self.RT_WIN),
+            'y': deque(maxlen=self.RT_WIN),
+            'z': deque(maxlen=self.RT_WIN),
         }
-    
 
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
     def log(self, msg: str):
@@ -453,44 +454,39 @@ class FFTApp(App):
     
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
-        WIN = self.RT_WIN
         while self.rt_on:
             time.sleep(0.5)
-            # WIN 만큼 버퍼가 찰 때까지 대기
-            if any(len(self.rt_buf[ax]) < WIN for ax in ('x','y','z')):
+            # 버퍼가 가득 찰 때까지 대기
+            if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
                 continue
-    
+
             datasets = []
             ymax = xmax = 0.0
-    
+
             for axis in ('x','y','z'):
-                # 타임스탬프는 더 이상 사용하지 않음
                 _, vals = zip(*self.rt_buf[axis])
                 sig = np.asarray(vals, dtype=float)
-                n   = WIN
-    
-                # ── 고정 dt 사용 ───────────────────────────
+                n   = self.RT_WIN
+
+                # 고정 dt 사용
                 dt = self.FIXED_DT
-    
+
                 # FFT
                 freq = np.fft.fftfreq(n, d=dt)[:n//2]
                 amp  = np.abs(fft(sig))[:n//2]
-    
-                # 0–50Hz 필터링
-                mask = freq <= 50
-                freq, amp = freq[mask], amp[mask]
-    
-                # 스무딩
-                smooth = np.convolve(amp, np.ones(8)/8, 'same')
-    
+
+                # 1–50Hz만 사용
+                mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
+                freq = freq[mask]
+                smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
+
                 datasets.append(list(zip(freq, smooth)))
-                ymax = max(ymax, smooth.max())
-                xmax = max(xmax, freq[-1])
-    
+                ymax = max(ymax, smooth.max() if len(smooth) else 0)
+                xmax = max(xmax, freq[-1] if len(freq) else 0)
+
             # 그래프 업데이트
             Clock.schedule_once(lambda *_:
                 self.graph.update_graph(datasets, [], xmax, ymax))
-
 
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
