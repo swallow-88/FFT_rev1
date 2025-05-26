@@ -376,12 +376,14 @@ class GraphWidget(Widget):
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
     RT_WIN   = 256
-    FIXED_DT = 1.0 / 60.0  # 샘플링 간격 고정 (예: 60Hz)
-    MIN_FREQ = 1.0         # 피크 검색시 1Hz 미만 제거
+    FIXED_DT = 1.0 / 60.0
+    MIN_FREQ = 1.0
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # … 생략 …
+        # ① 실시간 토글 플래그를 미리 초기화
+        self.rt_on = False
+        # ② 가속도 버퍼 준비
         self.rt_buf = {
             'x': deque(maxlen=self.RT_WIN),
             'y': deque(maxlen=self.RT_WIN),
@@ -469,29 +471,25 @@ class FFTApp(App):
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
         while self.rt_on:
-            time.sleep(0.5)
-                # 버퍼가 가득 찰 때까지 대기
             try:
+                # 0.5 s 간격으로 FFT 실행
                 time.sleep(0.5)
-                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
+    
+                # 버퍼가 다 차지 않았으면 기다림
+                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x', 'y', 'z')):
                     continue
     
                 datasets = []
                 ymax = xmax = 0.0
     
-                for axis in ('x','y','z'):
+                for axis in ('x', 'y', 'z'):
                     _, vals = zip(*self.rt_buf[axis])
                     sig = np.asarray(vals, dtype=float)
                     n   = self.RT_WIN
     
-                    # 고정 dt 사용
-                    dt = self.FIXED_DT
-    
-                    # FFT
-                    freq = np.fft.fftfreq(n, d=dt)[:n//2]
+                    freq = np.fft.fftfreq(n, d=self.FIXED_DT)[:n//2]
                     amp  = np.abs(fft(sig))[:n//2]
     
-                    # 1–50Hz만 사용
                     mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq = freq[mask]
                     smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
@@ -500,16 +498,13 @@ class FFTApp(App):
                     ymax = max(ymax, smooth.max() if len(smooth) else 0)
                     xmax = max(xmax, freq[-1] if len(freq) else 0)
     
-                # 그래프 업데이트
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph(datasets, [], xmax, ymax))
-
+                Clock.schedule_once(
+                    lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
+                )
+    
             except Exception as e:
-                # 백그라운드 스레드의 예외도 로그에 남김
                 _dump_crash(f"_rt_fft_loop error: {e}\n{traceback.format_exc()}")
-                # 에러가 터져도 루프를 멈추지 않고 계속 시도할 수 있습니다.
                 continue
-
 
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
