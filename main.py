@@ -115,6 +115,8 @@ class GraphWidget(Widget):
 
     def __init__(self, **kw):
         super().__init__(**kw)
+        #self.sample_t0 = time.time()
+        #self.sample_count = 0
         self.datasets = []
         self.diff     = []
         self.max_x = self.max_y = 1
@@ -160,13 +162,13 @@ class GraphWidget(Widget):
         for i in range(6):
             x_val = i * step_x
             x_pos = self.PAD_X + (self.width-2*self.PAD_X)*(i/5) - 20
-            lbl = Label(
-                text=f"{int(x_val)} Hz",
-                size_hint=(None,None), size=(60,20),
-                pos=(int(x_pos), int(self.PAD_Y-28))
-            )
+            # 1) _labels()  X축 부분
+            lbl = Label(text=f"{int(x_val)} Hz", size_hint=(None,None),
+                        size=(60,20), pos=(int(x_pos), int(self.PAD_Y-28)))
             lbl._axis = True
             self.add_widget(lbl)
+
+# … Y축 루프 안도 동일하게 lbl._axis=True / self.add_widget(lbl)
 
         # Y축: 0%, 50%, 100% 위치에만 레이블
         # Y축: 0 %, 50 %, 100 % 위치
@@ -174,11 +176,11 @@ class GraphWidget(Widget):
             mag   = self.max_y * frac
             y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
-                lbl = Label(
-                    text=f"{mag:.0f} dB",            # ← 단위 변경
-                    size_hint=(None,None), size=(60,20),
-                    pos=(int(x), int(y_pos))
-                )
+                # 5) _labels()  Y축 루프
+                lbl = Label(text=f"{mag:.0f} dB", size_hint=(None,None),
+                            size=(60,20), pos=(int(x), int(y_pos)))
+                lbl._axis = True
+                self.add_widget(lbl) 
 
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
@@ -212,12 +214,12 @@ class GraphWidget(Widget):
     
             # ── (3) 피크 라벨 ─────────────────────────────────────────
             for fx, fy, sx, sy in peaks:
-                lbl = Label(
-                    text=f"▲ {fx:.1f} Hz  {fy:.0f} dB",   # Hz + dB
-                    size_hint=(None,None), size=(110,22),
-                    pos=(int(sx-40), int(sy+6))
-                )
-        
+                lbl = Label(text=f"▲ {fx:.1f} Hz  {fy:.0f} dB",
+                            size_hint=(None,None), size=(110,22),
+                            pos=(int(sx-40), int(sy+6)))
+                lbl._peak = True           # ← 먼저 지정
+                self.add_widget(lbl)
+                
             # ── (4) Δ 표시 ───────────────────────────────────────────
             if len(peaks) >= 2:
                 delta = abs(peaks[0][0] - peaks[1][0])
@@ -249,7 +251,11 @@ class FFTApp(App):
             'y': deque(maxlen=self.RT_WIN),
             'z': deque(maxlen=self.RT_WIN),
         }
+# 3) FFTApp.__init__
+        self.sample_t0 = time.time()
+        self.sample_count = 0
 
+    
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
     def log(self, msg: str):
         Logger.info(msg)
@@ -356,6 +362,14 @@ class FFTApp(App):
             self.rt_buf['z'].append((now, abs(az)))
         except Exception as e:
             Logger.warning(f"accel read fail: {e}")
+            
+        self.sample_count += 1
+        if time.time() - self.sample_t0 >= 1.0:          # 1초마다
+            fs = self.sample_count / (time.time() - self.sample_t0)
+            if fs < 100:
+                self.log(f"⚠️ 샘플 속도 {fs:.0f} Hz → 50 Hz 분석 불완전")
+            self.sample_t0 = time.time()
+            self.sample_count = 0
     
     # ---------- ③ FFT 백그라운드 ----------# ── 2) _rt_fft_loop – dt를 실측으로 계산 ───────────────────────────
     def _rt_fft_loop(self):
@@ -369,7 +383,9 @@ class FFTApp(App):
                 for axis in ('x','y','z'):
                     ts, vals = zip(*self.rt_buf[axis])
                     sig = np.asarray(vals, dtype=float)
+                    sig *= np.hanning(n)
                     n   = self.RT_WIN
+                    sig = np.asarray(vals, dtype=float) * np.hanning(n)
     
                     # 평균 dt
                     dt  = (ts[-1] - ts[0]) / (n-1)
@@ -533,6 +549,7 @@ class FFTApp(App):
         0–50 Hz 범위를 dB 스케일로 반환한다.
         ─ 반환: ([(freq, dB), …], 50,  y_max_dB)
         """
+        
         try:
             t, a = [], []
             with open(path, newline="") as f:
@@ -549,8 +566,8 @@ class FFTApp(App):
             # ── FFT ──────────────────────────────────────────────
             dt = (t[-1] - t[0]) / (len(a) - 1)
             f  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
-            v  = np.abs(fft(a))[:len(a)//2]
-    
+            v = np.abs(fft(np.array(a) * np.hanning(len(a))))[:len(a)//2]
+            
             # ① dB 변환 --------------------------------------------------
             v[v == 0] = 1e-12                       # 0 방지
             db = 20 * np.log10(v / DB_REF)          # dB 값
