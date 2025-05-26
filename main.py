@@ -24,6 +24,7 @@ from kivy.uix.popup      import Popup
 from kivy.graphics       import Line, Color
 from kivy.utils          import platform
 from plyer               import filechooser           # (SAF 실패 시 fallback)
+import traceback
 
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
 ANDROID = platform == "android"
@@ -240,12 +241,14 @@ class GraphWidget(Widget):
         self.bind(size=lambda *a: Clock.schedule_once(lambda *_: self.redraw(), 0))
 
     def update_graph(self, ds, df, xm, ym):
-        # X축 고정, Y축은 데이터 기반 최대값
-        self.max_x = float(self.MAX_FREQ)
-        self.max_y = max(1e-6, float(ym))
-        self.datasets = [seq for seq in (ds or []) if seq]
-        self.diff     = df or []
-        Clock.schedule_once(lambda *_: self.redraw(), 0)
+        try:
+            self.max_x = float(self.MAX_FREQ)
+            self.max_y = max(1e-6, float(ym))
+            self.datasets = [seq for seq in (ds or []) if seq]
+            self.diff     = df or []
+            Clock.schedule_once(lambda *_: self.redraw(), 0)
+        except Exception as e:
+            _dump_crash(f"update_graph error: {e}\n{traceback.format_exc()}")
 
     def _scale(self, pts):
         w = self.width  - 2*self.PAD_X
@@ -299,66 +302,77 @@ class GraphWidget(Widget):
                 self.add_widget(lbl)
 
     def redraw(self, *_):
-        # 크기 준비 안 됐으면 건너뛰기
-        if self.width <= 2*self.PAD_X or self.height <= 2*self.PAD_Y:
-            return
-
-        # ① 기존 축·피크 레이블만 제거
-        for child in list(self.children):
-            if getattr(child, "_axis", False) or getattr(child, "_peak", False):
-                self.remove_widget(child)
-        # ② 캔버스 초기화
-        self.canvas.clear()
-
-        if not self.datasets:
-            return
-
-        peaks = []
-        with self.canvas:
-            self._grid()
-            self._labels()
-
-            # 데이터 곡선 및 피크 위치 계산
-            for idx, pts in enumerate(self.datasets):
-                if not pts: continue
-                Color(*self.COLORS[idx % len(self.COLORS)])
-                Line(points=self._scale(pts), width=self.LINE_W)
-                fx, fy = max(pts, key=lambda p: p[1])
-                sx, sy = self._scale([(fx, fy)])[0:2]
-                peaks.append((fx, fy, sx, sy))
-
-            # 차이선
-            if self.diff:
-                Color(*self.DIFF_CLR)
-                Line(points=self._scale(self.diff), width=self.LINE_W)
-
-        # 피크 레이블
-        for fx, fy, sx, sy in peaks:
-            lbl = Label(
-                text=f"▲ {fx:.1f} Hz",
-                size_hint=(None,None), size=(85,22),
-                pos=(int(sx-28), int(sy+6))
-            )
-            lbl._peak = True
-            self.add_widget(lbl)
-
-        # Δ 표시
-        if len(peaks) >= 2:
-            delta = abs(peaks[0][0] - peaks[1][0])
-            bad   = delta > 1.5
-            clr   = (1,0,0,1) if bad else (0,1,0,1)
-            info = Label(
-                text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
-                size_hint=(None,None), size=(190,24),
-                pos=(int(self.PAD_X), int(self.height-self.PAD_Y+6)),
-                color=clr
-            )
-            info._peak = True
-            self.add_widget(info)
-
-
-
-
+        try:
+            # 충분한 크기가 확보되지 않으면 건너뛰기
+            if self.width <= 2 * self.PAD_X or self.height <= 2 * self.PAD_Y:
+                return
+    
+            # ① 기존 축·피크 레이블만 제거
+            for child in list(self.children):
+                if getattr(child, "_axis", False) or getattr(child, "_peak", False):
+                    self.remove_widget(child)
+    
+            # ② 캔버스 초기화
+            self.canvas.clear()
+    
+            if not self.datasets:
+                return
+    
+            peaks = []
+            with self.canvas:
+                # 그리드
+                self._grid()
+                # 축 레이블 (Y축은 0%, 50%, 100% 기준)
+                self._labels()
+    
+                # 데이터 곡선 및 피크 위치 계산
+                for idx, pts in enumerate(self.datasets):
+                    if not pts:
+                        continue
+                    Color(*self.COLORS[idx % len(self.COLORS)])
+                    Line(points=self._scale(pts), width=self.LINE_W)
+    
+                    # 피크 계산
+                    fx, fy = max(pts, key=lambda p: p[1])
+                    sx, sy = self._scale([(fx, fy)])[0:2]
+                    peaks.append((fx, fy, sx, sy))
+    
+                # 차이선 (필요 시)
+                if self.diff:
+                    Color(*self.DIFF_CLR)
+                    Line(points=self._scale(self.diff), width=self.LINE_W)
+    
+            # ③ 피크 라벨 추가
+            for fx, fy, sx, sy in peaks:
+                lbl = Label(
+                    text=f"▲ {fx:.1f} Hz",
+                    size_hint=(None, None),
+                    size=(85, 22),
+                    pos=(int(sx - 28), int(sy + 6))
+                )
+                lbl._peak = True
+                self.add_widget(lbl)
+    
+            # ④ Δ 표시 (첫 두 곡선만)
+            if len(peaks) >= 2:
+                delta = abs(peaks[0][0] - peaks[1][0])
+                bad   = delta > 1.5
+                clr   = (1, 0, 0, 1) if bad else (0, 1, 0, 1)
+                info = Label(
+                    text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
+                    size_hint=(None, None),
+                    size=(190, 24),
+                    pos=(int(self.PAD_X), int(self.height - self.PAD_Y + 6)),
+                    color=clr
+                )
+                info._peak = True
+                self.add_widget(info)
+    
+        except Exception as e:
+            # 예외 발생 시 파일에 기록하고 로그에도 출력
+            import traceback
+            _dump_crash(f"redraw error: {e}\n{traceback.format_exc()}")
+    
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
     RT_WIN   = 256
@@ -456,37 +470,46 @@ class FFTApp(App):
     def _rt_fft_loop(self):
         while self.rt_on:
             time.sleep(0.5)
-            # 버퍼가 가득 찰 때까지 대기
-            if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
+                # 버퍼가 가득 찰 때까지 대기
+            try:
+                time.sleep(0.5)
+                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
+                    continue
+    
+                datasets = []
+                ymax = xmax = 0.0
+    
+                for axis in ('x','y','z'):
+                    _, vals = zip(*self.rt_buf[axis])
+                    sig = np.asarray(vals, dtype=float)
+                    n   = self.RT_WIN
+    
+                    # 고정 dt 사용
+                    dt = self.FIXED_DT
+    
+                    # FFT
+                    freq = np.fft.fftfreq(n, d=dt)[:n//2]
+                    amp  = np.abs(fft(sig))[:n//2]
+    
+                    # 1–50Hz만 사용
+                    mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
+                    freq = freq[mask]
+                    smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
+    
+                    datasets.append(list(zip(freq, smooth)))
+                    ymax = max(ymax, smooth.max() if len(smooth) else 0)
+                    xmax = max(xmax, freq[-1] if len(freq) else 0)
+    
+                # 그래프 업데이트
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph(datasets, [], xmax, ymax))
+
+            except Exception as e:
+                # 백그라운드 스레드의 예외도 로그에 남김
+                _dump_crash(f"_rt_fft_loop error: {e}\n{traceback.format_exc()}")
+                # 에러가 터져도 루프를 멈추지 않고 계속 시도할 수 있습니다.
                 continue
 
-            datasets = []
-            ymax = xmax = 0.0
-
-            for axis in ('x','y','z'):
-                _, vals = zip(*self.rt_buf[axis])
-                sig = np.asarray(vals, dtype=float)
-                n   = self.RT_WIN
-
-                # 고정 dt 사용
-                dt = self.FIXED_DT
-
-                # FFT
-                freq = np.fft.fftfreq(n, d=dt)[:n//2]
-                amp  = np.abs(fft(sig))[:n//2]
-
-                # 1–50Hz만 사용
-                mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
-                freq = freq[mask]
-                smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
-
-                datasets.append(list(zip(freq, smooth)))
-                ymax = max(ymax, smooth.max() if len(smooth) else 0)
-                xmax = max(xmax, freq[-1] if len(freq) else 0)
-
-            # 그래프 업데이트
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph(datasets, [], xmax, ymax))
 
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
