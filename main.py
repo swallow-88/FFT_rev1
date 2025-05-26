@@ -268,10 +268,15 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # X축: 0,10,…,50 Hz
-        step_x = self.MAX_FREQ/5
+        # 기존 레이블 전부 제거
+        for w in list(self.children):
+            if getattr(w, "_axis", False):
+                self.remove_widget(w)
+
+        # X축 레이블 (0–50Hz)
+        step_x = self.MAX_FREQ / 5
         for i in range(6):
-            x_val = i*step_x
+            x_val = i * step_x
             x_pos = self.PAD_X + (self.width-2*self.PAD_X)*(i/5) - 20
             lbl = Label(
                 text=f"{int(x_val)} Hz",
@@ -281,7 +286,7 @@ class GraphWidget(Widget):
             lbl._axis = True
             self.add_widget(lbl)
 
-        # Y축: 대표값만 (0%, 50%, 100%)
+        # Y축: 0%, 50%, 100% 위치에만 레이블
         for frac in (0.0, 0.5, 1.0):
             mag   = self.max_y * frac
             y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
@@ -293,6 +298,7 @@ class GraphWidget(Widget):
                 )
                 lbl._axis = True
                 self.add_widget(lbl)
+
 
     def redraw(self, *_):
         # 충분한 크기가 확보되지 않으면 건너뛰기
@@ -352,6 +358,9 @@ class GraphWidget(Widget):
             self.add_widget(info)
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
+
+    RT_WIN = 256
+    FIXED_DT = 1.0/60.0
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -444,53 +453,44 @@ class FFTApp(App):
     
     # ---------- ③ FFT 백그라운드 ----------
     def _rt_fft_loop(self):
-        """
-        0.5 s마다 X·Y·Z 각 축을 FFT 하고 그래프 3 개를 그려 준다.
-        · 표본 간격(dt)을 실측으로 계산 → 유령 2 Hz 제거
-        · DC 제거 + Hanning window 로 누수 감소
-        · 0–50 Hz 구간만 부드럽게(smooth) 표시
-        """
+        WIN = self.RT_WIN
         while self.rt_on:
             time.sleep(0.5)
-
-            # 64 샘플 미만이면 건너뜀
-            if any(len(self.rt_buf[ax]) < 64 for ax in ('x', 'y', 'z')):
+            # WIN 만큼 버퍼가 찰 때까지 대기
+            if any(len(self.rt_buf[ax]) < WIN for ax in ('x','y','z')):
                 continue
-
-            datasets = []   # 그래프 3 개(X,Y,Z)
-            ymax     = 0.0  # y축 최대
-            xmax     = 0.0  # x축(샘플링 주파수 절반)
-
-            for axis in ('x', 'y', 'z'):
-                # ── 타임스탬프·데이터 분리 ──────────────────────
-                ts, val = zip(*self.rt_buf[axis])      # 두 튜플로 분리
-                sig = np.asarray(val, dtype=float)
-                n   = len(sig)
-
-                # ── 실측 dt 계산 ───────────────────────────────
-                dt = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 1/128.0
-
-                # ── 전처리 : DC 제거 + 윈도잉 ───────────────────
-                sig -= sig.mean()
-                sig *= np.hanning(n)
-
-                # ── FFT ───────────────────────────────────────
+    
+            datasets = []
+            ymax = xmax = 0.0
+    
+            for axis in ('x','y','z'):
+                # 타임스탬프는 더 이상 사용하지 않음
+                _, vals = zip(*self.rt_buf[axis])
+                sig = np.asarray(vals, dtype=float)
+                n   = WIN
+    
+                # ── 고정 dt 사용 ───────────────────────────
+                dt = self.FIXED_DT
+    
+                # FFT
                 freq = np.fft.fftfreq(n, d=dt)[:n//2]
                 amp  = np.abs(fft(sig))[:n//2]
-
-                mask = freq <= 50                # 0-50 Hz
+    
+                # 0–50Hz 필터링
+                mask = freq <= 50
                 freq, amp = freq[mask], amp[mask]
-
+    
+                # 스무딩
                 smooth = np.convolve(amp, np.ones(8)/8, 'same')
-
+    
                 datasets.append(list(zip(freq, smooth)))
                 ymax = max(ymax, smooth.max())
                 xmax = max(xmax, freq[-1])
-
-            # ── 메인 스레드에서 그래프 갱신 ─────────────────────
+    
+            # 그래프 업데이트
             Clock.schedule_once(lambda *_:
                 self.graph.update_graph(datasets, [], xmax, ymax))
-    
+
 
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
