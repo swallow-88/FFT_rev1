@@ -113,7 +113,7 @@ class GraphWidget(Widget):
     LINE_W   = 2.5
 
     MAX_FREQ = 30  # X축 0–50Hz 고정
-    BANDS = [(0,10), (10,30), (30,60), (60,100), (100,150)]  # (lo,hi)
+    RT_BANDS = [0, 5, 10, 20, 50, 100, 150]   # 실시간 VAL 구간
 
     
     def __init__(self, **kw):
@@ -136,16 +136,16 @@ class GraphWidget(Widget):
         # ---- 공통 ----
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
-
+    
         # ---- 축 스케일 결정 ----
         self.max_x = 30.0                      # 둘 다 X는 0~30 Hz
-        if rt:                                 # ───── 실시간 ─────
-            # 밴드 스케일을 쓸 것이므로 상한값은 마지막 band 의 hi 로 고정
-            self.min_y = self.BANDS[0][0]
-            self.max_y = self.BANDS[-1][1]        
-        else:                                  # ───── CSV ───────
+        if rt:                      # ── 실시간(VAL) ──
             self.min_y = 0.0
-            self.max_y = max(1e-6, float(ym)) # 데이터에 맞춰 자동
+            self.max_y = self.RT_BANDS[-1]   # ==150
+        else:                       # ── CSV ──
+            self.min_y = 0.0
+            self.max_y = max(1e-6, float(ym))
+    
         Clock.schedule_once(lambda *_: self.redraw(), 0)
 
     # ────────────── ② (val → yPixel) 매핑 도우미 ──────────────
@@ -170,10 +170,34 @@ class GraphWidget(Widget):
     # -----------------------------------------------
     def _scale(self, pts):
         w = self.width  - 2*self.PAD_X
+        h = self.height - 2*self.PAD_Y
         out = []
+    
         for x, y in pts:
+            # ---------- X ----------
             out.append(self.PAD_X + (x/self.max_x)*w)
-            out.append(self._val_to_y(y))
+    
+            # ---------- Y ----------
+            if self.rt_mode:                       # 실시간(밴드 매핑)
+                edges = self.RT_BANDS
+                band_h = h / (len(edges)-1)
+    
+                # 클리핑
+                if y <= edges[0]:
+                    y_px = self.PAD_Y
+                elif y >= edges[-1]:
+                    y_px = self.PAD_Y + h
+                else:
+                    # y 가 포함된 밴드 찾기
+                    for i in range(len(edges)-1):
+                        if edges[i] <= y < edges[i+1]:
+                            frac = (y - edges[i]) / (edges[i+1]-edges[i])
+                            y_px = self.PAD_Y + band_h*i + frac*band_h
+                            break
+                out.append(y_px)
+            else:                                   # CSV – 선형
+                out.append(self.PAD_Y + (y/self.max_y)*h)
+    
         return out
 
     def _grid(self):
@@ -187,42 +211,38 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 0) 기존 축 라벨 지우기
+        # 기존 라벨 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
     
-        # 1) X축 --------------------------------------------
-        for i in range(7):                                  # 0·5·10 … 30 Hz
-            f   = 5 * i
+        # ── X 축 (0·5·…·30 Hz) ───────────────────────────────
+        for i in range(7):
+            f = 5*i
             xpos = self.PAD_X + (self.width-2*self.PAD_X)*(f/self.MAX_FREQ) - 18
             lbl = Label(text=f"{f} Hz", size_hint=(None,None),
                         size=(50,20), pos=(xpos, self.PAD_Y-28))
             lbl._axis = True
             self.add_widget(lbl)
     
-
-        # 2) Y축(왼쪽) -------------------------------
-        if getattr(self, "rt_mode", False):
-            bands = self.BANDS
-            band_h = (self.height-2*self.PAD_Y) / len(bands)
-            for idx, (lo, hi) in enumerate(bands):
-                y_mid = self.PAD_Y + band_h*(idx+0.5) - 8
-                lbl   = Label(text=f"{lo}–{hi}",
-                              size_hint=(None,None), size=(85,20),
-                              pos=(self.PAD_X-60, y_mid))   # ← 10px 우측 이동
-                lbl._axis = True
-                self.add_widget(lbl)
-        else:
-            # CSV 모드 – 0 ~ max_y 를 5등분한 선형 라벨
-            for frac in (0, .25, .5, .75, 1):
-                v     = self.max_y * frac
-                y_mid = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
-                lbl   = Label(text=f"{v:.1f}",
-                              size_hint=(None,None), size=(60,20),
-                              pos=(self.PAD_X-60, y_mid))
-                lbl._axis = True
-                self.add_widget(lbl)
+        # ── Y 축 (왼쪽) ───────────────────────────────────────
+        if self.rt_mode:                 # **실시간 – 고정 밴드**
+            edges = self.RT_BANDS
+        else:                            # CSV – 5 등분
+            step  = self.max_y / 5
+            edges = [step*i for i in range(6)]
+    
+        h = self.height - 2*self.PAD_Y
+        band_h = h / (len(edges)-1)
+    
+        for i in range(len(edges)-1):
+            lo, hi = edges[i], edges[i+1]
+            y_mid  = self.PAD_Y + band_h*(i+0.5) - 8
+            lbl = Label(text=f"{lo:.0f}–{hi:.0f}",
+                        size_hint=(None,None), size=(90,20),
+                        pos=(self.PAD_X-55, y_mid))   # ← 5 px 우측 이동
+            lbl._axis = True
+            self.add_widget(lbl)
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
         try:
@@ -443,7 +463,8 @@ class FFTApp(App):
                     mask   = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq   = freq[mask]
                     smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
-    
+                    smooth = np.clip(smooth, 0, self.graph.RT_BANDS[-1])   # 0–150 VAL
+                    
                     datasets.append(list(zip(freq, smooth)))
                     ymax = max(ymax, smooth.max())
     
