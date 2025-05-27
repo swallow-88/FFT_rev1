@@ -201,14 +201,21 @@ class GraphWidget(Widget):
         return out
 
     def _grid(self):
-        gx = (self.width-2*self.PAD_X)/10
-        gy = (self.height-2*self.PAD_Y)/10
-        Color(.6,.6,.6)
-        for i in range(11):
-            Line(points=[self.PAD_X+i*gx, self.PAD_Y,
-                         self.PAD_X+i*gx, self.height-self.PAD_Y])
-            Line(points=[self.PAD_X, self.PAD_Y+i*gy,
-                         self.width-self.PAD_X, self.PAD_Y+i*gy])
+        Color(.6, .6, .6)
+    
+        # ── 수평선은 “edge” 개수 - 1 ──
+        edges = self.RT_BANDS if self.rt_mode else \
+                [self.max_y * i/5 for i in range(6)]
+    
+        for val in edges:
+            y = self._val_to_y(val)
+            Line(points=[self.PAD_X, y, self.width-self.PAD_X, y])
+    
+        # ── 수직선은 고정 0·5·…·30 Hz ──
+        gx = (self.width-2*self.PAD_X) / 6
+        for i in range(7):
+            x = self.PAD_X + gx*i
+            Line(points=[x, self.PAD_Y, x, self.height-self.PAD_Y])
 
     def _labels(self):
         # 기존 라벨 제거
@@ -226,21 +233,18 @@ class GraphWidget(Widget):
             self.add_widget(lbl)
     
         # ── Y 축 (왼쪽) ───────────────────────────────────────
-        if self.rt_mode:                 # **실시간 – 고정 밴드**
+        # -------- Y 라벨 --------
+        if self.rt_mode:
             edges = self.RT_BANDS
-        else:                            # CSV – 5 등분
-            step  = self.max_y / 5
-            edges = [step*i for i in range(6)]
-    
-        h = self.height - 2*self.PAD_Y
-        band_h = h / (len(edges)-1)
+        else:
+            edges = [self.max_y*i/5 for i in range(6)]
     
         for i in range(len(edges)-1):
             lo, hi = edges[i], edges[i+1]
-            y_mid  = self.PAD_Y + band_h*(i+0.5) - 8
+            y_mid  = self._val_to_y((lo+hi)/2) - 8
             lbl = Label(text=f"{lo:.0f}–{hi:.0f}",
                         size_hint=(None,None), size=(90,20),
-                        pos=(self.PAD_X-55, y_mid))   # ← 5 px 우측 이동
+                        pos=(self.PAD_X-50, y_mid))   # ←5px 오른쪽
             lbl._axis = True
             self.add_widget(lbl)
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
@@ -283,7 +287,7 @@ class GraphWidget(Widget):
                 lbl = Label(text=f"▲ {fx:.1f} Hz  {fy:.0f}",
                             size_hint=(None, None), size=(110, 22),
                             pos=(int(sx-40), int(sy+6)))
-                lbl._axis = True
+                lbl._peak = True
                 self.add_widget(lbl)
     
             # ---------- Δ 표시 ----------
@@ -296,11 +300,28 @@ class GraphWidget(Widget):
                              pos=(int(self.PAD_X),
                                   int(self.height - self.PAD_Y + 6)),
                              color=clr)
-                info._axis = True
+                info._peak = True
                 self.add_widget(info)
     
         except Exception as e:                                 # ← try 와 같은 칸
             _dump_crash(f"redraw error: {e}\n{traceback.format_exc()}")
+
+
+    def _val_to_y(self, v):
+        h = self.height - 2*self.PAD_Y
+        if self.rt_mode:               # 고정 밴드(log형)
+            edges = self.RT_BANDS
+            band_h = h / (len(edges)-1)
+            if v <= edges[0]:
+                return self.PAD_Y
+            if v >= edges[-1]:
+                return self.PAD_Y + h
+            for i in range(len(edges)-1):
+                if edges[i] <= v < edges[i+1]:
+                    frac = (v-edges[i])/(edges[i+1]-edges[i])
+                    return self.PAD_Y + band_h*i + frac*band_h
+        else:                           # 선형
+            return self.PAD_Y + h * (v/self.max_y)
         
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
@@ -464,6 +485,8 @@ class FFTApp(App):
                     freq   = freq[mask]
                     smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
                     smooth = np.clip(smooth, 0, self.graph.RT_BANDS[-1])   # 0–150 VAL
+                    # _rt_fft_loop → smooth 계산 직후
+                    smooth *= 150.0 / max(smooth.max(), 1e-6)   # 0–150 사이로 눌러줌
                     
                     datasets.append(list(zip(freq, smooth)))
                     ymax = max(ymax, smooth.max())
