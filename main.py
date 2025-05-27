@@ -111,8 +111,9 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    MAX_FREQ = 50  # X축 0–50Hz 고정
-
+    MAX_FREQ = 30  # X축 0–50Hz 고정
+    Y_MAX_DB = 120
+    
     def __init__(self, **kw):
         super().__init__(**kw)
         #self.sample_t0 = time.time()
@@ -125,10 +126,11 @@ class GraphWidget(Widget):
 
     def update_graph(self, ds, df, xm, ym):
         try:
-            self.max_x = float(self.MAX_FREQ)
-            self.min_y = DB_FLOOR                 # 축 하한 고정
-            # ym(≤0) – (–120) ⇒ 양수 범위
-            self.max_y = max(1e-3, float(ym) - self.min_y)
+            self.max_x = float(self.MAX_FREQ)   # 30 Hz
+            # ● Y축은 0-120 dB로 고정 ---------------------------
+            self.max_y = 120.0                  # 최상단
+            self.min_y = 0.0                    # 최하단
+            # ----------------------------------------------------
             self.datasets = [seq for seq in (ds or []) if seq]
             self.diff     = df or []
             Clock.schedule_once(lambda *_: self.redraw(), 0)
@@ -142,7 +144,7 @@ class GraphWidget(Widget):
         for x, y in pts:
             out.append(self.PAD_X + (x/self.max_x)*w)
             # y축은 (y - min_y) / max_y 로 정규화
-            out.append(self.PAD_Y + ((y - self.min_y)/self.max_y)*h)
+            out.append(self.PAD_Y + (y/self.max_y)*h)   # y 는 0~120 dB
         return out
 
     def _grid(self):
@@ -156,34 +158,27 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 이전 축 레이블만 제거
+        # 기존 축 라벨 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
-
-        # X축: 0,10,…,50 Hz
-        step_x = self.MAX_FREQ / 5
-        for i in range(6):
-            x_val = i * step_x
-            x_pos = self.PAD_X + (self.width-2*self.PAD_X)*(i/5) - 20
-            # 1) _labels()  X축 부분
-            lbl = Label(text=f"{int(x_val)} Hz", size_hint=(None,None),
-                        size=(60,20), pos=(int(x_pos), int(self.PAD_Y-28)))
+    
+        # ── X축 0-30 Hz, 6 tick (0,5,10…30) ───────────────────────
+        for i in range(7):
+            freq = 5 * i
+            x_pos = self.PAD_X + (self.width-2*self.PAD_X)*(freq/self.max_x) - 18
+            lbl = Label(text=f"{freq} Hz", size_hint=(None,None),
+                        size=(50,20), pos=(x_pos, self.PAD_Y-28))
             lbl._axis = True
             self.add_widget(lbl)
-
-
-        # Y축: 0%, 50%, 100% 위치에만 레이블
-        # Y축: 0 %, 50 %, 100 % 위치
-        for frac in (0.0, 0.5, 1.0):
-            mag = self.min_y + self.max_y * frac   
-            y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
-            for x in (self.PAD_X-68, self.width-self.PAD_X+10):
-                # 5) _labels()  Y축 루프
-                lbl = Label(text=f"{mag:.0f} dB", size_hint=(None,None),
-                            size=(60,20), pos=(int(x), int(y_pos)))
-                lbl._axis = True
-                self.add_widget(lbl) 
+    
+        # ── Y축 왼쪽만 0-120 dB, 20 dB 간격 ───────────────────────
+        for dB in range(0, 121, 20):
+            y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*(dB/self.max_y) - 8
+            lbl = Label(text=f"{dB} dB", size_hint=(None,None),
+                        size=(60,20), pos=(self.PAD_X-68, y_pos))
+            lbl._axis = True
+            self.add_widget(lbl)
 
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
@@ -394,18 +389,22 @@ class FFTApp(App):
                     amp  = np.abs(fft(sig))[:n//2]
     
                     # -------- dB 변환 --------
-                    amp[amp == 0] = 1e-12                 # 0 방지
-                    db  = 20 * np.log10(amp / DB_REF)
-                    db  = np.clip(db, DB_FLOOR, None)      # 바닥 컷
-                    # -------------------------
-                    
+
+                    amp[amp == 0] = 1e-12
+                    db = 20 * np.log10(amp / DB_REF)          # –120 ~ 0 dB
+                
                     mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq = freq[mask]
                     smooth = np.convolve(db[mask], np.ones(8)/8, 'same')
-    
-                    datasets.append(list(zip(freq, smooth)))
-                    ymax = max(ymax, smooth.max())
-                    xmax = max(xmax, freq[-1])
+                
+                    # ★★★ 여기 추가 ★★★
+                    smooth_shift = np.clip(smooth + 120.0, 0.0, 120.0)
+                    
+                    datasets.append(list(zip(freq, smooth_shift)))
+                    ymax = max(ymax, smooth_shift.max())
+                    # ● 추가 ---------------------------------------------------
+                    xmax = max(xmax, freq[-1] if len(freq) else 0.0)   # 0 ~ 30 Hz
+                    # ---------------------------------------------------------
         
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
@@ -579,9 +578,10 @@ class FFTApp(App):
             f, db = f[mask], db[mask]
     
             # ③ 스무딩 ---------------------------------------------------
-            s = np.convolve(db, np.ones(10) / 10, mode='same')
-    
-            return list(zip(f, s)), 50, s.max()
+            smooth = np.convolve(db, np.ones(10) / 10, mode='same')
+            smooth_shift = np.clip(smooth + 120.0, 0.0, 120.0)      # 0 ~ 120 dB
+
+            return list(zip(f, smooth_shift)), 30, smooth_shift.max()
     
         except Exception as e:
             Logger.error(f"FFT err {e}")
