@@ -373,38 +373,40 @@ class FFTApp(App):
     # ---------- ③ FFT 백그라운드 ----------# ── 2) _rt_fft_loop – dt를 실측으로 계산 ───────────────────────────
     def _rt_fft_loop(self):
         while self.rt_on:
-            time.sleep(0.5)
+            try:                                  # ① try: 블록 시작
+                time.sleep(0.5)
     
-            if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
-                continue
+                # 버퍼가 아직 다 안 찼으면 건너뜀
+                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x', 'y', 'z')):
+                    continue
     
-            datasets = []; ymax = 0.0
+                datasets = []                     # 세미콜론(;) 제거
+                ymax = 0.0
     
-            for axis in ('x','y','z'):
-                ts, vals = zip(*self.rt_buf[axis])
-                n   = self.RT_WIN
-                sig = np.asarray(vals, float) * np.hanning(n)
+                for axis in ('x', 'y', 'z'):
+                    ts, vals = zip(*self.rt_buf[axis])
+                    n   = self.RT_WIN
+                    sig = np.asarray(vals, float) * np.hanning(n)
     
-                dt   = 0.01                        # 100 Hz 고정
-                freq = np.fft.fftfreq(n, d=dt)[:n//2]
-                amp  = np.abs(fft(sig))[:n//2]     # VAL
+                    dt   = 0.01                   # 100 Hz 고정
+                    freq = np.fft.fftfreq(n, d=dt)[:n//2]
+                    amp  = np.abs(fft(sig))[:n//2]          # VAL 스펙트럼
     
-                mask   = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
-                freq   = freq[mask]
-                smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
+                    mask   = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
+                    freq   = freq[mask]
+                    smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
     
-                datasets.append(list(zip(freq, smooth)))
-                ymax = max(ymax, smooth.max())
+                    datasets.append(list(zip(freq, smooth)))
+                    ymax = max(ymax, smooth.max())
     
-            # x-축은 항상 0~30 Hz 고정, 따라서 xm 인자는 의미없음
-            Clock.schedule_once(
-                lambda *_: self.graph.update_graph(datasets, [], 30, ymax)
-            )
-        
-            except Exception as e:
+                # x축은 0-30 Hz 고정 → xm 인자는 30 고정
+                Clock.schedule_once(
+                    lambda *_: self.graph.update_graph(datasets, [], 30, ymax)
+                )
+    
+            except Exception as e:                # ② try 와 같은 들여쓰기
                 _dump_crash(f"_rt_fft_loop error: {e}\n{traceback.format_exc()}")
                 continue
-
     # ── UI 구성 ────────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
