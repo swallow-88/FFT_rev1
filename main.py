@@ -153,7 +153,9 @@ class GraphWidget(Widget):
         for x, y in pts:
             out.append(self.PAD_X + (x/self.max_x)*w)
             # y축은 (y - min_y) / max_y 로 정규화
-            out.append(self.PAD_Y + (y/self.max_y)*h)   # y 는 0~120 dB
+            out.append(self.PAD_Y + ((y-self.min_y)/self.max_y)*h)   # y 는 0~120 dB
+            
+
         return out
 
     def _grid(self):
@@ -593,7 +595,7 @@ class FFTApp(App):
             freq   = freq[mask]
             smooth = np.convolve(amp[mask], np.ones(10)/10, 'same')
     
-            return list(zip(freq, smooth)), 30, smooth.max()
+            return list(zip(freq, smooth)), 30, float(smooth.max())
     
         except Exception as e:
             Logger.error(f"csv_fft err {e}")
