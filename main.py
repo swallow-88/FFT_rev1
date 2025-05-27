@@ -373,32 +373,34 @@ class FFTApp(App):
     # ---------- ③ FFT 백그라운드 ----------# ── 2) _rt_fft_loop – dt를 실측으로 계산 ───────────────────────────
     def _rt_fft_loop(self):
         while self.rt_on:
-            try:
-                time.sleep(0.5)
-                if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
-                    continue
+            time.sleep(0.5)
     
-                datasets = []; ymax = xmax = 0.0
-                for axis in ('x', 'y', 'z'):
-                    ts, vals = zip(*self.rt_buf[axis])
-                    n   = self.RT_WIN
-                    sig = np.asarray(vals, float) * np.hanning(n)   # 창만 적용
-                
-                    dt   = self.FIXED_DT            # ← 고정
-                    freq = np.fft.fftfreq(n, d=dt)[:n//2]
-                    amp  = np.abs(fft(sig))[:n//2]  # ★ 그대로 ‘VAL’
-                
-                    mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
-                    freq = freq[mask]
-                    smooth = np.convolve(amp[mask], np.ones(8)/8, "same")
-                
-                    datasets.append(list(zip(freq, smooth)))
-                    ymax = max(ymax, smooth.max())
-                        
-                Clock.schedule_once(
-                    lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
-                )
+            if any(len(self.rt_buf[ax]) < self.RT_WIN for ax in ('x','y','z')):
+                continue
     
+            datasets = []; ymax = 0.0
+    
+            for axis in ('x','y','z'):
+                ts, vals = zip(*self.rt_buf[axis])
+                n   = self.RT_WIN
+                sig = np.asarray(vals, float) * np.hanning(n)
+    
+                dt   = 0.01                        # 100 Hz 고정
+                freq = np.fft.fftfreq(n, d=dt)[:n//2]
+                amp  = np.abs(fft(sig))[:n//2]     # VAL
+    
+                mask   = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
+                freq   = freq[mask]
+                smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
+    
+                datasets.append(list(zip(freq, smooth)))
+                ymax = max(ymax, smooth.max())
+    
+            # x-축은 항상 0~30 Hz 고정, 따라서 xm 인자는 의미없음
+            Clock.schedule_once(
+                lambda *_: self.graph.update_graph(datasets, [], 30, ymax)
+            )
+        
             except Exception as e:
                 _dump_crash(f"_rt_fft_loop error: {e}\n{traceback.format_exc()}")
                 continue
