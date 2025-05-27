@@ -181,20 +181,22 @@ class GraphWidget(Widget):
             lbl._axis = True
             self.add_widget(lbl)
     
-        # 2) Y축(왼쪽) – 5개 **구간**  ------------------------
-        n_band   = 5                     # 구간 개수 (원하면 6 · 4 등으로 조정)
-        band_h   = (self.height-2*self.PAD_Y) / n_band
-        band_max = self.max_y / n_band   # 한 구간에 해당하는 VAL 범위
-    
-        for i in range(n_band):
-            lower = i * band_max
-            upper = (i+1) * band_max
-            y_mid = self.PAD_Y + band_h*(i+0.5) - 8          # 라벨을 구간 중앙에
-            lbl   = Label(
-                text=f"{lower:,.1f}–{upper:,.1f}",           # ‘0.0–3.2’ 식
-                size_hint=(None,None), size=(85,20),
-                pos=(self.PAD_X-95, y_mid)                   # 왼쪽 한쪽만
-            )
+
+        # 2) Y축(왼쪽) -------------------------------
+        if getattr(self, "rt_mode", False):
+            bands = [(0,10), (10,30), (30,60), (60,100), (100,150)]
+        else:
+            # CSV 모드 – 화면을 5등분
+            step  = self.max_y / 5.0
+            bands = [(i*step, (i+1)*step) for i in range(5)]
+
+        h      = self.height - 2*self.PAD_Y
+        for lo, hi in bands:
+            # 구간 중앙 위치
+            y_mid = self.PAD_Y + h * ((lo+hi)/2) / self.max_y - 8
+            lbl   = Label(text=f"{lo:.0f}–{hi:.0f}",
+                          size_hint=(None,None), size=(85,20),
+                          pos=(self.PAD_X-70, y_mid))   # ← 살짝 오른쪽
             lbl._axis = True
             self.add_widget(lbl)
 
@@ -547,8 +549,10 @@ class FFTApp(App):
         if len(res) == 1:
             pts, xm, ym = res[0]
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph([pts], [], xm, ym, rt=False)  # ★
+                lambda *_: self.graph.update_graph([pts], [], xm, ym, rt=False)
             )
+
+ 
         else:
             (f1, x1, y1), (f2, x2, y2) = res
             diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
@@ -556,7 +560,7 @@ class FFTApp(App):
             xm = max(x1, x2)
             ym = max(y1, y2, max(y for _, y in diff))
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)  # ★
+                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)
             )
             
         Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
