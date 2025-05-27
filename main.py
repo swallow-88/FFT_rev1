@@ -28,6 +28,7 @@ import traceback
 
 DB_REF = 1.0
 DB_FLOOR = -120.0
+FIXED_DT = 1.0 / 100.0
 
 
 # ── Android 전용 모듈(있을 때만) ────────────────────────────────────
@@ -127,10 +128,9 @@ class GraphWidget(Widget):
     def update_graph(self, ds, df, xm, ym):
         try:
             self.max_x = float(self.MAX_FREQ)   # 30 Hz
-            # ● Y축은 0-120 dB로 고정 ---------------------------
-            self.max_y = 120.0                  # 최상단
-            self.min_y = 0.0                    # 최하단
-            # ----------------------------------------------------
+            self.min_y = 0.0                    # 밑 = 0
+            self.max_y = max(1e-6, float(ym))   # 최고 진폭
+             # ----------------------------------------------------
             self.datasets = [seq for seq in (ds or []) if seq]
             self.diff     = df or []
             Clock.schedule_once(lambda *_: self.redraw(), 0)
@@ -163,20 +163,21 @@ class GraphWidget(Widget):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
     
-        # ── X축 0-30 Hz, 6 tick (0,5,10…30) ───────────────────────
+        # ── X축 0·5·10 … 30 Hz ───────────────────────────
         for i in range(7):
-            freq = 5 * i
-            x_pos = self.PAD_X + (self.width-2*self.PAD_X)*(freq/self.max_x) - 18
-            lbl = Label(text=f"{freq} Hz", size_hint=(None,None),
-                        size=(50,20), pos=(x_pos, self.PAD_Y-28))
+            f = 5 * i
+            x = self.PAD_X + (self.width-2*self.PAD_X)*(f/self.MAX_FREQ) - 18
+            lbl = Label(text=f"{f} Hz", size_hint=(None,None),
+                        size=(50,20), pos=(x, self.PAD_Y-28))
             lbl._axis = True
             self.add_widget(lbl)
     
-        # ── Y축 왼쪽만 0-120 dB, 20 dB 간격 ───────────────────────
-        for dB in range(0, 121, 20):
-            y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*(dB/self.max_y) - 8
-            lbl = Label(text=f"{dB} dB", size_hint=(None,None),
-                        size=(60,20), pos=(self.PAD_X-68, y_pos))
+        # ── Y축(왼쪽만) 0 ~ max_y 를 5 등분 ────────────────
+        for frac in (0.0, 0.25, 0.50, 0.75, 1.0):
+            val  = self.max_y * frac
+            ypos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
+            lbl  = Label(text=f"{val:.2f}", size_hint=(None,None),
+                         size=(60,20), pos=(self.PAD_X-68, ypos))
             lbl._axis = True
             self.add_widget(lbl)
 
@@ -378,34 +379,22 @@ class FFTApp(App):
                     continue
     
                 datasets = []; ymax = xmax = 0.0
-                for axis in ('x','y','z'):
+                for axis in ('x', 'y', 'z'):
                     ts, vals = zip(*self.rt_buf[axis])
                     n   = self.RT_WIN
-                    sig = np.asarray(vals, dtype=float) * np.hanning(n)
-                        
-                    # 평균 dt
-                    dt  = (ts[-1] - ts[0]) / (n-1)
+                    sig = np.asarray(vals, float) * np.hanning(n)   # 창만 적용
+                
+                    dt   = self.FIXED_DT            # ← 고정
                     freq = np.fft.fftfreq(n, d=dt)[:n//2]
-                    amp  = np.abs(fft(sig))[:n//2]
-    
-                    # -------- dB 변환 --------
-
-                    amp[amp == 0] = 1e-12
-                    db = 20 * np.log10(amp / DB_REF)          # –120 ~ 0 dB
+                    amp  = np.abs(fft(sig))[:n//2]  # ★ 그대로 ‘VAL’
                 
                     mask = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq = freq[mask]
-                    smooth = np.convolve(db[mask], np.ones(8)/8, 'same')
+                    smooth = np.convolve(amp[mask], np.ones(8)/8, "same")
                 
-                    # ★★★ 여기 추가 ★★★
-                    smooth_shift = np.clip(smooth + 120.0, 0.0, 120.0)
-                    
-                    datasets.append(list(zip(freq, smooth_shift)))
-                    ymax = max(ymax, smooth_shift.max())
-                    # ● 추가 ---------------------------------------------------
-                    xmax = max(xmax, freq[-1] if len(freq) else 0.0)   # 0 ~ 30 Hz
-                    # ---------------------------------------------------------
-        
+                    datasets.append(list(zip(freq, smooth)))
+                    ymax = max(ymax, smooth.max())
+                        
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
                 )
@@ -545,46 +534,34 @@ class FFTApp(App):
     @staticmethod
     def csv_fft(path: str):
         """
-        CSV 파일(첫 열: 시간[s], 두 번째 열: 값)에 대해
-        0–50 Hz 범위를 dB 스케일로 반환한다.
-        ─ 반환: ([(freq, dB), …], 50,  y_max_dB)
+        CSV( time[s] , value ) → 0-30 Hz 진폭(VAL) 스펙트럼을 돌려준다.
+        반환값: ([(freq, val), …],   30,   val_max)
         """
-        
         try:
             t, a = [], []
             with open(path, newline="") as f:
                 for r in csv.reader(f):
                     try:
-                        t.append(float(r[0]))
-                        a.append(float(r[1]))
+                        t.append(float(r[0]));  a.append(float(r[1]))
                     except Exception:
                         pass
-    
             if len(a) < 2:
                 raise ValueError("too few samples")
     
-            # ── FFT ──────────────────────────────────────────────
-            dt = (t[-1] - t[0]) / (len(a) - 1)
-            f  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
-            v = np.abs(fft(np.array(a) * np.hanning(len(a))))[:len(a)//2]
-            
-            # ① dB 변환 --------------------------------------------------
-            v[v == 0] = 1e-12                       # 0 방지
-            db = 20 * np.log10(v / DB_REF)          # dB 값
-            db = np.clip(db, DB_FLOOR, None)        # 바닥 컷
+            # FFT (Hanning 창만 적용, dB 변환 없음)
+            dt   = FFTApp.FIXED_DT                # 고정 100 Hz 샘플 주기
+            sig  = np.asarray(a) * np.hanning(len(a))
+            amp  = np.abs(fft(sig))[:len(a)//2]   # ← VAL 진폭
+            freq = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
     
-            # ② 0–50 Hz 구간만 -----------------------------------------
-            mask = f <= 50
-            f, db = f[mask], db[mask]
+            mask   = (freq <= 30) & (freq >= 1)   # 1-30 Hz
+            freq   = freq[mask]
+            smooth = np.convolve(amp[mask], np.ones(10)/10, 'same')
     
-            # ③ 스무딩 ---------------------------------------------------
-            smooth = np.convolve(db, np.ones(10) / 10, mode='same')
-            smooth_shift = np.clip(smooth + 120.0, 0.0, 120.0)      # 0 ~ 120 dB
-
-            return list(zip(f, smooth_shift)), 30, smooth_shift.max()
+            return list(zip(freq, smooth)), 30, smooth.max()
     
         except Exception as e:
-            Logger.error(f"FFT err {e}")
+            Logger.error(f"csv_fft err {e}")
             return None, 0, 0
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
