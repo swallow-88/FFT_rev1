@@ -415,7 +415,7 @@ class FFTApp(App):
                     n   = self.RT_WIN
                     sig = np.asarray(vals, float) * np.hanning(n)
     
-                    dt   = 0.01                   # 100 Hz 고정
+                    dt   = FFTApp.FIXED_DT                   # 100 Hz 고정
                     freq = np.fft.fftfreq(n, d=dt)[:n//2]
                     amp  = np.abs(fft(sig))[:n//2]          # VAL 스펙트럼
     
@@ -585,13 +585,18 @@ class FFTApp(App):
             if len(a) < 2:
                 raise ValueError("too few samples")
     
-            # FFT (Hanning 창만 적용, dB 변환 없음)
-            dt   = FFTApp.FIXED_DT                # 고정 100 Hz 샘플 주기
+              # 고정 100 Hz 샘플 주기
+             # ① 샘플 간 평균 Δt 계산 ― 실제 CSV 주기 사용
+            dt   = (t[-1] - t[0]) / (len(t) - 1)  # sec/샘플
+            if dt <= 0:             # 파일이 잘못된 경우 방어
+                raise ValueError("invalid time column")
             sig  = np.asarray(a) * np.hanning(len(a))
             amp  = np.abs(fft(sig))[:len(a)//2]   # ← VAL 진폭
             freq = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
     
-            mask   = (freq <= 30) & (freq >= 1)   # 1-30 Hz
+            # ② Nyquist 주파수보다 낮도록, 30 Hz 보다 작은 경우엔 최대치까지만
+            f_hi   = min(30, freq.max())
+            mask   = (freq <= f_hi) & (freq >= 1)
             freq   = freq[mask]
             smooth = np.convolve(amp[mask], np.ones(10)/10, 'same')
     
