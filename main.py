@@ -125,17 +125,26 @@ class GraphWidget(Widget):
         self.min_y = DB_FLOOR
         self.bind(size=lambda *a: Clock.schedule_once(lambda *_: self.redraw(), 0))
 
-    def update_graph(self, ds, df, xm, ym):
-        try:
-            self.max_x = float(self.MAX_FREQ)   # 30 Hz
-            self.min_y = 0.0                    # 밑 = 0
-            self.max_y = max(1e-6, float(ym))   # 최고 진폭
-             # ----------------------------------------------------
-            self.datasets = [seq for seq in (ds or []) if seq]
-            self.diff     = df or []
-            Clock.schedule_once(lambda *_: self.redraw(), 0)
-        except Exception as e:
-            _dump_crash(f"update_graph error: {e}\n{traceback.format_exc()}")
+
+    def update_graph(self, ds, df, xm, ym, *, rt: bool):
+        """
+        rt=True  → 실시간 FFT 모드  
+        rt=False → CSV 파일 FFT 모드
+        """
+        self.rt_mode = rt            # <- 모드 기억
+        # ---- 공통 ----
+        self.datasets = [seq for seq in (ds or []) if seq]
+        self.diff     = df or []
+
+        # ---- 축 스케일 결정 ----
+        self.max_x = 30.0                      # 둘 다 X는 0~30 Hz
+        if rt:                                 # ───── 실시간 ─────
+            self.min_y = 0.0                  # 0 부터
+            self.max_y = 120.0                # 0~120 (고정)
+        else:                                  # ───── CSV ───────
+            self.min_y = 0.0
+            self.max_y = max(1e-6, float(ym)) # 데이터에 맞춰 자동
+        Clock.schedule_once(lambda *_: self.redraw(), 0)
 
     def _scale(self, pts):
         w = self.width  - 2*self.PAD_X
@@ -200,7 +209,7 @@ class GraphWidget(Widget):
             if not self.datasets:
                 return
     
-            peaks = []
+            peaks = []                                        # ← 들여쓰기 OK
             with self.canvas:
                 self._grid()
                 self._labels()
@@ -208,6 +217,11 @@ class GraphWidget(Widget):
                 for idx, pts in enumerate(self.datasets):
                     if not pts:
                         continue
+    
+                    # 실시간 모드일 때 y 클립
+                    if getattr(self, "rt_mode", False):
+                        pts = [(x, min(y, self.max_y)) for x, y in pts]
+    
                     Color(*self.COLORS[idx % len(self.COLORS)])
                     Line(points=self._scale(pts), width=self.LINE_W)
     
@@ -219,29 +233,30 @@ class GraphWidget(Widget):
                     Color(*self.DIFF_CLR)
                     Line(points=self._scale(self.diff), width=self.LINE_W)
     
-            # ── (3) 피크 라벨 ─────────────────────────────────────────
-            for fx, fy, sx, sy in peaks:
-                lbl = Label(text=f"▲ {fx:.1f} Hz  {fy:.0f} dB",
-                            size_hint=(None,None), size=(110,22),
+            # ---------- 피크 라벨 ----------
+            for fx, fy, sx, sy in peaks:                      # peaks 로!
+                lbl = Label(text=f"▲ {fx:.1f} Hz  {fy:.0f}",
+                            size_hint=(None, None), size=(110, 22),
                             pos=(int(sx-40), int(sy+6)))
-                lbl._peak = True           # ← 먼저 지정
+                lbl._axis = True
                 self.add_widget(lbl)
-                
-            # ── (4) Δ 표시 ───────────────────────────────────────────
+    
+            # ---------- Δ 표시 ----------
             if len(peaks) >= 2:
                 delta = abs(peaks[0][0] - peaks[1][0])
                 bad   = delta > 1.5
                 clr   = (1,0,0,1) if bad else (0,1,0,1)
                 info = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
-                             size_hint=(None,None), size=(190,24),
-                             pos=(int(self.PAD_X), int(self.height-self.PAD_Y+6)),
+                             size_hint=(None, None), size=(190, 24),
+                             pos=(int(self.PAD_X),
+                                  int(self.height - self.PAD_Y + 6)),
                              color=clr)
-                info._peak = True
+                info._axis = True
                 self.add_widget(info)
     
-        except Exception as e:
+        except Exception as e:                                 # ← try 와 같은 칸
             _dump_crash(f"redraw error: {e}\n{traceback.format_exc()}")
-    
+        
 # ── 메인 앱 ───────────────────────────────────────────────────────
 class FFTApp(App):
     RT_WIN   = 256
@@ -408,8 +423,9 @@ class FFTApp(App):
                     ymax = max(ymax, smooth.max())
     
                 # x축은 0-30 Hz 고정 → xm 인자는 30 고정
+                # _rt_fft_loop() 마지막 쪽
                 Clock.schedule_once(
-                    lambda *_: self.graph.update_graph(datasets, [], 30, ymax)
+                    lambda *_: self.graph.update_graph(datasets, [], 30, ymax, rt=True)
                 )
     
             except Exception as e:                # ② try 와 같은 들여쓰기
@@ -521,26 +537,29 @@ class FFTApp(App):
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
     def _fft_bg(self):
-        res=[]
+        res = []
         for p in self.paths:
-            pts,xm,ym = self.csv_fft(p)
+            pts, xm, ym = self.csv_fft(p)
             if pts is None:
                 self.log("CSV parse err"); return
-            res.append((pts,xm,ym))
-
-        if len(res)==1:
-            pts,xm,ym = res[0]
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts], [], xm, ym))
+            res.append((pts, xm, ym))
+    
+        if len(res) == 1:
+            pts, xm, ym = res[0]
+            Clock.schedule_once(
+                lambda *_: self.graph.update_graph([pts], [], xm, ym, rt=False)  # ★
+            )
         else:
-            (f1,x1,y1), (f2,x2,y2) = res
-            diff=[(f1[i][0], abs(f1[i][1]-f2[i][1]))
-                  for i in range(min(len(f1),len(f2)))]
-            xm=max(x1,x2); ym=max(y1,y2,max(y for _,y in diff))
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([f1,f2], diff, xm, ym))
-        Clock.schedule_once(lambda *_:
-            setattr(self.btn_run,"disabled",False))
+            (f1, x1, y1), (f2, x2, y2) = res
+            diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
+                    for i in range(min(len(f1), len(f2)))]
+            xm = max(x1, x2)
+            ym = max(y1, y2, max(y for _, y in diff))
+            Clock.schedule_once(
+                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)  # ★
+            )
+            
+        Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
 
     # ── CSV → FFT ────────────────────────────────────────────
     @staticmethod
