@@ -158,26 +158,34 @@ class GraphWidget(Widget):
                          self.width-self.PAD_X, self.PAD_Y+i*gy])
 
     def _labels(self):
-        # 기존 축 라벨 제거
+        # 0) 기존 축 라벨 지우기
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
     
-        # ── X축 0·5·10 … 30 Hz ───────────────────────────
-        for i in range(7):
-            f = 5 * i
-            x = self.PAD_X + (self.width-2*self.PAD_X)*(f/self.MAX_FREQ) - 18
+        # 1) X축 --------------------------------------------
+        for i in range(7):                                  # 0·5·10 … 30 Hz
+            f   = 5 * i
+            xpos = self.PAD_X + (self.width-2*self.PAD_X)*(f/self.MAX_FREQ) - 18
             lbl = Label(text=f"{f} Hz", size_hint=(None,None),
-                        size=(50,20), pos=(x, self.PAD_Y-28))
+                        size=(50,20), pos=(xpos, self.PAD_Y-28))
             lbl._axis = True
             self.add_widget(lbl)
     
-        # ── Y축(왼쪽만) 0 ~ max_y 를 5 등분 ────────────────
-        for frac in (0.0, 0.25, 0.50, 0.75, 1.0):
-            val  = self.max_y * frac
-            ypos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
-            lbl  = Label(text=f"{val:.2f}", size_hint=(None,None),
-                         size=(60,20), pos=(self.PAD_X-68, ypos))
+        # 2) Y축(왼쪽) – 5개 **구간**  ------------------------
+        n_band   = 5                     # 구간 개수 (원하면 6 · 4 등으로 조정)
+        band_h   = (self.height-2*self.PAD_Y) / n_band
+        band_max = self.max_y / n_band   # 한 구간에 해당하는 VAL 범위
+    
+        for i in range(n_band):
+            lower = i * band_max
+            upper = (i+1) * band_max
+            y_mid = self.PAD_Y + band_h*(i+0.5) - 8          # 라벨을 구간 중앙에
+            lbl   = Label(
+                text=f"{lower:,.1f}–{upper:,.1f}",           # ‘0.0–3.2’ 식
+                size_hint=(None,None), size=(85,20),
+                pos=(self.PAD_X-95, y_mid)                   # 왼쪽 한쪽만
+            )
             lbl._axis = True
             self.add_widget(lbl)
 
