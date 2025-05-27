@@ -120,12 +120,15 @@ class GraphWidget(Widget):
         self.datasets = []
         self.diff     = []
         self.max_x = self.max_y = 1
+        self.min_y = DB_FLOOR
         self.bind(size=lambda *a: Clock.schedule_once(lambda *_: self.redraw(), 0))
 
     def update_graph(self, ds, df, xm, ym):
         try:
             self.max_x = float(self.MAX_FREQ)
-            self.max_y = max(1e-6, float(ym))
+            self.min_y = DB_FLOOR                 # 축 하한 고정
+            # ym(≤0) – (–120) ⇒ 양수 범위
+            self.max_y = max(1e-3, float(ym) - self.min_y)
             self.datasets = [seq for seq in (ds or []) if seq]
             self.diff     = df or []
             Clock.schedule_once(lambda *_: self.redraw(), 0)
@@ -138,7 +141,8 @@ class GraphWidget(Widget):
         out = []
         for x, y in pts:
             out.append(self.PAD_X + (x/self.max_x)*w)
-            out.append(self.PAD_Y + (y/self.max_y)*h)
+            # y축은 (y - min_y) / max_y 로 정규화
+            out.append(self.PAD_Y + ((y - self.min_y)/self.max_y)*h)
         return out
 
     def _grid(self):
@@ -168,12 +172,11 @@ class GraphWidget(Widget):
             lbl._axis = True
             self.add_widget(lbl)
 
-# … Y축 루프 안도 동일하게 lbl._axis=True / self.add_widget(lbl)
 
         # Y축: 0%, 50%, 100% 위치에만 레이블
         # Y축: 0 %, 50 %, 100 % 위치
         for frac in (0.0, 0.5, 1.0):
-            mag   = self.max_y * frac
+            mag = self.min_y + self.max_y * frac   
             y_pos = self.PAD_Y + (self.height-2*self.PAD_Y)*frac - 8
             for x in (self.PAD_X-68, self.width-self.PAD_X+10):
                 # 5) _labels()  Y축 루프
@@ -382,11 +385,9 @@ class FFTApp(App):
                 datasets = []; ymax = xmax = 0.0
                 for axis in ('x','y','z'):
                     ts, vals = zip(*self.rt_buf[axis])
-                    sig = np.asarray(vals, dtype=float)
-                    sig *= np.hanning(n)
                     n   = self.RT_WIN
                     sig = np.asarray(vals, dtype=float) * np.hanning(n)
-    
+                        
                     # 평균 dt
                     dt  = (ts[-1] - ts[0]) / (n-1)
                     freq = np.fft.fftfreq(n, d=dt)[:n//2]
