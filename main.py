@@ -148,25 +148,6 @@ class GraphWidget(Widget):
     
         Clock.schedule_once(lambda *_: self.redraw(), 0)
 
-    # ────────────── ② (val → yPixel) 매핑 도우미 ──────────────
-    def _val_to_y(self, v: float) -> float:
-        """실시간 모드일 때 밴드 기준으로 y 픽셀 좌표를 계산
-           CSV 모드엔 그냥 선형 스케일을 쓴다."""
-        h = self.height - 2*self.PAD_Y
-        if not getattr(self, "rt_mode", False):
-            return self.PAD_Y + h * (v-self.min_y) / max(1e-6, self.max_y-self.min_y)
-
-        # -------- 밴드 스케일 --------
-        bands = self.BANDS
-        band_h = h / len(bands)           # 모든 밴드 높이 동일
-        # v가 범위를 벗어나면 클립
-        v = max(bands[0][0], min(bands[-1][1], v))
-        # v가 속한 밴드 찾기
-        for idx, (lo, hi) in enumerate(bands):
-            if lo <= v <= hi:
-                frac = (v-lo) / (hi-lo)   # 밴드 안 세부 비율
-                return self.PAD_Y + band_h*idx + frac*band_h
-
     # -----------------------------------------------
     def _scale(self, pts):
         w = self.width  - 2*self.PAD_X
@@ -249,6 +230,7 @@ class GraphWidget(Widget):
             self.add_widget(lbl)
     # ── 1) GraphWidget.redraw – 들여쓰기 정리 ──────────────────────────
     def redraw(self, *_):
+        self.clear_widgets()
         try:
             if self.width <= 2*self.PAD_X or self.height <= 2*self.PAD_Y:
                 return
@@ -484,13 +466,15 @@ class FFTApp(App):
                     mask   = (freq <= self.graph.MAX_FREQ) & (freq >= self.MIN_FREQ)
                     freq   = freq[mask]
                     smooth = np.convolve(amp[mask], np.ones(8)/8, 'same')
-                    smooth = np.clip(smooth, 0, self.graph.RT_BANDS[-1])   # 0–150 VAL
+                    smooth = np.clip(smooth, 0.0, 150.0)   # 0–150 VAL
                     # _rt_fft_loop → smooth 계산 직후
-                    smooth *= 150.0 / max(smooth.max(), 1e-6)   # 0–150 사이로 눌러줌
+                    
                     
                     datasets.append(list(zip(freq, smooth)))
                     ymax = max(ymax, smooth.max())
-    
+                
+
+
                 # x축은 0-30 Hz 고정 → xm 인자는 30 고정
                 # _rt_fft_loop() 마지막 쪽
                 Clock.schedule_once(
@@ -627,7 +611,7 @@ class FFTApp(App):
             xm = max(x1, x2)
             ym = max(y1, y2, max(y for _, y in diff))
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)
+                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)              
             )
             
         Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
