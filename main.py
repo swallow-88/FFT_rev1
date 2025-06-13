@@ -321,10 +321,12 @@ class FFTApp(App):
             'y': deque(maxlen=self.RT_WIN),
             'z': deque(maxlen=self.RT_WIN),
         }
-# 3) FFTApp.__init__
+# 데이터 수집
         self.sample_t0 = time.time()
         self.sample_count = 0
+        self.prev_fft = None  
 
+    
     
     # ── 작은 토스트+라벨 로그 ─────────────────────────────────────
     def log(self, msg: str):
@@ -503,6 +505,12 @@ class FFTApp(App):
                               on_press=self.toggle_realtime)
         root.add_widget(self.btn_rt)
 
+
+         # ★NEW: 10 초 레코딩 버튼
+        self.btn_rec = Button(text="Record 10 s FFT", size_hint=(1,.1),
+                              on_press=self.record_10s)
+        root.add_widget(self.btn_rec)
+
         
         self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
 
@@ -654,6 +662,87 @@ class FFTApp(App):
         except Exception as e:
             Logger.error(f"csv_fft err {e}")
             return None, 0, 0
+
+
+    # ★NEW: 10 초 가속도 레코딩 + FFT
+    def record_10s(self, *_):
+        if self.rt_on:
+            self.log("⚠️ 실시간 분석이 켜져 있습니다. 먼저 OFF 해 주세요.")
+            return
+        self.btn_rec.disabled = True
+        threading.Thread(target=self._record_10s_thread, daemon=True).start()
+    
+    # ★NEW: 10 초 가속도 레코딩 + FFT + CSV 저장
+    def _record_10s_thread(self):
+        try:
+            # 1) 센서 켜기
+            accelerometer.enable()
+            buf = {'x': [], 'y': [], 'z': []}
+
+            t0 = time.time()
+            while time.time() - t0 < 10.0:          # 10 초 동안 수집
+                ax, ay, az = accelerometer.acceleration
+                if None not in (ax, ay, az):
+                    now = time.time()
+                    buf['x'].append((now, ax))
+                    buf['y'].append((now, ay))
+                    buf['z'].append((now, az))
+                time.sleep(0.005)                   # ≈200 Hz 이하
+
+            accelerometer.disable()
+
+            # 2) FFT 계산
+            datasets, ymax = [], 0.0
+            for axis in ('x', 'y', 'z'):
+                ts, vals = zip(*buf[axis])
+                sig  = np.asarray(vals, float) * np.hanning(len(vals))
+                dt   = (ts[-1] - ts[0]) / (len(ts) - 1)
+                freq = np.fft.fftfreq(len(sig), d=dt)[:len(sig)//2]
+                amp  = np.abs(fft(sig))[:len(sig)//2]
+                mask = (freq <= GraphWidget.MAX_FREQ) & (freq >= self.MIN_FREQ)
+                freq = freq[mask]
+                sm   = np.convolve(amp[mask], np.ones(8)/8, 'same')
+                datasets.append(list(zip(freq, sm)))
+                ymax = max(ymax, sm.max())
+
+            # 3) 직전 결과와 차이 계산
+            diff = []
+            if self.prev_fft:
+                base_f, base_a = zip(*self.prev_fft[0])
+                cur_f,  cur_a  = zip(*datasets[0])
+                n = min(len(base_f), len(cur_f))
+                diff = [(base_f[i], abs(base_a[i] - cur_a[i])) for i in range(n)]
+
+            # 4) 그래프 갱신
+            Clock.schedule_once(
+                lambda *_: self.graph.update_graph(datasets, diff, 30, ymax, rt=False)
+            )
+
+            # 5) CSV 저장
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = f"/sdcard/accel_{ts}.csv"
+            try:
+                with open(path, "w") as f:
+                    for i in range(len(buf['x'])):
+                        f.write(f"{buf['x'][i][0]},{buf['x'][i][1]},"
+                                f"{buf['y'][i][1]},{buf['z'][i][1]}\n")
+                self.log(f"✅ 10 초 FFT 완료 – 저장됨: {os.path.basename(path)}")
+            except Exception as e:
+                self.log(f"⚠️ CSV 저장 실패: {e}")
+
+            # 6) 다음 비교용으로 저장
+            self.prev_fft = datasets
+
+        except Exception as e:
+            _dump_crash(f"record_10s error: {e}\n{traceback.format_exc()}")
+            self.log(f"❌ 레코딩 실패: {e}")
+
+        finally:
+            Clock.schedule_once(lambda *_: setattr(self.btn_rec, "disabled", False))
+
+
+
+
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     FFTApp().run()
