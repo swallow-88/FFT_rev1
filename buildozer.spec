@@ -43,6 +43,16 @@ android.archs                = armeabi-v7a,arm64-v8a
 android.ndk = 25.2.9519653
 android.ndk_api             = 30
 
+
+android.manifestPlaceholders = MANAGE_EXTERNAL_STORAGE=true
+
+# 또는 명시 삽입 (tools:ignore 로 Scoped Storage 경고 무시)
+android.add_manifest_xml = """
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+    tools:ignore="ScopedStorage" />
+"""
+
+
 # ── Build Tools 버전 고정 ──────────────────────────────────────────────────────
 android.build_tools_version = 33.0.2
 
