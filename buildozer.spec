@@ -32,7 +32,8 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius
 #p4a.local_recipes = recipes
 android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 
-
+android.useandroidx = True
+android.enable_androidx_workaround = True
 # 필요하다면 ant, gradle, ndk 버전은 그대로 두세요
 
 # ── Android 플랫폼 & 툴체인 설정 ───────────────────────────────────────────────
