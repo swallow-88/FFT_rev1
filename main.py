@@ -548,7 +548,7 @@ class FFTApp(App):
                 multiple=True,
                 filters=[("CSV", "*.csv")],
                 native=False,
-                path="/storage/emulated/0/Download"
+                path="/storage/emulated/0/Download"  # 또는 내부 저장소 루트
             )
         except Exception as e:
             Logger.exception("filechooser fallback 오류")
