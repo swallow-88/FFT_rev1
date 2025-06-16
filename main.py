@@ -12,6 +12,8 @@ import queue, time
 
 from numpy.fft import fft
 
+from android.storage import app_storage_path
+                       
 from kivy.app            import App
 from kivy.clock          import Clock
 from kivy.logger         import Logger
@@ -719,8 +721,10 @@ class FFTApp(App):
             )
 
             # 5) CSV 저장
+            
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = f"/sdcard/accel_{ts}.csv"
+            path = os.path.join(app_storage_path(), f"accel_{ts}.csv")
+            
             try:
                 with open(path, "w") as f:
                     for i in range(len(buf['x'])):
