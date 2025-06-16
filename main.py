@@ -93,20 +93,23 @@ sys.excepthook = _ex
 def uri_to_file(u: str) -> str | None:
     if not u:
         return None
+
+    # ① file:// 또는 절대경로  →  **존재 여부 확인하지 않고 그대로 반환**
     if u.startswith("file://"):
-        real = urllib.parse.unquote(u[7:])
-        return real if os.path.exists(real) else None
+        return urllib.parse.unquote(u[7:])
     if not u.startswith("content://"):
-        return u if os.path.exists(u) else None
+        return u              # 존재 확인은 csv_fft() 단계에서 open()이 대신함
+
+    # ② SAF URI → 내부로 복사
     if ANDROID and SharedStorage:
         try:
             return SharedStorage().copy_from_shared(
                 u, uuid.uuid4().hex, to_downloads=False)
         except Exception as e:
             Logger.error(f"SAF copy fail: {e}")
-            self.log(f"SAF 복사 실패: {e}")
+            if toast:
+                toast.toast(f"SAF 복사 실패: {e}")
     return None
-
 
 
 class GraphWidget(Widget):
@@ -573,17 +576,18 @@ class FFTApp(App):
 
     # ── 파일 선택 결과 콜백 ─────────────────────────────────────
     def on_choose(self, sel):
-        Logger.info(f"선택: {sel}")
+        Logger.info(f"[on_choose] raw: {sel}")
         if not sel:
             return
-        paths=[]
+        paths = []
         for raw in sel[:2]:
             real = uri_to_file(raw)
-            Logger.info(f"{raw} → {real}")
+            Logger.info(f"[on_choose] {raw} → {real}")
             if not real:
-                self.log("❌ 복사 실패"); return
+                self.log("❌ SAF/권한 문제로 파일을 열 수 없습니다")
+                return
             paths.append(real)
-
+    
         self.paths = paths
         self.label.text = " · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled = False
