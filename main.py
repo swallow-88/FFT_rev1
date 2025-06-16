@@ -520,64 +520,43 @@ class FFTApp(App):
         return root
 
     # ── 파일 선택 ──────────────────────────────────────────────
-    def open_chooser(self,*_):
+    def open_chooser(self, *_):
+    
+        # (1) Android 11+ ‘모든-파일’ 권한 확인
         if ANDROID and ANDROID_API >= 30:
             try:
                 from jnius import autoclass
                 Env = autoclass("android.os.Environment")
                 if not Env.isExternalStorageManager():
-                    mv = ModalView(size_hint=(.8,.35))
-                    box=BoxLayout(orientation='vertical', spacing=10, padding=10)
+                    mv  = ModalView(size_hint=(.8, .35))
+                    box = BoxLayout(orientation='vertical', spacing=10, padding=10)
                     box.add_widget(Label(
                         text="⚠️ CSV 파일에 접근하려면\n'모든 파일' 권한이 필요합니다.",
                         halign="center"))
-                    box.add_widget(Button(text="권한 설정으로 이동",
-                                          size_hint=(1,.4),
-                                          on_press=lambda *_: (
-                                              mv.dismiss(),
-                                              self._goto_allfiles_permission())))
-                    mv.add_widget(box); mv.open()
-                    return
+                    box.add_widget(Button(
+                        text="권한 설정으로 이동", size_hint=(1, .4),
+                        on_press=lambda *_: (mv.dismiss(),
+                                             self._goto_allfiles_permission())))
+                    mv.add_widget(box)
+                    mv.open()
+                    return                         # 권한이 없으면 더 진행하지 않음
             except Exception:
                 Logger.exception("ALL-FILES check 오류(무시)")
     
-        # 👇 SAF 미지원 환경에서는 filechooser 사용
+        # (2) **한 번만** filechooser 호출
         try:
             filechooser.open_file(
                 on_selection=self.on_choose,
                 multiple=True,
                 filters=[("CSV", "*.csv")],
                 native=False,
-                path="/storage/emulated/0/Download"  # 또는 내부 저장소 루트
+                path="/storage/emulated/0/Download"
             )
+            return                              # ← 반드시 바로 return
         except Exception as e:
-            Logger.exception("filechooser fallback 오류")
+            Logger.exception("filechooser 오류")
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
-
-        # ① SAF picker (권장) ------------------------------------
-        if ANDROID and SharedStorage:
-            try:
-                SharedStorage().open_file(
-                    callback=self.on_choose,
-                    multiple=True,
-                    mime_type="text/*")
-                return
-            except Exception as e:
-                Logger.exception("SAF picker fail")
-                self.log(f"SAF 선택기 오류: {e}")
-
-        # ② 경로 기반 chooser -----------------------------------
-        try:
-            filechooser.open_file(
-                on_selection=self.on_choose,      # ★ 키워드 인자!
-                multiple=True,
-                filters=[("CSV","*.csv")],
-                native=False,
-                path="/storage/emulated/0/Download")
-            return
-        except Exception as e:
-            Logger.exception("legacy chooser fail")
-            self.log(f"파일 선택기를 열 수 없습니다: {e}")
+            return                              # 실패했으면 더 진행하지 않음
 
     def _goto_allfiles_permission(self):
         from jnius import autoclass
