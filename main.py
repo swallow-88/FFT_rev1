@@ -574,7 +574,7 @@ class FFTApp(App):
                 filters=[("CSV","*.csv")],
                 native=False,
                 path="/storage/emulated/0/Download")
-          return
+            return
         except Exception as e:
             Logger.exception("legacy chooser fail")
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
