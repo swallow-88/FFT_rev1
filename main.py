@@ -104,6 +104,7 @@ def uri_to_file(u: str) -> str | None:
                 u, uuid.uuid4().hex, to_downloads=False)
         except Exception as e:
             Logger.error(f"SAF copy fail: {e}")
+            self.log(f"SAF 복사 실패: {e}")
     return None
 
 
@@ -340,11 +341,12 @@ class FFTApp(App):
                 pass
 
     # ── 저장소 권한 요청 ────────────────────────────────────────
-    def _ask_perm(self,*_):
-        if not ANDROID or SharedStorage:           # SAF만 쓰면 file 권한 불필요
+    def _ask_perm(self, *_):
+        # SharedStorage 유무와 관계없이 외부 파일 경로를 쓴다면 권한 필요
+        if not ANDROID:
             self.btn_sel.disabled = False
             return
-
+    
         need = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
         MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
         if MANAGE:
@@ -353,12 +355,13 @@ class FFTApp(App):
             need += [Permission.READ_MEDIA_IMAGES,
                      Permission.READ_MEDIA_AUDIO,
                      Permission.READ_MEDIA_VIDEO]
-
+    
         def _cb(perms, grants):
             self.btn_sel.disabled = not any(grants)
             if not any(grants):
                 self.log("저장소 권한 거부됨 – CSV 파일을 열 수 없습니다")
-
+    
+        # → **무조건** 권한을 확인/요청
         if all(check_permission(p) for p in need):
             self.btn_sel.disabled = False
         else:
