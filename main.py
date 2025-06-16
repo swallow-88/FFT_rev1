@@ -521,8 +521,6 @@ class FFTApp(App):
 
     # ── 파일 선택 ──────────────────────────────────────────────
     def open_chooser(self,*_):
-
-        # Android 11+ : ‘모든 파일’ 권한 안내
         if ANDROID and ANDROID_API >= 30:
             try:
                 from jnius import autoclass
@@ -542,6 +540,19 @@ class FFTApp(App):
                     return
             except Exception:
                 Logger.exception("ALL-FILES check 오류(무시)")
+    
+        # 👇 SAF 미지원 환경에서는 filechooser 사용
+        try:
+            filechooser.open_file(
+                on_selection=self.on_choose,
+                multiple=True,
+                filters=[("CSV", "*.csv")],
+                native=False,
+                path="/storage/emulated/0/Download"
+            )
+        except Exception as e:
+            Logger.exception("filechooser fallback 오류")
+            self.log(f"파일 선택기를 열 수 없습니다: {e}")
 
         # ① SAF picker (권장) ------------------------------------
         if ANDROID and SharedStorage:
@@ -563,6 +574,7 @@ class FFTApp(App):
                 filters=[("CSV","*.csv")],
                 native=False,
                 path="/storage/emulated/0/Download")
+          return
         except Exception as e:
             Logger.exception("legacy chooser fail")
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
@@ -722,24 +734,29 @@ class FFTApp(App):
 
             # 5) CSV 저장
             
+            # 5) 내부 저장
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = os.path.join(app_storage_path(), f"accel_{ts}.csv")
+            file_name = f"accel_{ts}.csv"
+            internal_path = os.path.join(app_storage_path(), file_name)
             
             try:
-                with open(path, "w") as f:
+                with open(internal_path, "w") as f:
                     for i in range(len(buf['x'])):
                         f.write(f"{buf['x'][i][0]},{buf['x'][i][1]},"
                                 f"{buf['y'][i][1]},{buf['z'][i][1]}\n")
-                self.log(f"✅ 10 초 FFT 완료 – 저장됨: {os.path.basename(path)}")
             except Exception as e:
-                self.log(f"⚠️ CSV 저장 실패: {e}")
-
-            # 6) 다음 비교용으로 저장
-            self.prev_fft = datasets
-
-        except Exception as e:
-            _dump_crash(f"record_10s error: {e}\n{traceback.format_exc()}")
-            self.log(f"❌ 레코딩 실패: {e}")
+                self.log(f"⚠️ 내부 CSV 저장 실패: {e}")
+                return
+            
+            # 6) SAF를 이용한 Downloads 폴더 복사
+            try:
+                if ANDROID and SharedStorage is not None:
+                    SharedStorage().copy_to_shared(internal_path, file_name)
+                    self.log(f"✅ 10초 FFT 완료 – Downloads 폴더에 저장됨: {file_name}")
+                else:
+                    self.log(f"✅ 저장 완료 (내부 디렉토리): {file_name}")
+            except Exception as e:
+                self.log(f"⚠️ Downloads 복사 실패: {e}")
 
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_rec, "disabled", False))
