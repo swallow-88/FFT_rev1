@@ -531,27 +531,42 @@ class FFTApp(App):
     # ── 파일 선택 ──────────────────────────────────────────────
     # ── 파일 선택 ──────────────────────────────────────────────
     def open_chooser(self, *_):
-
+    
         if ANDROID:
-            # ① 읽기 권한만 확인-요청
-            need = [Permission.READ_EXTERNAL_STORAGE]      # READ 만!
-            if not all(check_permission(p) for p in need):
-                self.log("📂 CSV 를 열려면 ‘파일 액세스 허용’을 눌러 주세요")
-                request_permissions(need, lambda *_: self.open_chooser())
-                return
+            need = [Permission.READ_EXTERNAL_STORAGE]           # 읽기만
+            if ANDROID_API >= 33:
+                need = [Permission.READ_MEDIA_IMAGES]           # Tiramisu+
+    
+            # 이미 허용?
+            if all(check_permission(p) for p in need):
+                return self._show_filechooser()                 # 바로 chooser
+    
+            # ① 권한 요청 → ② 거부 시 즉시 “앱 설정”으로
+            def _cb(perms, grants):
+                if all(grants):
+                    self._show_filechooser()
+                else:
+                    self.log("❗ 권한이 거부되었습니다 – 설정 화면으로 이동합니다")
+                    self._goto_app_settings()
+    
+            request_permissions(need, _cb)
+            return                                              # ← 중요
+    
+        # (PC · iOS 등) 바로 chooser
+        self._show_filechooser()
 
-        # ② filechooser 한 번만 호출
-        try:
-            filechooser.open_file(
-                on_selection=self.on_choose,
-                multiple=True,
-                filters=[("CSV", "*.csv")],
-                native=False,
-                path="/storage/emulated/0/Download"
-            )
-        except Exception as e:
-            Logger.exception("filechooser 오류")
-            self.log(f"파일 선택기를 열 수 없습니다: {e}")
+
+def _show_filechooser(self):
+    try:
+        filechooser.open_file(
+            on_selection=self.on_choose,
+            multiple=True,
+            filters=[("CSV", "*.csv")],
+            native=False,
+            path="/storage/emulated/0/Download")
+    except Exception as e:
+        Logger.exception("filechooser 오류")
+        self.log(f"파일 선택기를 열 수 없습니다: {e}")
 
   
     def _goto_allfiles_permission(self):
