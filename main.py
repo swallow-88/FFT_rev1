@@ -754,6 +754,42 @@ def _show_filechooser(self):
 
 
 
+    def _show_filechooser(self):
+        try:
+            filechooser.open_file(
+                on_selection=self.on_choose,
+                multiple=True,
+                filters=[("CSV", "*.csv")],
+                native=False,
+                path="/storage/emulated/0/Download")
+        except Exception as e:
+            Logger.exception("filechooser 오류")
+            self.log(f"파일 선택기를 열 수 없습니다: {e}")
+
+    # ───── 권한 거부 → 바로 앱 설정 ─────
+    def _goto_app_settings(self):
+        from jnius import autoclass
+        Intent   = autoclass("android.content.Intent")
+        Settings = autoclass("android.provider.Settings")
+        Uri      = autoclass("android.net.Uri")
+        act      = autoclass("org.kivy.android.PythonActivity").mActivity
+        uri = Uri.fromParts("package", act.getPackageName(), None)
+        act.startActivity(Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+
+    # ───── ‘모든-파일’ 권한 안내 팝업 ─────
+    def _show_allfiles_dialog(self):
+        mv  = ModalView(size_hint=(.8, .35))
+        box = BoxLayout(orientation='vertical', spacing=10, padding=10)
+        box.add_widget(Label(
+            text="⚠️ CSV 파일에 접근하려면\n'모든 파일' 권한이 필요합니다.",
+            halign="center"))
+        box.add_widget(Button(
+            text="권한 설정으로 이동", size_hint=(1, .4),
+            on_press=lambda *_: (mv.dismiss(),
+                                 self._goto_app_settings())))
+        mv.add_widget(box)
+        mv.open()
 
 # ── 실행 ──────────────────────────────────────────────────────
 if __name__ == "__main__":
