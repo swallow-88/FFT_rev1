@@ -498,7 +498,7 @@ class FFTApp(App):
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
         self.label   = Label(text="Pick 1 or 2 CSV files", size_hint=(1,.1))
-        self.btn_sel = Button(text="Select CSV", disabled=False, size_hint=(1,.1),
+        self.btn_sel = Button(text="Select CSV", disabled=True, size_hint=(1,.1),
                               on_press=self.open_chooser)
         self.btn_run = Button(text="FFT RUN",   disabled=True, size_hint=(1,.1),
                               on_press=self.run_fft)
