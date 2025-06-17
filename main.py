@@ -498,7 +498,7 @@ class FFTApp(App):
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
         self.label   = Label(text="Pick 1 or 2 CSV files", size_hint=(1,.1))
-        self.btn_sel = Button(text="Select CSV", disabled=True, size_hint=(1,.1),
+        self.btn_sel = Button(text="Select CSV", disabled=False, size_hint=(1,.1),
                               on_press=self.open_chooser)
         self.btn_run = Button(text="FFT RUN",   disabled=True, size_hint=(1,.1),
                               on_press=self.run_fft)
@@ -528,28 +528,33 @@ class FFTApp(App):
     # ── 파일 선택 ──────────────────────────────────────────────
     def open_chooser(self, *_):
     
-        # (1) Android 11+ ‘모든-파일’ 권한 확인
-        if ANDROID and ANDROID_API >= 30:
-            try:
-                from jnius import autoclass
-                Env = autoclass("android.os.Environment")
-                if not Env.isExternalStorageManager():
-                    mv  = ModalView(size_hint=(.8, .35))
-                    box = BoxLayout(orientation='vertical', spacing=10, padding=10)
-                    box.add_widget(Label(
-                        text="⚠️ CSV 파일에 접근하려면\n'모든 파일' 권한이 필요합니다.",
-                        halign="center"))
-                    box.add_widget(Button(
-                        text="권한 설정으로 이동", size_hint=(1, .4),
-                        on_press=lambda *_: (mv.dismiss(),
-                                             self._goto_allfiles_permission())))
-                    mv.add_widget(box)
-                    mv.open()
-                    return                         # 권한이 없으면 더 진행하지 않음
-            except Exception:
-                Logger.exception("ALL-FILES check 오류(무시)")
+        if ANDROID:
+            # 0️⃣ 필수 권한 목록
+            need = [Permission.READ_EXTERNAL_STORAGE,
+                    Permission.WRITE_EXTERNAL_STORAGE]
+            MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
+            if MANAGE and ANDROID_API >= 30:
+                need.append(MANAGE)
     
-        # (2) **한 번만** filechooser 호출
+            # 권한 없으면 먼저 요청 → 허용되면 다시 open_chooser 호출
+            if not all(check_permission(p) for p in need):
+                self.log("⚠️ 먼저 저장소 권한을 허용해 주세요")
+                request_permissions(need,
+                                    lambda *_: self.open_chooser())
+                return
+    
+            # 1️⃣ Android 11+ ‘모든-파일’ 권한(시스템 설정) 확인
+            if ANDROID_API >= 30:
+                try:
+                    from jnius import autoclass
+                    Env = autoclass("android.os.Environment")
+                    if not Env.isExternalStorageManager():
+                        self._show_allfiles_dialog()  # ↙︎ 팝업 함수로 분리해도 OK
+                        return
+                except Exception:
+                    Logger.exception("ALL-FILES check 오류(무시)")
+    
+        # 2️⃣ **filechooser** 한 번만 호출
         try:
             filechooser.open_file(
                 on_selection=self.on_choose,
@@ -558,12 +563,12 @@ class FFTApp(App):
                 native=False,
                 path="/storage/emulated/0/Download"
             )
-            return                              # ← 반드시 바로 return
+            return
         except Exception as e:
             Logger.exception("filechooser 오류")
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
-            return                              # 실패했으면 더 진행하지 않음
 
+  
     def _goto_allfiles_permission(self):
         from jnius import autoclass
         Intent   = autoclass("android.content.Intent")
