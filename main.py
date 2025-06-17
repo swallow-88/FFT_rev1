@@ -556,51 +556,6 @@ class FFTApp(App):
         self._show_filechooser()
 
 
-def _show_filechooser(self):
-    try:
-        filechooser.open_file(
-            on_selection=self.on_choose,
-            multiple=True,
-            filters=[("CSV", "*.csv")],
-            native=False,
-            path="/storage/emulated/0/Download")
-    except Exception as e:
-        Logger.exception("filechooser 오류")
-        self.log(f"파일 선택기를 열 수 없습니다: {e}")
-
-  
-    def _goto_allfiles_permission(self):
-        from jnius import autoclass
-        Intent   = autoclass("android.content.Intent")
-        Settings = autoclass("android.provider.Settings")
-        Uri      = autoclass("android.net.Uri")
-        act      = autoclass("org.kivy.android.PythonActivity").mActivity
-        uri = Uri.fromParts("package", act.getPackageName(), None)
-        act.startActivity(Intent(
-            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
-
-    # ── 파일 선택 결과 콜백 ─────────────────────────────────────
-    def on_choose(self, sel):
-        Logger.info(f"[on_choose] raw: {sel}")
-        if not sel:
-            return
-        paths = []
-        for raw in sel[:2]:
-            real = uri_to_file(raw)
-            Logger.info(f"[on_choose] {raw} → {real}")
-            if not real:
-                self.log("❌ SAF/권한 문제로 파일을 열 수 없습니다")
-                return
-            paths.append(real)
-    
-        self.paths = paths
-        self.label.text = " · ".join(os.path.basename(p) for p in paths)
-        self.btn_run.disabled = False
-
-    # ── FFT 실행 ──────────────────────────────────────────────
-    def run_fft(self,*_):
-        self.btn_run.disabled = True
-        threading.Thread(target=self._fft_bg, daemon=True).start()
 
     def _fft_bg(self):
         res = []
