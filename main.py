@@ -371,7 +371,45 @@ class FFTApp(App):
             request_permissions(need, _cb)
 
 
-    
+
+    # ── 파일 선택 결과 콜백 ─────────────────────────────
+    def on_choose(self, selection):
+        """
+        filechooser 가 돌려준 선택 목록을 받아
+        · 최대 2 개의 CSV 경로를 self.paths 에 저장
+        · 상태 라벨 업데이트
+        · FFT RUN 버튼 활성화
+        """
+        Logger.info(f"[on_choose] raw: {selection}")
+        if not selection:          # 사용자가 '취소'를 눌렀을 때
+            return
+
+        paths = []
+        for raw in selection[:2]:  # 최대 2 개만 사용
+            real = uri_to_file(raw)
+            Logger.info(f"[on_choose] {raw} → {real}")
+            if not real:
+                self.log("❌ SAF/권한 문제로 파일을 열 수 없습니다")
+                return
+            paths.append(real)
+
+        self.paths = paths
+        self.label.text = " · ".join(os.path.basename(p) for p in paths)
+        self.btn_run.disabled = False     # RUN 버튼 켜기
+
+
+    # ── FFT RUN 버튼 동작 ───────────────────────────────
+    def run_fft(self, *_):
+        """
+        선택된 CSV(들)에 대해 FFT 계산을 백그라운드 스레드로 수행
+        """
+        if not getattr(self, "paths", None):     # 안전체크
+            self.log("먼저 CSV 파일을 선택해 주세요")
+            return
+        self.btn_run.disabled = True
+        threading.Thread(target=self._fft_bg, daemon=True).start()
+
+  
     # ---------- ① 토글  ----------
     # ---------- 실시간 FFT 토글 ----------
     def toggle_realtime(self, *_):
@@ -531,29 +569,36 @@ class FFTApp(App):
     # ── 파일 선택 ──────────────────────────────────────────────
     # ── 파일 선택 ──────────────────────────────────────────────
     def open_chooser(self, *_):
-    
         if ANDROID:
-            need = [Permission.READ_EXTERNAL_STORAGE]           # 읽기만
+            need = [Permission.READ_EXTERNAL_STORAGE]
+            if ANDROID_API >= 30:
+                need += [Permission.MANAGE_EXTERNAL_STORAGE]  # ← 추가
             if ANDROID_API >= 33:
-                need = [Permission.READ_MEDIA_IMAGES]           # Tiramisu+
+                need = [Permission.READ_MEDIA_IMAGES]
     
-            # 이미 허용?
-            if all(check_permission(p) for p in need):
-                return self._show_filechooser()                 # 바로 chooser
+            if not all(check_permission(p) for p in need):
+                def _cb(perms, grants):
+                    if all(grants):
+                        # Android 11+ ‘모든-파일’ 권한 추가 확인
+                        if ANDROID_API >= 30 and not self._has_all_files():
+                            self._show_allfiles_dialog(); return
+                        self._show_filechooser()
+                    else:
+                        self.log("❗ 권한이 거부되었습니다 – 설정 화면으로 이동합니다")
+                        self._goto_app_settings()
+                request_permissions(need, _cb)
+                return
     
-            # ① 권한 요청 → ② 거부 시 즉시 “앱 설정”으로
-            def _cb(perms, grants):
-                if all(grants):
-                    self._show_filechooser()
-                else:
-                    self.log("❗ 권한이 거부되었습니다 – 설정 화면으로 이동합니다")
-                    self._goto_app_settings()
+            if ANDROID_API >= 30 and not self._has_all_files():  # ← 추가
+                self._show_allfiles_dialog(); return
     
-            request_permissions(need, _cb)
-            return                                              # ← 중요
-    
-        # (PC · iOS 등) 바로 chooser
         self._show_filechooser()
+    
+    # 작은 헬퍼
+    def _has_all_files(self):
+        from jnius import autoclass
+        Env = autoclass("android.os.Environment")
+        return Env.isExternalStorageManager()
 
 
 
@@ -567,10 +612,11 @@ class FFTApp(App):
     
         if len(res) == 1:
             pts, xm, ym = res[0]
+            # 4) 그래프 갱신
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph([pts], [], xm, ym, rt=False)
+                lambda *_: self.graph.update_graph(datasets, diff, 30, ymax, rt=False)
             )
-
+            self.prev_fft = datasets          # ★ 추가 ★
  
         else:
             (f1, x1, y1), (f2, x2, y2) = res
