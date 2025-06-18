@@ -350,18 +350,18 @@ class FFTApp(App):
             self.btn_sel.disabled = False
             return
     
-        need = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
-        MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
-        if ANDROID_API >= 30 and MANAGE:
-            need.append(MANAGE)
+        # 권한 요청 로직 핵심만 다시 정리
+        need = []
         
-        if ANDROID_API >= 33:
-            # READ_MEDIA_* + MANAGE (둘 다 필요할 수도 있으니 합친다)
-            need += [p for p in (
-                getattr(Permission, "READ_MEDIA_IMAGES",  None),
-                getattr(Permission, "READ_MEDIA_AUDIO",   None),
-                getattr(Permission, "READ_MEDIA_VIDEO",   None),
-            ) if p]
+        if ANDROID_API >= 33:                             # Android 13+
+            need += [Permission.READ_MEDIA_IMAGES,
+                     Permission.READ_MEDIA_AUDIO,
+                     Permission.READ_MEDIA_VIDEO]
+        elif ANDROID_API >= 30:                           # 11–12
+            need += [Permission.READ_EXTERNAL_STORAGE,
+                     Permission.WRITE_EXTERNAL_STORAGE]
+        
+        # MANAGE_EXTERNAL_STORAGE 는 Manifest 에만 선언 → 여기서는 따로 안 넣음
             
         def _cb(perms, grants):
             self.btn_sel.disabled = not any(grants)
