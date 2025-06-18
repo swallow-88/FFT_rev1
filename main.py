@@ -570,46 +570,49 @@ class FFTApp(App):
     # ── 파일 선택 ──────────────────────────────────────────────
     def open_chooser(self, *_):
         if ANDROID:
-            need = [Permission.READ_EXTERNAL_STORAGE]
-    
-            # 안전하게 속성 꺼내기 ― 없으면 None
+            need = [Permission.READ_EXTERNAL_STORAGE] if hasattr(Permission, "READ_EXTERNAL_STORAGE") else []
             MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
             if ANDROID_API >= 30 and MANAGE:
                 need.append(MANAGE)
     
-            if ANDROID_API >= 33:        # Android 13 (Tiramisu)+
-                need = [Permission.READ_MEDIA_IMAGES]
+            # Android 13+ 분리권한 – CSV 는 ‘파일’ 카테고리에 해당 → SAF 만 쓰면 사실 불필요
+            if ANDROID_API >= 33:
+                need = [p for p in (
+                    getattr(Permission, "READ_MEDIA_IMAGES",  None),
+                    getattr(Permission, "READ_MEDIA_AUDIO",   None),
+                    getattr(Permission, "READ_MEDIA_VIDEO",   None),
+                ) if p]
     
-    
+            # 아직 하나라도 거부되어 있으면 → 요청
             if not all(check_permission(p) for p in need):
     
-                # --- 권한 요청 후 콜백 ---
                 def _cb(perms, grants):
                     if all(grants):
-                        Clock.schedule_once(     # ★ UI thread 로 넘기기
-                            lambda *_: self._after_perm_granted(), 0)
+                        Clock.schedule_once(lambda *_: self._after_perm_granted(), 0)
                     else:
-                        Clock.schedule_once(
-                            lambda *_: (self.log("❗권한이 거부되었습니다 – 설정 화면으로 이동합니다"),
-                                         self._goto_app_settings()), 0)
+                        # MANAGE_EXTERNAL_STORAGE 가 거부됐다면 all_files=True 로
+                        Clock.schedule_once(lambda *_:
+                            self._goto_app_settings(all_files=MANAGE in perms), 0)
     
                 request_permissions(need, _cb)
                 return
     
-            # 이미 권한 있음 → 바로 진행
+            # 이미 다 허용
             self._after_perm_granted()
             return
     
-        # PC·iOS 등
+        # PC / iOS
         self._show_filechooser()
     
     
     # ---- 권한 OK → 필요한 추가 체크 후 chooser 호출 ----
     def _after_perm_granted(self):
+        # MANAGE_EXTERNAL_STORAGE 가 필요한데 아직 OFF → 다시 안내
         if ANDROID_API >= 30 and not self._has_all_files():
-            self._show_allfiles_dialog(); return
+            self._show_allfiles_dialog()
+            return
         self._show_filechooser()
-    
+        
     
 
   
@@ -793,15 +796,35 @@ class FFTApp(App):
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
 
     # ───── 권한 거부 → 바로 앱 설정 ─────
-    def _goto_app_settings(self):
+    def _goto_app_settings(self, *, all_files=False):
+        """
+        all_files=True : '모든-파일' 스위치 화면으로 바로 이동
+                   False: 일반 앱 권한(또는 앱 정보) 화면
+        """
         from jnius import autoclass
         Intent   = autoclass("android.content.Intent")
         Settings = autoclass("android.provider.Settings")
         Uri      = autoclass("android.net.Uri")
         act      = autoclass("org.kivy.android.PythonActivity").mActivity
-        uri = Uri.fromParts("package", act.getPackageName(), None)
-        act.startActivity(Intent(
-            Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+        pkg_uri  = Uri.fromParts("package", act.getPackageName(), None)
+    
+        try:
+            if all_files and ANDROID_API >= 30:
+                # Android 11+ 전용 ‘모든-파일’ 특별 권한 화면
+                act.startActivity(Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, pkg_uri))
+                return
+    
+            # 런타임 권한 목록 화면 (API 23+). 제조사에 따라 앱 정보 → 권한 탭으로 바로 진입
+            if ANDROID_API >= 23:
+                act.startActivity(Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg_uri))
+                return
+        except Exception:
+            pass    # 아래 fallback
+    
+        # 마지막 fallback – 앱 목록 루트
+        act.startActivity(Intent(Settings.ACTION_APPLICATION_SETTINGS))
 
     # ───── ‘모든-파일’ 권한 안내 팝업 ─────
     def _show_allfiles_dialog(self):
