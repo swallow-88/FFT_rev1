@@ -571,10 +571,15 @@ class FFTApp(App):
     def open_chooser(self, *_):
         if ANDROID:
             need = [Permission.READ_EXTERNAL_STORAGE]
-            if ANDROID_API >= 30:
-                need += [Permission.MANAGE_EXTERNAL_STORAGE]
-            if ANDROID_API >= 33:
+    
+            # 안전하게 속성 꺼내기 ― 없으면 None
+            MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
+            if ANDROID_API >= 30 and MANAGE:
+                need.append(MANAGE)
+    
+            if ANDROID_API >= 33:        # Android 13 (Tiramisu)+
                 need = [Permission.READ_MEDIA_IMAGES]
+    
     
             if not all(check_permission(p) for p in need):
     
