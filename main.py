@@ -352,13 +352,17 @@ class FFTApp(App):
     
         need = [Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE]
         MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
-        if MANAGE:
+        if ANDROID_API >= 30 and MANAGE:
             need.append(MANAGE)
+        
         if ANDROID_API >= 33:
-            need += [Permission.READ_MEDIA_IMAGES,
-                     Permission.READ_MEDIA_AUDIO,
-                     Permission.READ_MEDIA_VIDEO]
-    
+            # READ_MEDIA_* + MANAGE (둘 다 필요할 수도 있으니 합친다)
+            need += [p for p in (
+                getattr(Permission, "READ_MEDIA_IMAGES",  None),
+                getattr(Permission, "READ_MEDIA_AUDIO",   None),
+                getattr(Permission, "READ_MEDIA_VIDEO",   None),
+            ) if p]
+            
         def _cb(perms, grants):
             self.btn_sel.disabled = not any(grants)
             if not any(grants):
@@ -785,12 +789,13 @@ class FFTApp(App):
 
     def _show_filechooser(self):
         try:
+            # **native=True → 기본 SAF document picker 호출**
             filechooser.open_file(
                 on_selection=self.on_choose,
                 multiple=True,
                 filters=[("CSV", "*.csv")],
-                native=False,
-                path="/storage/emulated/0/Download")
+                native=True,            # ← 여기만 바꿔도 대부분 해결
+            )
         except Exception as e:
             Logger.exception("filechooser 오류")
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
