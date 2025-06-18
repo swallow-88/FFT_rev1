@@ -572,28 +572,42 @@ class FFTApp(App):
         if ANDROID:
             need = [Permission.READ_EXTERNAL_STORAGE]
             if ANDROID_API >= 30:
-                need += [Permission.MANAGE_EXTERNAL_STORAGE]  # ← 추가
+                need += [Permission.MANAGE_EXTERNAL_STORAGE]
             if ANDROID_API >= 33:
                 need = [Permission.READ_MEDIA_IMAGES]
     
             if not all(check_permission(p) for p in need):
+    
+                # --- 권한 요청 후 콜백 ---
                 def _cb(perms, grants):
                     if all(grants):
-                        # Android 11+ ‘모든-파일’ 권한 추가 확인
-                        if ANDROID_API >= 30 and not self._has_all_files():
-                            self._show_allfiles_dialog(); return
-                        self._show_filechooser()
+                        Clock.schedule_once(     # ★ UI thread 로 넘기기
+                            lambda *_: self._after_perm_granted(), 0)
                     else:
-                        self.log("❗ 권한이 거부되었습니다 – 설정 화면으로 이동합니다")
-                        self._goto_app_settings()
+                        Clock.schedule_once(
+                            lambda *_: (self.log("❗권한이 거부되었습니다 – 설정 화면으로 이동합니다"),
+                                         self._goto_app_settings()), 0)
+    
                 request_permissions(need, _cb)
                 return
     
-            if ANDROID_API >= 30 and not self._has_all_files():  # ← 추가
-                self._show_allfiles_dialog(); return
+            # 이미 권한 있음 → 바로 진행
+            self._after_perm_granted()
+            return
     
+        # PC·iOS 등
         self._show_filechooser()
     
+    
+    # ---- 권한 OK → 필요한 추가 체크 후 chooser 호출 ----
+    def _after_perm_granted(self):
+        if ANDROID_API >= 30 and not self._has_all_files():
+            self._show_allfiles_dialog(); return
+        self._show_filechooser()
+    
+    
+
+  
     # 작은 헬퍼
     def _has_all_files(self):
         from jnius import autoclass
@@ -612,12 +626,15 @@ class FFTApp(App):
     
         if len(res) == 1:
             pts, xm, ym = res[0]
-            # 4) 그래프 갱신
+    
+            # ① 그래프 갱신 ------------------------------------------------
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph(datasets, diff, 30, ymax, rt=False)
+                lambda *_: self.graph.update_graph([pts], [], xm, ym, rt=False)
             )
-            self.prev_fft = datasets          # ★ 추가 ★
- 
+    
+            # ② 다음 10 초 레코딩과 비교할 수 있도록 저장 ------------------
+            self.prev_fft = [[pts]]               # ← 리스트 중첩 형태 유지
+    
         else:
             (f1, x1, y1), (f2, x2, y2) = res
             diff = [(f1[i][0], abs(f1[i][1]-f2[i][1]))
@@ -625,10 +642,13 @@ class FFTApp(App):
             xm = max(x1, x2)
             ym = max(y1, y2, max(y for _, y in diff))
             Clock.schedule_once(
-                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)              
+                lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym, rt=False)
             )
-            
+            self.prev_fft = [[f1, f2]]            # ← 같은 이유
+    
         Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+
+
 
     # ── CSV → FFT ────────────────────────────────────────────
     @staticmethod
