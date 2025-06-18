@@ -32,23 +32,8 @@ requirements = python3,kivy,numpy,plyer,android,androidstorage4kivy,pyjnius
 #p4a.local_recipes = recipes
 # buildozer.spec
 
-android.permissions = \
-    READ_EXTERNAL_STORAGE,\
-    WRITE_EXTERNAL_STORAGE,\
-    MANAGE_EXTERNAL_STORAGE,\
-    READ_MEDIA_IMAGES,\
-    READ_MEDIA_VIDEO,\
-    READ_MEDIA_AUDIO,\
-    RECORD_AUDIO        # ← 이미 있던 것
 
-#   권한 이름은 정확히 위처럼 **콤마(,)로 구분**해서 한 줄에 적습니다.
-#   MANAGE_EXTERNAL_STORAGE 가 p4a/빌도저 버전에 아직 없으면 ↓처럼 수동 삽입
-android.add_manifest_xml = '''
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-                     tools:ignore="ScopedStorage"/>
-'''
-android.grant_permissions = 1          # 설치 직후 adb install 로 자동 grant
-#android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
+android.permissions = MANAGE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 
 android.useandroidx = True
 android.enable_androidx_workaround = True
