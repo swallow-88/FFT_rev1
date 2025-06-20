@@ -375,20 +375,38 @@ class FFTApp(App):
     def _rt_fft_loop(self):
         while self.rt_on:
             time.sleep(0.5)
-            if any(len(self.rt_buf[ax])<64 for ax in ('x','y','z')): continue
-            datasets=[]; ymax=xmax=0.0
-            for axis in ('x','y','z'):
-                ts,val=zip(*self.rt_buf[axis]); sig=np.asarray(val,float)
-                n=len(sig); dt=(ts[-1]-ts[0])/(n-1) if n>1 else 1/128.0
-                sig -= sig.mean(); sig *= np.hanning(n)
-                freq = np.fft.fftfreq(n,d=dt)[:n//2]
-                amp  = np.abs(fft(sig))[:n//2]
-                m=freq<=50; freq,amp=freq[m],amp[m]
-                smooth = np.convolve(amp,np.ones(8)/8,'same')
-                datasets.append(list(zip(freq,smooth)))
-                ymax=max(ymax,smooth.max()); xmax=max(xmax,freq[-1])
+    
+            if any(len(self.rt_buf[ax]) < 64 for ax in ('x', 'y', 'z')):
+                continue
+    
+            datasets = []; ymax = xmax = 0
+            for axis in ('x', 'y', 'z'):
+                ts, val = zip(*self.rt_buf[axis])
+                sig = np.asarray(val, float)
+                n   = len(sig)
+    
+                dt  = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 1 / 100
+                sig -= sig.mean()
+                sig *= np.hanning(n)
+    
+                freq = np.fft.fftfreq(n, d=dt)[:n // 2]
+                amp_a = np.abs(fft(sig))[:n // 2]
+    
+                mask       = freq <= 100
+                freq, amp_a = freq[mask], amp_a[mask]
+    
+                # ★ 가속도 → 속도(mm/s)
+                f_nz  = np.where(freq == 0, 1e-6, freq)
+                amp_v = amp_a / (2 * np.pi * f_nz) * 1e3
+    
+                smooth = np.convolve(amp_v, np.ones(8) / 8, 'same')
+                datasets.append(list(zip(freq, smooth)))
+    
+                ymax = max(ymax, smooth.max())
+                xmax = max(xmax, freq[-1])
+    
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph(datasets,[],xmax,ymax))
+                self.graph.update_graph(datasets, [], xmax, ymax))
 
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
@@ -510,47 +528,44 @@ class FFTApp(App):
 
     @staticmethod
 
+    @staticmethod
     def csv_fft(path: str):
-        """
-        - CSV 인코딩을 한 번 더 열어 보고 실패 시 'rb' 로 바이너리 읽기
-        - dt가 0/음수면 샘플링 주기를 추정값(0.01 s)으로 대체
-        - len(a) < 64·dt 오류 등 모든 예외를 호출자에게 넘기지 않고
-          None 을 반환 → _fft_bg 쪽에서 안전 처리
-        """
         try:
-            # ① 파일 열기 (utf-8 → 실패 시 latin-1 fallback)
-            try:
-                f = open(path, encoding="utf-8")
-            except UnicodeDecodeError:
-                f = open(path, encoding="latin-1")   # 최소한 깨지지 않게
-            with f:
+            # ---------- CSV 읽기 ----------
+            with open(path, encoding="utf-8", errors="replace") as f:
                 t, a = [], []
                 for r in csv.reader(f):
-                    if len(r) < 2:
+                    if len(r) < 2:          # 빈 칸 skip
                         continue
                     try:
-                        t.append(float(r[0]))
-                        a.append(float(r[1]))
+                        t.append(float(r[0])); a.append(float(r[1]))
                     except ValueError:
-                        continue      # 숫자 변환 실패 행 skip
+                        continue
     
             if len(a) < 2:
                 raise ValueError("too few samples")
     
-            # ② dt 계산 – 0 이거나 음수면 0.01 s(=100 Hz) 로 가정
+            # ---------- 표본 주기 ----------
             dt = (t[-1] - t[0]) / (len(a) - 1)
             if dt <= 0:
-                dt = 0.01
+                dt = 0.01                   # 100 Hz 가정(안전)
     
-            # ③ FFT
-            n   = len(a)
-            freq = np.fft.fftfreq(n, d=dt)[:n//2]
-            amp  = np.abs(fft(a))[:n//2]
-            mask = freq <= 50
-            freq, amp = freq[mask], amp[mask]
-            smooth = np.convolve(amp, np.ones(10)/10, 'same')
+            # ---------- FFT(가속도) ----------
+            n     = len(a)
+            freq  = np.fft.fftfreq(n, d=dt)[:n // 2]          # Hz
+            amp_a = np.abs(fft(a))[:n // 2]                   # m/s²
     
-            return list(zip(freq, smooth)), 50, smooth.max()
+            # ---------- 0–100 Hz 제한 ----------
+            mask        = freq <= 100
+            freq, amp_a = freq[mask], amp_a[mask]
+    
+            # ---------- ★ 속도(mm/s RMS) 변환 ----------
+            f_nz  = np.where(freq == 0, 1e-6, freq)           # 0 Hz 보호
+            amp_v = amp_a / (2 * np.pi * f_nz) * 1e3          # mm/s
+    
+            # ---------- 스무딩, 반환 ----------
+            smooth = np.convolve(amp_v, np.ones(10) / 10, 'same')
+            return list(zip(freq, smooth)), 100, smooth.max()
     
         except Exception as e:
             Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
