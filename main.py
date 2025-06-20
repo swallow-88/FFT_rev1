@@ -100,102 +100,89 @@ def uri_to_file(u: str) -> str | None:
 
 # ── 그래프 위젯 (기존 그대로) ───────────────────────────────────────
 # ── 그래프 위젯 (Y축 고정 · 세미로그) ───────────────────────────────
+# ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
     COLORS   = [(1,0,0), (0,1,0), (0,0,1)]
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    # ★ 고정 Y축 눈금값
-    Y_TICKS  = [0, 5, 10, 20, 50]
-    Y_MAX    = Y_TICKS[-1]
+    Y_TICKS = [0, 5, 10, 20, 50]
+    Y_MAX   = Y_TICKS[-1]
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.datasets, self.diff = [], []
-        self.max_x = 1          # X축은 여전히 자동
+        self.max_x = 1
         self.bind(size=self.redraw)
 
-    # ── 외부로부터 데이터 갱신 ─────────────────────────────
-    def update_graph(self, ds, df, xm, _ym_ignored):
-        self.max_x = max(1e-6, float(xm))   # X축만 갱신
+    # ---------- 외부 호출 ----------
+    def update_graph(self, ds, df, xm, _y_ignored):
+        self.max_x  = max(1e-6, float(xm))          # ← float 캐스팅
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
         self.redraw()
 
-    # ── 좌표 변환 (X는 선형 / Y는 세미로그 비율) ─────────────
+    # ---------- 좌표 변환 ----------
     def _scale(self, pts):
-        w = self.width  - 2*self.PAD_X
-        h = self.height - 2*self.PAD_Y
+        w = float(self.width  - 2*self.PAD_X)
+        h = float(self.height - 2*self.PAD_Y)
 
-        def y_pos(val: float) -> float:
-            """
-            0–5 : 전체 h의 0~40 %
-            5–10: 40~60 %
-            10–20:60~80 %
-            20–50:80~100 %
-            """
-            v = max(0.0, min(val, self.Y_MAX))
-            if   v <= 5:
-                frac = 0.40 * (v/5)
-            elif v <= 10:
-                frac = 0.40 + 0.20*( (v-5)/5 )
-            elif v <= 20:
-                frac = 0.60 + 0.20*( (v-10)/10 )
-            else:            # 20–50
-                frac = 0.80 + 0.20*( (v-20)/30 )
+        def y_pos(v):
+            v = max(0.0, min(float(v), self.Y_MAX))
+            if   v <= 5:   frac = 0.40*(v/5)
+            elif v <= 10:  frac = 0.40 + 0.20*((v-5)/5)
+            elif v <= 20:  frac = 0.60 + 0.20*((v-10)/10)
+            else:          frac = 0.80 + 0.20*((v-20)/30)
             return self.PAD_Y + frac*h
 
-        out=[]
+        out = []
         for x, y in pts:
-            out += [ self.PAD_X + x/self.max_x*w,
-                     y_pos(y) ]
+            out += [float(self.PAD_X + float(x)/self.max_x*w),
+                    y_pos(y)]
         return out
 
-    # ── 그리드선 --------------------------------------------------
+    # ---------- 그리드 ----------
     def _grid(self):
-        gx = (self.width - 2*self.PAD_X)/10
+        gx = float(self.width - 2*self.PAD_X)/10
         Color(.6,.6,.6)
-
-        # 수직선 (X축 10등분)
         for i in range(11):
             Line(points=[self.PAD_X+i*gx, self.PAD_Y,
                          self.PAD_X+i*gx, self.height-self.PAD_Y])
-
-        # 수평선 (고정 Y_TICKS 위치)
-        for val in self.Y_TICKS:
-            y = self._scale([(0,val)])[1]
+        for v in self.Y_TICKS:
+            y = self._scale([(0,v)])[1]
             Line(points=[self.PAD_X, y,
                          self.width-self.PAD_X, y])
 
-    # ── 축 라벨 ---------------------------------------------------
+    # ---------- 축 라벨 ----------
     def _labels(self):
+        # 이전 축 라벨 제거
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
 
-        # X축 0~max_x, 10등분
-        n = 10
-        for i in range(n+1):
-            x = self.PAD_X + i*(self.width-2*self.PAD_X)/n - 20
-            lbl = Label(text=f"{int(self.max_x*i/n)} Hz",
+        # X축
+        for i in range(11):
+            x = float(self.PAD_X + i*(self.width-2*self.PAD_X)/10 - 20)
+            lbl = Label(text=f"{int(self.max_x*i/10)} Hz",
                         size_hint=(None,None), size=(60,20),
-                        pos=(x, self.PAD_Y-28))
-            lbl._axis = True; self.add_widget(lbl)
+                        pos=(x, float(self.PAD_Y-28)))
+            lbl._axis = True
+            self.add_widget(lbl)
 
-        # 고정 Y축 라벨 (좌·우)
-        for val in self.Y_TICKS:
-            y = self._scale([(0,val)])[1] - 8
+        # Y축
+        for v in self.Y_TICKS:
+            y = float(self._scale([(0,v)])[1] - 8)
             for x_pos in (self.PAD_X-68, self.width-self.PAD_X+10):
-                lbl = Label(text=f"{val}",
+                lbl = Label(text=f"{v}",
                             size_hint=(None,None), size=(60,20),
-                            pos=(x_pos, y))
-                lbl._axis = True; self.add_widget(lbl)
+                            pos=(float(x_pos), y))
+                lbl._axis = True
+                self.add_widget(lbl)
 
-    # ── 메인 그리기 루프 -----------------------------------------
-    def redraw(self, *_):
+    # ---------- 메인 그리기 ----------
+    def redraw(self,*_):
         self.canvas.clear()
-        # 이전 피크·Δ 라벨 제거
         for w in list(self.children):
             if getattr(w, "_peak", False):
                 self.remove_widget(w)
@@ -203,11 +190,10 @@ class GraphWidget(Widget):
         if not self.datasets:
             return
 
-        peaks=[]
+        peaks = []
         with self.canvas:
             self._grid(); self._labels()
 
-            # 곡선 및 피크
             for idx, pts in enumerate(self.datasets):
                 if not pts: continue
                 Color(*self.COLORS[idx % len(self.COLORS)])
@@ -219,7 +205,6 @@ class GraphWidget(Widget):
                 except ValueError:
                     continue
 
-            # 차이선
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
@@ -228,8 +213,9 @@ class GraphWidget(Widget):
         for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
                         size_hint=(None,None), size=(85,22),
-                        pos=(sx-28, sy+6))
-            lbl._peak = True; self.add_widget(lbl)
+                        pos=(float(sx-28), float(sy+6)))
+            lbl._peak = True
+            self.add_widget(lbl)
 
         # Δ 표시
         if len(peaks) >= 2:
@@ -238,9 +224,11 @@ class GraphWidget(Widget):
             clr   = (1,0,0,1) if bad else (0,1,0,1)
             info  = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
                           size_hint=(None,None), size=(190,24),
-                          pos=(self.PAD_X, self.height-self.PAD_Y+6),
+                          pos=(float(self.PAD_X),
+                               float(self.height-self.PAD_Y+6)),
                           color=clr)
-            info._peak = True; self.add_widget(info)
+            info._peak = True
+            self.add_widget(info)
 # ── 메인 앱 ────────────────────────────────────────────────────────
 class FFTApp(App):
     REC_DURATION = 30.0          # 기록 길이(초)
