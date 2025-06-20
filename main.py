@@ -390,7 +390,11 @@ class FFTApp(App):
                 sig *= np.hanning(n)
     
                 freq = np.fft.fftfreq(n, d=dt)[:n // 2]
-                amp_a = np.abs(fft(sig))[:n // 2]
+                
+                
+                # 교체 -----------------------------
+                raw    = np.fft.fft(sig)                    # 이미 한닝창 곱해둔 sig 사용
+                amp_a  = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
     
                 mask       = freq <= 100
                 freq, amp_a = freq[mask], amp_a[mask]
@@ -551,9 +555,10 @@ class FFTApp(App):
                 dt = 0.01                   # 100 Hz 가정(안전)
     
             # ---------- FFT(가속도) ----------
+   # ---------- FFT(가속도, RMS) ----------
             n     = len(a)
-            freq  = np.fft.fftfreq(n, d=dt)[:n // 2]          # Hz
-            amp_a = np.abs(fft(a))[:n // 2]                   # m/s²
+            raw   = np.fft.fft(a * np.hanning(n))            # 윈도우 포함
+            amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS                # m/s²
     
             # ---------- 0–100 Hz 제한 ----------
             mask        = freq <= 100
