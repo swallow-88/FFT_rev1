@@ -1,4 +1,4 @@
-ㅁ미"""
+"""
 FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 + 30 초 실시간 가속도 기록 (Downloads 폴더 저장 개선판)
 """
