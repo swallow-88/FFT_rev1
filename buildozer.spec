@@ -84,7 +84,7 @@ p4a.bootstrap               = sdl2
 #p4a.branch                  = develop
 
     # … 나머지 설정 …
-
+p4a_env_vars = NPY_SIMD_FORCE=generic
 
 
 # ── (선택) SDK/NDK 경로 고정 ───────────────────────────────────────────────────
