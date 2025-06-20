@@ -487,46 +487,86 @@ class FFTApp(App):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
+    # ── _fft_bg() : 모든 예외를 최상위에서 잡고 버튼을 다시 살린다 ─
     def _fft_bg(self):
-        res=[]
-        for p in self.paths:
-            pts,xm,ym = self.csv_fft(p)
-            if pts is None:
-                self.log("CSV parse err"); return
-            res.append((pts,xm,ym))
-        if len(res)==1:
-            pts,xm,ym = res[0]
+        try:
+            res = []
+            for p in self.paths:
+                pts, xm, ym = self.csv_fft(p)
+                if pts is None:
+                    raise ValueError("CSV parse failed")
+                res.append((pts, xm, ym))
+    
+            if len(res) == 1:
+                pts, xm, ym = res[0]
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([pts], [], xm, ym))
+            else:
+                (f1, x1, y1), (f2, x2, y2) = res
+                if not f1 or not f2:
+                    raise ValueError("empty dataset")
+                diff = [(f1[i][0], abs(f1[i][1] - f2[i][1]))
+                        for i in range(min(len(f1), len(f2)))]
+                xm = max(x1, x2)
+                ym = max(y1, y2, max(y for _, y in diff))
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([f1, f2], diff, xm, ym))
+    
+        except Exception as e:
+            # 메인 스레드에서 토스트·라벨로 오류 표시
+            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
+    
+        finally:
             Clock.schedule_once(lambda *_:
-                self.graph.update_graph([pts],[],xm,ym))
-        else:
-            (f1,x1,y1),(f2,x2,y2) = res
-            diff=[(f1[i][0],abs(f1[i][1]-f2[i][1]))
-                  for i in range(min(len(f1),len(f2)))]
-            xm=max(x1,x2); ym=max(y1,y2,max(y for _,y in diff))
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph([f1,f2],diff,xm,ym))
-        Clock.schedule_once(lambda *_:
-            setattr(self.btn_run,"disabled",False))
+                setattr(self.btn_run, "disabled", False))
 
     @staticmethod
-    def csv_fft(path: str):
-        try:
-            t,a=[],[]
-            with open(path) as f:
-                for r in csv.reader(f):
-                    try: t.append(float(r[0])); a.append(float(r[1]))
-                    except Exception: pass
-            if len(a)<2: raise ValueError("too few samples")
-            dt=(t[-1]-t[0])/len(a)
-            f=np.fft.fftfreq(len(a),d=dt)[:len(a)//2]
-            v=np.abs(fft(a))[:len(a)//2]
-            m=f<=50; f,v=f[m],v[m]
-            s=np.convolve(v,np.ones(10)/10,'same')
-            return list(zip(f,s)),50,s.max()
-        except Exception as e:
-            Logger.error(f"FFT err {e}")
-            return None,0,0
 
+    def csv_fft(path: str):
+        """
+        - CSV 인코딩을 한 번 더 열어 보고 실패 시 'rb' 로 바이너리 읽기
+        - dt가 0/음수면 샘플링 주기를 추정값(0.01 s)으로 대체
+        - len(a) < 64·dt 오류 등 모든 예외를 호출자에게 넘기지 않고
+          None 을 반환 → _fft_bg 쪽에서 안전 처리
+        """
+        try:
+            # ① 파일 열기 (utf-8 → 실패 시 latin-1 fallback)
+            try:
+                f = open(path, encoding="utf-8")
+            except UnicodeDecodeError:
+                f = open(path, encoding="latin-1")   # 최소한 깨지지 않게
+            with f:
+                t, a = [], []
+                for r in csv.reader(f):
+                    if len(r) < 2:
+                        continue
+                    try:
+                        t.append(float(r[0]))
+                        a.append(float(r[1]))
+                    except ValueError:
+                        continue      # 숫자 변환 실패 행 skip
+    
+            if len(a) < 2:
+                raise ValueError("too few samples")
+    
+            # ② dt 계산 – 0 이거나 음수면 0.01 s(=100 Hz) 로 가정
+            dt = (t[-1] - t[0]) / (len(a) - 1)
+            if dt <= 0:
+                dt = 0.01
+    
+            # ③ FFT
+            n   = len(a)
+            freq = np.fft.fftfreq(n, d=dt)[:n//2]
+            amp  = np.abs(fft(a))[:n//2]
+            mask = freq <= 50
+            freq, amp = freq[mask], amp[mask]
+            smooth = np.convolve(amp, np.ones(10)/10, 'same')
+    
+            return list(zip(freq, smooth)), 50, smooth.max()
+    
+        except Exception as e:
+            Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
+            return None, 0, 0
 
 # ── 실행 ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
