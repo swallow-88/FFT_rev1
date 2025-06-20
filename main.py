@@ -400,7 +400,9 @@ class FFTApp(App):
                 freq, amp_a = freq[mask], amp_a[mask]
     
                 # ★ 가속도 → 속도(mm/s)
-                f_nz  = np.where(freq == 0, 1e-6, freq)
+                
+                # 교체: 0–2 Hz 모두 2 Hz 로 캡
+                f_nz  = np.where(freq < 2.0, 2.0, freq)
                 amp_v = amp_a / (2 * np.pi * f_nz) * 1e3
     
                 smooth = np.convolve(amp_v, np.ones(8) / 8, 'same')
@@ -523,8 +525,10 @@ class FFTApp(App):
                     self.graph.update_graph([f1, f2], diff, xm, ym))
     
         except Exception as e:
-            # 메인 스레드에서 토스트·라벨로 오류 표시
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
+            msg = str(e)                          # 값을 먼저 보존
+            Clock.schedule_once(lambda *_,
+                                m=msg:            # 기본 인자에 캡처
+                                self.log(f"FFT 오류: {m}"))
     
         finally:
             Clock.schedule_once(lambda *_:
@@ -565,7 +569,9 @@ class FFTApp(App):
             freq, amp_a = freq[mask], amp_a[mask]
     
             # ---------- ★ 속도(mm/s RMS) 변환 ----------
-            f_nz  = np.where(freq == 0, 1e-6, freq)           # 0 Hz 보호
+             
+            # 교체: 0–2 Hz 모두 2 Hz 로 캡
+            f_nz  = np.where(freq < 2.0, 2.0, freq)           # 0 Hz 보호
             amp_v = amp_a / (2 * np.pi * f_nz) * 1e3          # mm/s
     
             # ---------- 스무딩, 반환 ----------
