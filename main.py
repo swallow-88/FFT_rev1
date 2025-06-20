@@ -1,4 +1,4 @@
-"""
+ㅁ미"""
 FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 + 30 초 실시간 가속도 기록 (Downloads 폴더 저장 개선판)
 """
@@ -99,89 +99,148 @@ def uri_to_file(u: str) -> str | None:
 
 
 # ── 그래프 위젯 (기존 그대로) ───────────────────────────────────────
+# ── 그래프 위젯 (Y축 고정 · 세미로그) ───────────────────────────────
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
     COLORS   = [(1,0,0), (0,1,0), (0,0,1)]
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
+
+    # ★ 고정 Y축 눈금값
+    Y_TICKS  = [0, 5, 10, 20, 50]
+    Y_MAX    = Y_TICKS[-1]
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.datasets, self.diff = [], []
-        self.max_x = self.max_y = 1
+        self.max_x = 1          # X축은 여전히 자동
         self.bind(size=self.redraw)
-    def update_graph(self, ds, df, xm, ym):
-        self.max_x = max(1e-6, float(xm))
-        self.max_y = max(1e-6, float(ym))
+
+    # ── 외부로부터 데이터 갱신 ─────────────────────────────
+    def update_graph(self, ds, df, xm, _ym_ignored):
+        self.max_x = max(1e-6, float(xm))   # X축만 갱신
         self.datasets = [seq for seq in (ds or []) if seq]
-        self.diff = df or []
+        self.diff     = df or []
         self.redraw()
+
+    # ── 좌표 변환 (X는 선형 / Y는 세미로그 비율) ─────────────
     def _scale(self, pts):
-        w, h = self.width-2*self.PAD_X, self.height-2*self.PAD_Y
-        return [float(c)
-                for x,y in pts
-                for c in (self.PAD_X + x/self.max_x*w,
-                          self.PAD_Y + y/self.max_y*h)]
+        w = self.width  - 2*self.PAD_X
+        h = self.height - 2*self.PAD_Y
+
+        def y_pos(val: float) -> float:
+            """
+            0–5 : 전체 h의 0~40 %
+            5–10: 40~60 %
+            10–20:60~80 %
+            20–50:80~100 %
+            """
+            v = max(0.0, min(val, self.Y_MAX))
+            if   v <= 5:
+                frac = 0.40 * (v/5)
+            elif v <= 10:
+                frac = 0.40 + 0.20*( (v-5)/5 )
+            elif v <= 20:
+                frac = 0.60 + 0.20*( (v-10)/10 )
+            else:            # 20–50
+                frac = 0.80 + 0.20*( (v-20)/30 )
+            return self.PAD_Y + frac*h
+
+        out=[]
+        for x, y in pts:
+            out += [ self.PAD_X + x/self.max_x*w,
+                     y_pos(y) ]
+        return out
+
+    # ── 그리드선 --------------------------------------------------
     def _grid(self):
-        gx, gy = (self.width-2*self.PAD_X)/10, (self.height-2*self.PAD_Y)/10
+        gx = (self.width - 2*self.PAD_X)/10
         Color(.6,.6,.6)
+
+        # 수직선 (X축 10등분)
         for i in range(11):
-            Line(points=[self.PAD_X+i*gx,self.PAD_Y,
-                         self.PAD_X+i*gx,self.height-self.PAD_Y])
-            Line(points=[self.PAD_X,self.PAD_Y+i*gy,
-                         self.width-self.PAD_X,self.PAD_Y+i*gy])
+            Line(points=[self.PAD_X+i*gx, self.PAD_Y,
+                         self.PAD_X+i*gx, self.height-self.PAD_Y])
+
+        # 수평선 (고정 Y_TICKS 위치)
+        for val in self.Y_TICKS:
+            y = self._scale([(0,val)])[1]
+            Line(points=[self.PAD_X, y,
+                         self.width-self.PAD_X, y])
+
+    # ── 축 라벨 ---------------------------------------------------
     def _labels(self):
         for w in list(self.children):
-            if getattr(w,"_axis",False): self.remove_widget(w)
-        step = 10 if self.max_x<=60 else (100 if self.max_x<=600 else 300)
-        n = int(self.max_x//step)+1
-        for i in range(n):
-            x = self.PAD_X+i*(self.width-2*self.PAD_X)/(n-1)-20
-            lbl = Label(text=f"{i*step:d} Hz",
-                        size_hint=(None,None),size=(60,20),
-                        pos=(x,self.PAD_Y-28)); lbl._axis=True
-            self.add_widget(lbl)
-        for i in range(11):
-            mag = self.max_y*i/10
-            y   = self.PAD_Y+i*(self.height-2*self.PAD_Y)/10-8
-            for x in (self.PAD_X-68,self.width-self.PAD_X+10):
-                lbl = Label(text=f"{mag:.1e}",
-                            size_hint=(None,None),size=(60,20),
-                            pos=(x,y)); lbl._axis=True
-                self.add_widget(lbl)
-    def redraw(self,*_):
+            if getattr(w, "_axis", False):
+                self.remove_widget(w)
+
+        # X축 0~max_x, 10등분
+        n = 10
+        for i in range(n+1):
+            x = self.PAD_X + i*(self.width-2*self.PAD_X)/n - 20
+            lbl = Label(text=f"{int(self.max_x*i/n)} Hz",
+                        size_hint=(None,None), size=(60,20),
+                        pos=(x, self.PAD_Y-28))
+            lbl._axis = True; self.add_widget(lbl)
+
+        # 고정 Y축 라벨 (좌·우)
+        for val in self.Y_TICKS:
+            y = self._scale([(0,val)])[1] - 8
+            for x_pos in (self.PAD_X-68, self.width-self.PAD_X+10):
+                lbl = Label(text=f"{val}",
+                            size_hint=(None,None), size=(60,20),
+                            pos=(x_pos, y))
+                lbl._axis = True; self.add_widget(lbl)
+
+    # ── 메인 그리기 루프 -----------------------------------------
+    def redraw(self, *_):
         self.canvas.clear()
+        # 이전 피크·Δ 라벨 제거
         for w in list(self.children):
-            if getattr(w,"_peak",False): self.remove_widget(w)
-        if not self.datasets: return
+            if getattr(w, "_peak", False):
+                self.remove_widget(w)
+
+        if not self.datasets:
+            return
+
         peaks=[]
         with self.canvas:
             self._grid(); self._labels()
-            for idx,pts in enumerate(self.datasets):
+
+            # 곡선 및 피크
+            for idx, pts in enumerate(self.datasets):
                 if not pts: continue
-                Color(*self.COLORS[idx%len(self.COLORS)])
-                Line(points=self._scale(pts),width=self.LINE_W)
-                try: fx,fy = max(pts,key=lambda p:p[1])
-                except ValueError: continue
-                sx,sy = self._scale([(fx,fy)])[0:2]
-                peaks.append((fx,fy,sx,sy))
+                Color(*self.COLORS[idx % len(self.COLORS)])
+                Line(points=self._scale(pts), width=self.LINE_W)
+                try:
+                    fx, fy = max(pts, key=lambda p: p[1])
+                    sx, sy = self._scale([(fx, fy)])[0:2]
+                    peaks.append((fx, fy, sx, sy))
+                except ValueError:
+                    continue
+
+            # 차이선
             if self.diff:
                 Color(*self.DIFF_CLR)
-                Line(points=self._scale(self.diff),width=self.LINE_W)
-        for fx,fy,sx,sy in peaks:
+                Line(points=self._scale(self.diff), width=self.LINE_W)
+
+        # 피크 라벨
+        for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None,None),size=(85,22),
-                        pos=(sx-28,sy+6)); lbl._peak=True
-            self.add_widget(lbl)
-        if len(peaks)>=2:
-            delta = abs(peaks[0][0]-peaks[1][0]); bad = delta>1.5
-            clr = (1,0,0,1) if bad else (0,1,0,1)
-            info = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
-                         size_hint=(None,None),size=(190,24),
-                         pos=(self.PAD_X,self.height-self.PAD_Y+6),
-                         color=clr); info._peak=True
-            self.add_widget(info)
+                        size_hint=(None,None), size=(85,22),
+                        pos=(sx-28, sy+6))
+            lbl._peak = True; self.add_widget(lbl)
 
-
+        # Δ 표시
+        if len(peaks) >= 2:
+            delta = abs(peaks[0][0] - peaks[1][0])
+            bad   = delta > 1.5
+            clr   = (1,0,0,1) if bad else (0,1,0,1)
+            info  = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
+                          size_hint=(None,None), size=(190,24),
+                          pos=(self.PAD_X, self.height-self.PAD_Y+6),
+                          color=clr)
+            info._peak = True; self.add_widget(info)
 # ── 메인 앱 ────────────────────────────────────────────────────────
 class FFTApp(App):
     REC_DURATION = 30.0          # 기록 길이(초)
