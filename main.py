@@ -541,8 +541,15 @@ class FFTApp(App):
         try:
             t, a = [], []
             with open(path, encoding="utf-8", errors="replace") as f:
-                dialect = csv.Sniffer().sniff(f.read(1024), delimiters=";, \t")
+                sample = f.read(1024)
                 f.seek(0)
+            
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
+                except csv.Error:
+                    # ↙ 실패하면 그냥 'excel' 기본(콤마)로 진행
+                    dialect = csv.get_dialect("excel")
+                          
                 rdr = csv.reader(f, dialect)
                 for row in rdr:
                     if len(row) < 2:
