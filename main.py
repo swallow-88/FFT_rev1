@@ -3,7 +3,7 @@ FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 안정판
 + 30 초 실시간 가속도 기록 (Downloads 폴더 저장 개선판)
 """
 # ── 표준 & 3rd-party ────────────────────────────────────────────────
-import os, csv, sys, traceback, threading, datetime, uuid, urllib.parse, time
+import os, csv, sys, traceback, threading, datetime, uuid, urllib.parse, time, re
 import numpy as np
 from collections import deque
 from numpy.fft import fft
@@ -535,8 +535,6 @@ class FFTApp(App):
                 setattr(self.btn_run, "disabled", False))
 
     @staticmethod
-
-    import re
     num_re = re.compile(r"^-?\d+(?:[.,]\d+)?$")   # 숫자 패턴
     
     def csv_fft(path: str):
