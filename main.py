@@ -107,7 +107,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    Y_TICKS = [-80, -60, -40, -20, 0, 20, 40]   # dB re 1 µm/s²
+    Y_TICKS = [-80, -60, -40, -20, 0, 20, 40, 60, 80, 100]
     Y_MAX   = Y_TICKS[-1]
 
     def __init__(self, **kw):
@@ -121,6 +121,11 @@ class GraphWidget(Widget):
         self.max_x  = max(1e-6, float(xm))          # ← float 캐스팅
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
+            # ▶ 최대값 받아서 20 dB 간격으로 라운드
+        top = max(20, ((int(ym) // 20) + 1) * 20)      # 23 → 40, 67 → 80, …
+        self.Y_TICKS = list(range(-80, top + 1, 20))
+        self.Y_MAX   = self.Y_TICKS[-1]
+        
         self.redraw()
 
     # ---------- 좌표 변환 ----------
