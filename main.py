@@ -536,22 +536,31 @@ class FFTApp(App):
 
     @staticmethod
 
-    @staticmethod
+    import re
+    num_re = re.compile(r"^-?\d+(?:[.,]\d+)?$")   # 숫자 패턴
+    
     def csv_fft(path: str):
         try:
-            # ---------- CSV 읽기 ----------
+            t, a = [], []
             with open(path, encoding="utf-8", errors="replace") as f:
-                t, a = [], []
-                for r in csv.reader(f):
-                    if len(r) < 2:          # 빈 칸 skip
+                dialect = csv.Sniffer().sniff(f.read(1024), delimiters=";, \t")
+                f.seek(0)
+                rdr = csv.reader(f, dialect)
+                for row in rdr:
+                    if len(row) < 2:
+                        continue                        # 열 2개 미만 skip
+                    # --- 헤더/문자열 행 skip ---
+                    if not (num_re.match(row[0].strip()) and
+                            num_re.match(row[1].strip())):
                         continue
-                    try:
-                        t.append(float(r[0])); a.append(float(r[1]))
-                    except ValueError:
-                        continue
+                    # 소수점 쉼표 → 점
+                    t.append(float(row[0].replace(",", ".")))
+                    a.append(float(row[1].replace(",", ".")))
     
             if len(a) < 2:
-                raise ValueError("too few samples")
+                raise ValueError("too few numeric rows")
+    
+            # ↓ 이하 FFT 부분은 그대로 …
     
             # ---------- 표본 주기 ----------
             dt = (t[-1] - t[0]) / (len(a) - 1)
