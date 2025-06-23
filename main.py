@@ -535,8 +535,6 @@ class FFTApp(App):
                 setattr(self.btn_run, "disabled", False))
 
     @staticmethod
-
-    
     def csv_fft(path: str):
         num_re = re.compile(r"^-?\d+(?:[.,]\d+)?$")   # 숫자 패턴
         
@@ -572,7 +570,10 @@ class FFTApp(App):
             n     = len(a)
             raw   = np.fft.fft(a * np.hanning(n))            # 윈도우 포함
             amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS                # m/s²
-    
+
+            # ★ 빠진 부분 추가 ★
+            freq = np.fft.fftfreq(n, d=dt)[:n // 2] 
+            
             # ---------- 0–100 Hz 제한 ----------
             mask        = freq <= 100
             freq, amp_a = freq[mask], amp_a[mask]
