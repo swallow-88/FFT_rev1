@@ -107,7 +107,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    Y_TICKS = [0, 5, 10, 20, 50]
+    Y_TICKS = [-80, -60, -40, -20, 0, 20, 40]   # dB re 1 µm/s²
     Y_MAX   = Y_TICKS[-1]
 
     def __init__(self, **kw):
@@ -391,21 +391,20 @@ class FFTApp(App):
     
                 freq = np.fft.fftfreq(n, d=dt)[:n // 2]
                 
-                
-                # 교체 -----------------------------
-                raw    = np.fft.fft(sig)                    # 이미 한닝창 곱해둔 sig 사용
+                # ---------- 가속도 RMS 계산 ----------
+                raw    = np.fft.fft(sig)                         # 이미 한닝창 곱한 sig
                 amp_a  = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
-    
-                mask       = freq <= 100
-                freq, amp_a = freq[mask], amp_a[mask]
-    
-                # ★ 가속도 → 속도(mm/s)
                 
-                # 교체: 0–2 Hz 모두 2 Hz 로 캡
-                f_nz  = np.where(freq < 2.0, 2.0, freq)
-                amp_v = amp_a / (2 * np.pi * f_nz) * 1e3
-    
-                smooth = np.convolve(amp_v, np.ones(8) / 8, 'same')
+                # ---------- 0–100 Hz 범위만 사용 ----------
+                mask        = freq <= 100
+                freq, amp_a = freq[mask], amp_a[mask]
+                
+                # ---------- ★ 가속도 dB(re 1 µm/s²) 변환 ----------
+                ref     = 1e-6                                   # 1 µm/s² = 10⁻⁶
+                floor   = ref * 1e-4                             # -80 dB 바닥
+                amp_db  = 20 * np.log10(np.maximum(amp_a, floor) / ref)
+                
+                smooth  = np.convolve(amp_db, np.ones(8) / 8, 'same')
                 datasets.append(list(zip(freq, smooth)))
     
                 ymax = max(ymax, smooth.max())
@@ -572,27 +571,21 @@ class FFTApp(App):
             if dt <= 0:
                 dt = 0.01                   # 100 Hz 가정(안전)
     
-            # ---------- FFT(가속도) ----------
-   # ---------- FFT(가속도, RMS) ----------
-            n     = len(a)
-            raw   = np.fft.fft(a * np.hanning(n))            # 윈도우 포함
-            amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS                # m/s²
 
-            # ★ 빠진 부분 추가 ★
-            freq = np.fft.fftfreq(n, d=dt)[:n // 2] 
+            # ---------- FFT(가속도, RMS) ----------
+            n     = len(a)
+            raw   = np.fft.fft(a * np.hanning(n))
+            amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
+            freq  = np.fft.fftfreq(n, d=dt)[:n // 2]
             
-            # ---------- 0–100 Hz 제한 ----------
             mask        = freq <= 100
             freq, amp_a = freq[mask], amp_a[mask]
-    
-            # ---------- ★ 속도(mm/s RMS) 변환 ----------
-             
-            # 교체: 0–2 Hz 모두 2 Hz 로 캡
-            f_nz  = np.where(freq < 2.0, 2.0, freq)           # 0 Hz 보호
-            amp_v = amp_a / (2 * np.pi * f_nz) * 1e3          # mm/s
-    
-            # ---------- 스무딩, 반환 ----------
-            smooth = np.convolve(amp_v, np.ones(10) / 10, 'same')
+            
+            # ★ 가속도 → dB
+            ref     = 1e-6
+            amp_db  = 20 * np.log10( np.maximum(amp_a, ref*1e-4) / ref )
+            
+            smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
             return list(zip(freq, smooth)), 100, smooth.max()
     
         except Exception as e:
