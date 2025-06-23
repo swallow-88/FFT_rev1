@@ -539,6 +539,7 @@ class FFTApp(App):
     
     def csv_fft(path: str):
         num_re = re.compile(r"^-?\d+(?:[.,]\d+)?$")   # 숫자 패턴
+        
         try:
             t, a = [], []
             with open(path, encoding="utf-8", errors="replace") as f:
