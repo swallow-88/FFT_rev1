@@ -128,16 +128,6 @@ class GraphWidget(Widget):
         
         self.redraw()
 
-    # ---------- 좌표 변환 ----------
-    def _scale(self, pts):
-        w = float(self.width  - 2*self.PAD_X)
-        h = float(self.height - 2*self.PAD_Y)
-
-class GraphWidget(Widget):
-    ...
-    Y_TICKS = [0, 40, 80, 150]
-    Y_MAX   = Y_TICKS[-1]
-
     def y_pos(self, v: float) -> float:
         """
         0-40 : 하단 40 %
@@ -155,6 +145,15 @@ class GraphWidget(Widget):
             frac = 0.70 + 0.30 * ((v - 80) / 70)
 
         return self.PAD_Y + frac * h
+
+    
+    # ---------- 좌표 변환 ----------
+    def _scale(self, pts):
+        w = float(self.width  - 2*self.PAD_X)
+        h = float(self.height - 2*self.PAD_Y)
+
+
+
 
     # ---------- 그리드 ----------
     def _grid(self):
@@ -246,7 +245,7 @@ class GraphWidget(Widget):
 # ── 메인 앱 ────────────────────────────────────────────────────────
 class FFTApp(App):
     REC_DURATION = 30.0          # 기록 길이(초)
-
+    OFFSET_DB = 20 
     def __init__(self, **kw):
         super().__init__(**kw)
         # 실시간 FFT
@@ -414,6 +413,10 @@ class FFTApp(App):
                 freq, amp_a = freq[mask], amp_a[mask]
                 
                 # ---------- ★ 가속도 dB(re 1 µm/s²) 변환 ----------
+                # --- 가속도 → 속도(mm/s RMS) ---
+                f_nz  = np.where(freq < 2.0, 2.0, freq)        # 0‥2 Hz 보호
+                amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
+                
                 # csv_fft(), _rt_fft_loop() 두 군데 동일
                 ref = 1e-3          # 1 mm/s RMS → 0 dB 기준
                 amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
@@ -423,7 +426,7 @@ class FFTApp(App):
                 datasets.append(list(zip(freq, smooth)))
     
                 ymax = max(ymax, smooth.max())
-                xmax = max(xmax, freq[-1])
+                xmax = 50
     
             Clock.schedule_once(lambda *_:
                 self.graph.update_graph(datasets, [], xmax, ymax))
@@ -514,7 +517,7 @@ class FFTApp(App):
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
     # ── _fft_bg() : 모든 예외를 최상위에서 잡고 버튼을 다시 살린다 ─
-    OFFSET_DB = 20          # ★ 한 번만 선언 (파일 상단이나 클래스 상수로 권장)
+    # ★ 한 번만 선언 (파일 상단이나 클래스 상수로 권장)
     
     def _fft_bg(self):
         try:
@@ -605,9 +608,13 @@ class FFTApp(App):
             freq, amp_a = freq[mask], amp_a[mask]
             
             # ★ 가속도 → dB
-            # csv_fft(), _rt_fft_loop() 두 군데 동일
-            ref = 1e-3          # 1 mm/s RMS → 0 dB 기준
-            amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
+            # --- 가속도 → 속도(mm/s RMS) ---
+            f_nz  = np.where(freq < 2.0, 2.0, freq)        # 0‥2 Hz 보호
+            amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
+            
+            # --- dB 변환 ---
+            ref    = 1e-3          # 1 mm/s RMS → 0 dB
+            amp_db = 20*np.log10(np.maximum(amp_v, ref*1e-4)/ref)
             
             smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
             return list(zip(freq, smooth)), 50, smooth.max()
