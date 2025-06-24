@@ -504,6 +504,8 @@ class FFTApp(App):
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
     # ── _fft_bg() : 모든 예외를 최상위에서 잡고 버튼을 다시 살린다 ─
+    OFFSET_DB = 20          # ★ 한 번만 선언 (파일 상단이나 클래스 상수로 권장)
+    
     def _fft_bg(self):
         try:
             res = []
@@ -515,34 +517,35 @@ class FFTApp(App):
     
             if len(res) == 1:
                 pts, xm, ym = res[0]
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([pts], [], xm, ym))
+                Clock.schedule_once(
+                    lambda *_: self.graph.update_graph([pts], [], xm, ym)
+                )
+    
             else:
                 (f1, x1, y1), (f2, x2, y2) = res
                 if not f1 or not f2:
                     raise ValueError("empty dataset")
-            OFFSET_DB = 20                      # ★ 시각적 오프셋 값(원하면 10~30 dB 조정)
-            
-            diff = [
-                (f1[i][0], abs(f1[i][1] - f2[i][1]) + OFFSET_DB)   # ← +20 dB 올려서 중앙으로
-                for i in range(min(len(f1), len(f2)))
-            ]
-            
-            xm = max(x1, x2)
-            ym = max(y1, y2, max(y for _, y in diff))   # diff 를 포함해 y-축 최대 재계산
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([f1, f2], diff, xm, ym))
+    
+                # ── 차이선 y 축 올려주기 ──────────────────────────
+                diff = [
+                    (f1[i][0], abs(f1[i][1] - f2[i][1]) + OFFSET_DB)
+                    for i in range(min(len(f1), len(f2)))
+                ]
+    
+                xm = max(x1, x2)
+                ym = max(y1, y2, max(y for _, y in diff))
+    
+                Clock.schedule_once(
+                    lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym)
+                )
     
         except Exception as e:
-            msg = str(e)                          # 값을 먼저 보존
-            Clock.schedule_once(lambda *_,
-                                m=msg:            # 기본 인자에 캡처
-                                self.log(f"FFT 오류: {m}"))
+            msg = str(e)
+            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {msg}"))
     
         finally:
-            Clock.schedule_once(lambda *_:
-                setattr(self.btn_run, "disabled", False))
-
+            Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+        
     @staticmethod
     def csv_fft(path: str):
         # 수정 ― 지수부 (eE±) 허용
