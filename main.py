@@ -401,7 +401,7 @@ class FFTApp(App):
                 amp_a  = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
                 
                 # ---------- 0–100 Hz 범위만 사용 ----------
-                mask        = freq <= 100
+                mask        = freq <= 50
                 freq, amp_a = freq[mask], amp_a[mask]
                 
                 # ---------- ★ 가속도 dB(re 1 µm/s²) 변환 ----------
@@ -421,13 +421,13 @@ class FFTApp(App):
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical",padding=10,spacing=10)
-        self.label   = Label(text="Pick 1 or 2 CSV files",size_hint=(1,.1))
-        self.btn_sel = Button(text="Select CSV",disabled=True,size_hint=(1,.1),
+        self.label   = Label(text="Pick 1 or 2 CSV files",size_hint=(1,.10))
+        self.btn_sel = Button(text="Select CSV",disabled=True,size_hint=(1,.08),
                               on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",disabled=True,size_hint=(1,.1),
+        self.btn_run = Button(text="FFT RUN",disabled=True,size_hint=(1,.08),
                               on_press=self.run_fft)
         # ★ 30 초 기록 버튼
-        self.btn_rec = Button(text="Record 30 s",disabled=True,size_hint=(1,.1),
+        self.btn_rec = Button(text="Record 30 s",disabled=True,size_hint=(1,.08),
                               on_press=self.start_recording)
 
         root.add_widget(self.label)
@@ -435,11 +435,11 @@ class FFTApp(App):
         root.add_widget(self.btn_run)
         root.add_widget(self.btn_rec)
 
-        self.btn_rt  = Button(text="Realtime FFT (OFF)",size_hint=(1,.1),
+        self.btn_rt  = Button(text="Realtime FFT (OFF)",size_hint=(1,.08),
                               on_press=self.toggle_realtime)
         root.add_widget(self.btn_rt)
 
-        self.graph = GraphWidget(size_hint=(1,.6)); root.add_widget(self.graph)
+        self.graph = GraphWidget(size_hint=(1,.5)); root.add_widget(self.graph)
         Clock.schedule_once(self._ask_perm, 0)
         return root
 
@@ -521,10 +521,15 @@ class FFTApp(App):
                 (f1, x1, y1), (f2, x2, y2) = res
                 if not f1 or not f2:
                     raise ValueError("empty dataset")
-                diff = [(f1[i][0], abs(f1[i][1] - f2[i][1]))
-                        for i in range(min(len(f1), len(f2)))]
-                xm = max(x1, x2)
-                ym = max(y1, y2, max(y for _, y in diff))
+            OFFSET_DB = 20                      # ★ 시각적 오프셋 값(원하면 10~30 dB 조정)
+            
+            diff = [
+                (f1[i][0], abs(f1[i][1] - f2[i][1]) + OFFSET_DB)   # ← +20 dB 올려서 중앙으로
+                for i in range(min(len(f1), len(f2)))
+            ]
+            
+            xm = max(x1, x2)
+            ym = max(y1, y2, max(y for _, y in diff))   # diff 를 포함해 y-축 최대 재계산
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([f1, f2], diff, xm, ym))
     
@@ -583,7 +588,7 @@ class FFTApp(App):
             amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
             freq  = np.fft.fftfreq(n, d=dt)[:n // 2]
             
-            mask        = freq <= 100
+            mask        = freq <= 50
             freq, amp_a = freq[mask], amp_a[mask]
             
             # ★ 가속도 → dB
