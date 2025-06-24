@@ -117,7 +117,7 @@ class GraphWidget(Widget):
         self.bind(size=self.redraw)
 
     # ---------- 외부 호출 ----------
-    def update_graph(self, ds, df, xm, _y_ignored):
+    def update_graph(self, ds, df, xm, ym):
         self.max_x  = max(1e-6, float(xm))          # ← float 캐스팅
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
