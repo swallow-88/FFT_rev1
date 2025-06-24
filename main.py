@@ -107,7 +107,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
     LINE_W   = 2.5
 
-    Y_TICKS = [-80, -60, -40, -20, 0, 20, 40, 60, 80, 100]
+    Y_TICKS = [0, 40, 80, 150]
     Y_MAX   = Y_TICKS[-1]
 
     def __init__(self, **kw):
@@ -133,19 +133,28 @@ class GraphWidget(Widget):
         w = float(self.width  - 2*self.PAD_X)
         h = float(self.height - 2*self.PAD_Y)
 
-        def y_pos(v):
-            v = max(0.0, min(float(v), self.Y_MAX))
-            if   v <= 5:   frac = 0.40*(v/5)
-            elif v <= 10:  frac = 0.40 + 0.20*((v-5)/5)
-            elif v <= 20:  frac = 0.60 + 0.20*((v-10)/10)
-            else:          frac = 0.80 + 0.20*((v-20)/30)
-            return self.PAD_Y + frac*h
+class GraphWidget(Widget):
+    ...
+    Y_TICKS = [0, 40, 80, 150]
+    Y_MAX   = Y_TICKS[-1]
 
-        out = []
-        for x, y in pts:
-            out += [float(self.PAD_X + float(x)/self.max_x*w),
-                    y_pos(y)]
-        return out
+    def y_pos(self, v: float) -> float:
+        """
+        0-40 : 하단 40 %
+        40-80: 40~70 %
+        80-150: 70~100 %
+        """
+        h   = self.height - 2*self.PAD_Y
+        v   = max(0.0, min(v, self.Y_MAX))
+
+        if v <= 40:
+            frac = 0.40 * (v / 40)
+        elif v <= 80:
+            frac = 0.40 + 0.30 * ((v - 40) / 40)
+        else:          # 80-150
+            frac = 0.70 + 0.30 * ((v - 80) / 70)
+
+        return self.PAD_Y + frac * h
 
     # ---------- 그리드 ----------
     def _grid(self):
@@ -405,9 +414,10 @@ class FFTApp(App):
                 freq, amp_a = freq[mask], amp_a[mask]
                 
                 # ---------- ★ 가속도 dB(re 1 µm/s²) 변환 ----------
-                ref     = 1e-6                                   # 1 µm/s² = 10⁻⁶
-                floor   = ref * 1e-4                             # -80 dB 바닥
-                amp_db  = 20 * np.log10(np.maximum(amp_a, floor) / ref)
+                # csv_fft(), _rt_fft_loop() 두 군데 동일
+                ref = 1e-3          # 1 mm/s RMS → 0 dB 기준
+                amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
+                #floor   = ref * 1e-4                             # -80 dB 바닥
                 
                 smooth  = np.convolve(amp_db, np.ones(8) / 8, 'same')
                 datasets.append(list(zip(freq, smooth)))
@@ -439,7 +449,7 @@ class FFTApp(App):
                               on_press=self.toggle_realtime)
         root.add_widget(self.btn_rt)
 
-        self.graph = GraphWidget(size_hint=(1,.5)); root.add_widget(self.graph)
+        self.graph = GraphWidget(size_hint=(1,0.55)); root.add_widget(self.graph)
         Clock.schedule_once(self._ask_perm, 0)
         return root
 
@@ -595,8 +605,9 @@ class FFTApp(App):
             freq, amp_a = freq[mask], amp_a[mask]
             
             # ★ 가속도 → dB
-            ref     = 1e-6
-            amp_db  = 20 * np.log10( np.maximum(amp_a, ref*1e-4) / ref )
+            # csv_fft(), _rt_fft_loop() 두 군데 동일
+            ref = 1e-3          # 1 mm/s RMS → 0 dB 기준
+            amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
             
             smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
             return list(zip(freq, smooth)), 50, smooth.max()
