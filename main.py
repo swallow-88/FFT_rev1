@@ -596,7 +596,7 @@ class FFTApp(App):
             amp_db  = 20 * np.log10( np.maximum(amp_a, ref*1e-4) / ref )
             
             smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
-            return list(zip(freq, smooth)), 100, smooth.max()
+            return list(zip(freq, smooth)), 50, smooth.max()
     
         except Exception as e:
             Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
