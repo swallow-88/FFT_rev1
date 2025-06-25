@@ -716,30 +716,31 @@ class FFTApp(App):
             amp_v = amp_a/(2*np.pi*f_nz)*1e3                     # mm/s
             
             # ── ① 2 Hz 대역 RMS ─────────────────────
-            band_db = []
-            band_pk = []                                         # ② 선형 최고치
-
+            # ---- 2 Hz 대역 RMS / Peak ---------------------------------
+            band_db, band_pk = [], []
             for lo in np.arange(0, 50, BAND_HZ):
                 hi  = lo + BAND_HZ
                 sel = (freq >= lo) & (freq < hi)
                 if not np.any(sel):
                     continue
                 rms = np.sqrt(np.mean(amp_v[sel] ** 2))
-                db  = 20 * np.log10(max(rms, REF_MM_S * 1e-4) / REF_MM_S)
-                band_db.append(((lo + hi) / 2, db))
-
-            
-                # 대역 선형 피크
                 pk  = amp_v[sel].max()
-                pkd = 20*np.log10(max(pk, REF_MM_S*1e-4)/REF_MM_S)
-                band_pk.append(((lo+hi)/2, pkd))
             
-            # 스무딩은 RMS 값에만 (선택)
-            pts_rms = np.convolve([y for _,y in band_db], np.ones(3)/3, "same")
-            pts_rms = list(zip([x for x,_ in band_db], pts_rms))
+                db  = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
+                pkd = 20*np.log10(max(pk , REF_MM_S*1e-4)/REF_MM_S)
             
-            return pts_rms, band_pk, 50, max(max(y for _,y in pts_rms),
-                                             max(y for _,y in band_pk))
+                centre = (lo + hi) / 2
+                band_db.append((centre, db))
+                band_pk.append((centre, pkd))
+            
+            # --- RMS 스무딩(3-point) ---
+            if len(band_db) >= 3:
+                y_smooth = np.convolve([y for _, y in band_db], np.ones(3)/3, mode="same")
+                band_db  = list(zip([x for x, _ in band_db], y_smooth))
+            
+            ymax = max(max(y for _, y in band_db), max(y for _, y in band_pk))
+            return band_db, band_pk, 50, ymax
+            
     
         except Exception as e:
             Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
