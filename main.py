@@ -555,79 +555,84 @@ class FFTApp(App):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
-    # ── _fft_bg() : 모든 예외를 최상위에서 잡고 버튼을 다시 살린다 ─
-    # ★ 한 번만 선언 (파일 상단이나 클래스 상수로 권장)
-    
+
     # ─────────────────────────────────────────────────────
     #  CSV 파일 FFT : 2 Hz 대역 RMS(dB) & 피크(dB) + 차이선
     # ─────────────────────────────────────────────────────
     def _fft_bg(self):
         try:
-            # ── 1) 각 CSV → 두 개의 라인(RMS, 피크) 생성 ──
-            all_sets = []         # [[(x,y)...] , [(x,y)...]]  *파일수
-            xm = ym = 0
+            # 1) 각 CSV → 두 개의 라인(RMS·피크) 생성
+            all_sets = []                  # [[rms, peak], …]
+            ym = 0.0                       # y-축 최대치
+
             for path in self.paths:
-                t, a = self._load_csv(path)        # (시간[], 가속도[])
+                t, a = self._load_csv(path)          # (시간[], 가속도[])
                 if t is None:
                     raise ValueError(f"{os.path.basename(path)}: CSV parse failed")
-    
-                # FFT → 속도(mm/s RMS)
+
+                # ── FFT → 속도(mm/s RMS) 스펙트럼 ──
                 n   = len(a)
-                dt  = (t[-1]-t[0])/(n-1) if n>1 else 0.01
+                dt  = (t[-1] - t[0]) / (n - 1) if n > 1 else 0.01
                 sig = (a - a.mean()) * np.hanning(n)
-    
-                raw    = np.fft.fft(sig)
-                freq   = np.fft.fftfreq(n, d=dt)[:n//2]
-                amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))               # m/s²
-                sel    = freq <= 50
+
+                raw   = np.fft.fft(sig)
+                freq  = np.fft.fftfreq(n, d=dt)[:n // 2]
+                amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))  # m/s² RMS
+
+                sel = freq <= 50
                 freq, amp_a = freq[sel], amp_a[sel]
-    
-                amp_v = amp_a/(2*np.pi*np.where(freq<1e-6,1e-6,freq))*1e3   # mm/s
-    
+
+                amp_v = amp_a / (2 * np.pi * np.where(freq < 1e-6, 1e-6, freq)) * 1e3  # mm/s RMS
+
                 rms_line, pk_line = [], []
                 for lo in np.arange(0, 50, BAND_HZ):
-                    hi  = lo + BAND_HZ
-                    m   = (freq >= lo) & (freq < hi)
-                    if not m.any():          # 빈 대역 skip
+                    hi = lo + BAND_HZ
+                    m  = (freq >= lo) & (freq < hi)
+                    if not m.any():
                         continue
-                    rms  = np.sqrt(np.mean(amp_v[m]**2))
-                    pk   = amp_v[m].max()
-    
-                    db_r = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
-                    db_p = 20*np.log10(max(pk , REF_MM_S*1e-4)/REF_MM_S)
-    
-                    rms_line.append(((lo+hi)/2, db_r))
-                    pk_line .append(((lo+hi)/2, db_p))
-    
-                # 가벼운 스무딩
-                if len(rms_line) > 2:
-                    y = np.convolve([y for _,y in rms_line], np.ones(3)/3, "same")
-                    rms_line = list(zip([x for x,_ in rms_line], y))
-    
-                all_sets.append([rms_line, pk_line])
-                ym = max(ym, max(y for _,y in rms_line+pk_line))
-    
-            # ── 2) 단일/쌍파일에 따라 그래프 데이터 구성 ──
-            if len(all_sets) == 1:
-                lines = all_sets[0][0] + all_sets[0][1]     # RMS+피크
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([lines], [], 50, ym))
-            else:
-                (r1, p1), (r2, p2) = (all_sets[0], all_sets[1])
-    
-                # 차이(RMS 라인 기준) + OFFSET_DB 로 위로 올림
-                diff = [(x, abs(y1-y2)+OFFSET_DB)
-                        for (x,y1),(_,y2) in zip(r1, r2)]
-    
-                ym = max(ym, max(y for _,y in diff))
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([r1+p1, r2+p2], diff, 50, ym))
 
-            except Exception as e:
-                msg = f"FFT 오류: {e}"              # ★
-                Clock.schedule_once(lambda *_: self.log(msg))
-            finally:
-                Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+                    rms = np.sqrt(np.mean(amp_v[m] ** 2))
+                    pk  = amp_v[m].max()
+
+                    db_r = 20 * np.log10(max(rms, REF_MM_S * 1e-4) / REF_MM_S)
+                    db_p = 20 * np.log10(max(pk,  REF_MM_S * 1e-4) / REF_MM_S)
+
+                    centre = (lo + hi) / 2
+                    rms_line.append((centre, db_r))
+                    pk_line.append((centre, db_p))
+
+                # 살짝 스무딩(RMS 라인만)
+                if len(rms_line) > 2:
+                    y_sm = np.convolve([y for _, y in rms_line], np.ones(3) / 3, mode="same")
+                    rms_line = list(zip([x for x, _ in rms_line], y_sm))
+
+                all_sets.append([rms_line, pk_line])
+                ym = max(ym,
+                         max(y for _, y in rms_line),
+                         max(y for _, y in pk_line))
+
+            # 2) 그래프 그리기 데이터 구성
+            if len(all_sets) == 1:
+                r, p = all_sets[0]
+                Clock.schedule_once(lambda *_:
+                                    self.graph.update_graph([r + p], [], 50, ym))
+            else:
+                (r1, p1), (r2, p2) = all_sets[:2]
+
+                diff = [(x, abs(y1 - y2) + self.OFFSET_DB)
+                        for (x, y1), (_, y2) in zip(r1, r2)]
+
+                ym = max(ym, max(y for _, y in diff))
+                Clock.schedule_once(lambda *_:
+                                    self.graph.update_graph([r1 + p1,
+                                                             r2 + p2],
+                                                            diff, 50, ym))
+
+        except Exception as e:
+            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
+        finally:
+            # 버튼 활성화 복구
+            Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
             
 
     # CSV → 시계열 배열 읽기
@@ -713,15 +718,16 @@ class FFTApp(App):
             # ── ① 2 Hz 대역 RMS ─────────────────────
             band_db = []
             band_pk = []                                         # ② 선형 최고치
+
             for lo in np.arange(0, 50, BAND_HZ):
-                hi   = lo + BAND_HZ
-                sel  = (freq >= lo) & (freq < hi)
+                hi  = lo + BAND_HZ
+                sel = (freq >= lo) & (freq < hi)
                 if not np.any(sel):
                     continue
-                # 대역 RMS
-                rms = np.sqrt(np.mean(amp_v[sel]**2))
-                db  = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
-                band_db.append((lo+hi)/2, db)
+                rms = np.sqrt(np.mean(amp_v[sel] ** 2))
+                db  = 20 * np.log10(max(rms, REF_MM_S * 1e-4) / REF_MM_S)
+                band_db.append(((lo + hi) / 2, db))
+
             
                 # 대역 선형 피크
                 pk  = amp_v[sel].max()
