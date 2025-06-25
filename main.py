@@ -418,7 +418,7 @@ class FFTApp(App):
                 amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
                 
                 # csv_fft(), _rt_fft_loop() 두 군데 동일
-                ref = 1e-3          # 1 mm/s RMS → 0 dB 기준
+                ref = 1.0          # 1 mm/s RMS → 0 dB 기준
                 amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
                 #floor   = ref * 1e-4                             # -80 dB 바닥
                 
@@ -541,7 +541,7 @@ class FFTApp(App):
     
                 # ── 차이선 y 축 올려주기 ──────────────────────────
                 diff = [
-                    (f1[i][0], abs(f1[i][1] - f2[i][1]) + OFFSET_DB)
+                    (f1[i][0], abs(f1[i][1] - f2[i][1]) + self.OFFSET_DB)
                     for i in range(min(len(f1), len(f2)))
                 ]
     
@@ -613,7 +613,7 @@ class FFTApp(App):
             amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
             
             # --- dB 변환 ---
-            ref    = 1e-3          # 1 mm/s RMS → 0 dB
+            ref    = 1.0          # 1 mm/s RMS → 0 dB
             amp_db = 20*np.log10(np.maximum(amp_v, ref*1e-4)/ref)
             
             smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
