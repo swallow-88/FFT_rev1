@@ -108,7 +108,6 @@ def uri_to_file(u: str) -> str | None:
 # ── 그래프 위젯 (Y축 고정 · 세미로그) ───────────────────────────────
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
-class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
     COLORS   = [(1,0,0), (0,1,0), (0,0,1), PEAK_COLOR]   # ← 맨 뒤 추가
     DIFF_CLR = (0,0,1)
