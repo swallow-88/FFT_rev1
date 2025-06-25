@@ -692,9 +692,9 @@ class FFTApp(App):
                 Clock.schedule_once(lambda *_:
                                     self.graph.update_graph([r, p], [], 50, ym))
  
-            else:          # 두 파일 비교 모드
-                 (r1, p1), (r2, p2) = all_sets[:2]
-
+            else:
+                # 두 파일 비교 모드
+                (r1, p1), (r2, p2) = all_sets[:2]
                 fn1 = max(r1, key=lambda p: p[1])[0]
                 fn2 = max(r2, key=lambda p: p[1])[0]
                 Clock.schedule_once(lambda *_:
