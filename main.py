@@ -24,9 +24,13 @@ from kivy.utils          import platform
 from plyer               import filechooser     # (SAF 실패 시 fallback)
 
 # ---------- 사용자 조정값 ---------- #
-BAND_HZ     = 2.0     # ❶ RMS 를 묶을 주파수 대역폭(Hz)
-REF_MM_S    = 0.01    # ❷ 0 dB 기준 속도 [mm/s RMS]
-PEAK_COLOR  = (1,1,1) # ❸ 선형 피크 라인(흰색)
+BAND_HZ     = 2.0
+REF_MM_S    = 0.01
+PEAK_COLOR  = (1,1,1)
+
+# 공진 탐색 범위 ↓ (기존 (5,25) → 상한 50 Hz 로 확대)
+FN_BAND     = (5, 50)   # ← 이렇게만 변경
+THR_DF      = 0.5       # ΔF 경고 임계값 (필요 시 그대로)
 # ----------------------------------- #
 
 # ── Android 전용 모듈 ───────────────────────────────────────────────
@@ -255,6 +259,19 @@ class GraphWidget(Widget):
                           color=clr)
             info._peak = True
             self.add_widget(info)
+
+
+        app = App.get_running_app()
+        if getattr(app, "last_fn", None) is not None:
+            lbl = Label(text=f"Fₙ={app.last_fn:.2f} Hz",
+                        size_hint=(None,None), size=(115,22),
+                        pos=(self.width-155, self.height-28),
+                        color=(1,1,0,1))
+            lbl._peak = True
+            self.add_widget(lbl)
+
+
+
 # ── 메인 앱 ────────────────────────────────────────────────────────
 class FFTApp(App):
     REC_DURATION = 30.0          # 기록 길이(초)
@@ -268,6 +285,9 @@ class FFTApp(App):
         self.rec_on = False
         self.rec_start = 0.0
         self.rec_files = {}
+        
+        self.F0 = None      # ⊕ 기준 공진수
+        self.last_fn = None #   실시간 Fₙ 임시보
 
     # ── 공통 로그 ───────────────────────────────────────────────
     def log(self, msg: str):
@@ -456,6 +476,18 @@ class FFTApp(App):
                 if len(band_rms) > 2:
                     y = np.convolve([y for _, y in band_rms], np.ones(3)/3, "same")
                     band_rms = list(zip([x for x, _ in band_rms], y))
+
+
+                # ── ★★★ 여기에 삽입 ★★★  ───────────────
+                loF, hiF = FN_BAND                # (5, 50)
+                if band_rms:                      # 비어 있지 않을 때만
+                    centres = np.array([x for x, _ in band_rms])
+                    mags    = np.array([y for _, y in band_rms])
+                    maskF   = (centres >= loF) & (centres <= hiF)
+                    if maskF.any():
+                        fn_cur = centres[maskF][mags[maskF].argmax()]
+                        self.last_fn = fn_cur       # ⇦ 현재 Fₙ 저장
+                
     
                 # ── ④ 그래프용 데이터 push ─────────────────
                 datasets.append(band_rms)   # 색선
@@ -464,7 +496,13 @@ class FFTApp(App):
                 ymax = max(ymax,
                            max(y for _, y in band_rms),
                            max(y for _, y in band_pk))
-    
+
+            if self.F0 is not None and self.last_fn is not None:
+                df = abs(self.last_fn - self.F0)
+                if df > THR_DF:
+                    Clock.schedule_once(lambda *_:
+                        self.log(f"⚠️ ΔF={df:.2f} Hz > {THR_DF} Hz — 고무 열화 의심"))
+                
             # ── ⑤ UI 스레드로 그리기 요청 ─────────────────
             Clock.schedule_once(
                 lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
@@ -482,10 +520,23 @@ class FFTApp(App):
         self.btn_rec = Button(text="Record 30 s",disabled=True,size_hint=(1,.08),
                               on_press=self.start_recording)
 
+        
+
+ 
+
+        
         root.add_widget(self.label)
         root.add_widget(self.btn_sel)
         root.add_widget(self.btn_run)
         root.add_widget(self.btn_rec)
+
+
+        self.btn_setF0 = Button(text="Set F₀ (baseline)",
+                                size_hint=(1,.08),
+                                on_press=self._save_baseline)
+        root.add_widget(self.btn_setF0)
+
+        
 
         self.btn_rt  = Button(text="Realtime FFT (OFF)",size_hint=(1,.08),
                               on_press=self.toggle_realtime)
@@ -495,6 +546,18 @@ class FFTApp(App):
         Clock.schedule_once(self._ask_perm, 0)
         return root
 
+
+    # ⊕ 버튼 콜백
+    def _save_baseline(self,*_):
+        if self.last_fn is None:
+            self.log("❌ 아직 Fₙ 값을 알 수 없습니다")
+        else:
+            self.F0 = self.last_fn
+            self.log(f"✅ 기준 공진수 F₀ = {self.F0:.2f} Hz 저장")
+
+
+
+    
     # ── CSV 선택 & FFT 실행 (기존) ───────────────────────────────
     def open_chooser(self,*_):
         if ANDROID and ANDROID_API>=30:
@@ -606,7 +669,19 @@ class FFTApp(App):
                     y_sm = np.convolve([y for _, y in rms_line], np.ones(3) / 3, mode="same")
                     rms_line = list(zip([x for x, _ in rms_line], y_sm))
 
+
+                loF, hiF = FN_BAND
+                if rms_line:
+                    centres = np.array([x for x, _ in rms_line])
+                    mags    = np.array([y for _, y in rms_line])
+                    maskF   = (centres >= loF) & (centres <= hiF)
+                    if maskF.any():
+                        fn_cur = centres[maskF][mags[maskF].argmax()]
+                        self.last_fn = fn_cur        # 파일별 Fₙ
+
                 all_sets.append([rms_line, pk_line])
+
+                
                 ym = max(ym,
                          max(y for _, y in rms_line),
                          max(y for _, y in pk_line))
@@ -615,19 +690,18 @@ class FFTApp(App):
             if len(all_sets) == 1:
                 r, p = all_sets[0]
                 Clock.schedule_once(lambda *_:
-                                    self.graph.update_graph([r , p], [], 50, ym))
-            else:
-                (r1, p1), (r2, p2) = all_sets[:2]
+                                    self.graph.update_graph([r, p], [], 50, ym))
+ 
+            else:          # 두 파일 비교 모드
+                 (r1, p1), (r2, p2) = all_sets[:2]
 
-                diff = [(x, abs(y1 - y2) + self.OFFSET_DB)
-                        for (x, y1), (_, y2) in zip(r1, r2)]
-
-                ym = max(ym, max(y for _, y in diff))
+                fn1 = max(r1, key=lambda p: p[1])[0]
+                fn2 = max(r2, key=lambda p: p[1])[0]
                 Clock.schedule_once(lambda *_:
-                                    self.graph.update_graph([r1 , p1,
-                                                             r2 , p2],
-                                                            diff, 50, ym))
+                    self.log(f"CSV ΔF = {abs(fn1 - fn2):.2f} Hz "
+                             f"({fn1:.2f} → {fn2:.2f})"))
 
+        
         except Exception as e:
             Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
         finally:
