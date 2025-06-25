@@ -622,11 +622,12 @@ class FFTApp(App):
                 ym = max(ym, max(y for _,y in diff))
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([r1+p1, r2+p2], diff, 50, ym))
-    
-        except Exception as e:
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
-        finally:
-            Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+
+            except Exception as e:
+                msg = f"FFT 오류: {e}"              # ★
+                Clock.schedule_once(lambda *_: self.log(msg))
+            finally:
+                Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
             
 
     # CSV → 시계열 배열 읽기
