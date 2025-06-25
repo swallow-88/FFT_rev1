@@ -123,7 +123,7 @@ class GraphWidget(Widget):
         self.diff     = df or []
         # ▶ 최대값 받아서 20 dB 간격으로 라운드
         top = max(20, ((int(ym) // 20) + 1) * 20)      # 23 → 40, 67 → 80, …
-        self.Y_TICKS = list(range(-80, top + 1, 20))
+        self.Y_TICKS = list(range(0, top + 1, 20))
         self.Y_MAX   = self.Y_TICKS[-1]
         
         self.redraw()
