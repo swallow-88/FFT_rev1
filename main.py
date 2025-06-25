@@ -23,6 +23,12 @@ from kivy.graphics       import Line, Color
 from kivy.utils          import platform
 from plyer               import filechooser     # (SAF 실패 시 fallback)
 
+# ---------- 사용자 조정값 ---------- #
+BAND_HZ     = 2.0     # ❶ RMS 를 묶을 주파수 대역폭(Hz)
+REF_MM_S    = 0.01    # ❷ 0 dB 기준 속도 [mm/s RMS]
+PEAK_COLOR  = (1,1,1) # ❸ 선형 피크 라인(흰색)
+# ----------------------------------- #
+
 # ── Android 전용 모듈 ───────────────────────────────────────────────
 ANDROID = platform == "android"
 toast = SharedStorage = Permission = None
@@ -102,9 +108,10 @@ def uri_to_file(u: str) -> str | None:
 # ── 그래프 위젯 (Y축 고정 · 세미로그) ───────────────────────────────
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
+class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
-    COLORS   = [(1,0,0), (0,1,0), (0,0,1)]
-    DIFF_CLR = (1,1,1)
+    COLORS   = [(1,0,0), (0,1,0), (0,0,1), PEAK_COLOR]   # ← 맨 뒤 추가
+    DIFF_CLR = (0,0,1)
     LINE_W   = 2.5
 
     Y_TICKS = [0, 40, 80, 150]
@@ -392,51 +399,77 @@ class FFTApp(App):
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
 
+    # ─────────────────────────────────────────────────────
+    #  실시간 FFT 루프 – 2 Hz 대역별 ①RMS + ②피크(dB) 표시
+    # ─────────────────────────────────────────────────────
     def _rt_fft_loop(self):
         while self.rt_on:
             time.sleep(0.5)
     
+            # 샘플 수 부족 시 continue
             if any(len(self.rt_buf[ax]) < 64 for ax in ('x', 'y', 'z')):
                 continue
     
-            datasets = []; ymax = xmax = 0
+            datasets = []          # 그래프에 그릴 모든 라인
+            ymax     = 0
+            xmax     = 50          # 항상 0-50 Hz
+    
             for axis in ('x', 'y', 'z'):
+                # ── ① 신호 가져오기 ─────────────────────
                 ts, val = zip(*self.rt_buf[axis])
-                sig = np.asarray(val, float)
-                n   = len(sig)
+                sig     = np.asarray(val, float)
+                n       = len(sig)
     
-                dt  = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 1 / 100
-                sig -= sig.mean()
-                sig *= np.hanning(n)
+                dt  = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 0.01
+                sig = (sig - sig.mean()) * np.hanning(n)
     
-                freq = np.fft.fftfreq(n, d=dt)[:n // 2]
-                
-                # ---------- 가속도 RMS 계산 ----------
-                raw    = np.fft.fft(sig)                         # 이미 한닝창 곱한 sig
-                amp_a  = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
-                
-                # ---------- 0–100 Hz 범위만 사용 ----------
-                mask        = freq <= 50
-                freq, amp_a = freq[mask], amp_a[mask]
-                
-                # ---------- ★ 가속도 dB(re 1 µm/s²) 변환 ----------
-                # --- 가속도 → 속도(mm/s RMS) ---
-                f_nz  = np.where(freq < 2.0, 2.0, freq)        # 0‥2 Hz 보호
-                amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
-                
-                # csv_fft(), _rt_fft_loop() 두 군데 동일
-                ref = 1.0          # 1 mm/s RMS → 0 dB 기준
-                amp_db = 20 * np.log10(np.maximum(amp_v, ref*1e-4) / ref)
-                #floor   = ref * 1e-4                             # -80 dB 바닥
-                
-                smooth  = np.convolve(amp_db, np.ones(8) / 8, 'same')
-                datasets.append(list(zip(freq, smooth)))
+                # ── ② 가속도 → 속도(mm/s RMS) 스펙트럼 ─
+                raw    = np.fft.fft(sig)
+                amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))        # m/s² RMS
+                freq   = np.fft.fftfreq(n, d=dt)[:n//2]
     
-                ymax = max(ymax, smooth.max())
-                xmax = 50
+                sel            = freq <= 50
+                freq, amp_a    = freq[sel], amp_a[sel]
     
-            Clock.schedule_once(lambda *_:
-                self.graph.update_graph(datasets, [], xmax, ymax))
+                f_nz  = np.where(freq < 1e-6, 1e-6, freq)
+                amp_v = amp_a/(2*np.pi*f_nz)*1e3                    # mm/s RMS
+    
+                # ── ③ 2 Hz 대역별  RMS(dB) + 피크(dB) ──
+                band_rms = []
+                band_pk  = []
+                for lo in np.arange(0, 50, BAND_HZ):
+                    hi  = lo + BAND_HZ
+                    s   = (freq >= lo) & (freq < hi)
+                    if not np.any(s):
+                        continue
+    
+                    # RMS
+                    rms  = np.sqrt(np.mean(amp_v[s]**2))
+                    db_r = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
+                    band_rms.append(((lo+hi)/2, db_r))
+    
+                    # 피크
+                    pk   = amp_v[s].max()
+                    db_p = 20*np.log10(max(pk, REF_MM_S*1e-4)/REF_MM_S)
+                    band_pk.append(((lo+hi)/2, db_p))
+    
+                # 살짝 스무딩
+                if len(band_rms) > 2:
+                    y = np.convolve([y for _, y in band_rms], np.ones(3)/3, "same")
+                    band_rms = list(zip([x for x, _ in band_rms], y))
+    
+                # ── ④ 그래프용 데이터 push ─────────────────
+                datasets.append(band_rms)   # 색선
+                datasets.append(band_pk)    # 흰선
+    
+                ymax = max(ymax,
+                           max(y for _, y in band_rms),
+                           max(y for _, y in band_pk))
+    
+            # ── ⑤ UI 스레드로 그리기 요청 ─────────────────
+            Clock.schedule_once(
+                lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
+            )
 
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
@@ -526,45 +559,103 @@ class FFTApp(App):
     # ── _fft_bg() : 모든 예외를 최상위에서 잡고 버튼을 다시 살린다 ─
     # ★ 한 번만 선언 (파일 상단이나 클래스 상수로 권장)
     
+    # ─────────────────────────────────────────────────────
+    #  CSV 파일 FFT : 2 Hz 대역 RMS(dB) & 피크(dB) + 차이선
+    # ─────────────────────────────────────────────────────
     def _fft_bg(self):
         try:
-            res = []
-            for p in self.paths:
-                pts, xm, ym = self.csv_fft(p)
-                if pts is None:
-                    raise ValueError("CSV parse failed")
-                res.append((pts, xm, ym))
+            # ── 1) 각 CSV → 두 개의 라인(RMS, 피크) 생성 ──
+            all_sets = []         # [[(x,y)...] , [(x,y)...]]  *파일수
+            xm = ym = 0
+            for path in self.paths:
+                t, a = self._load_csv(path)        # (시간[], 가속도[])
+                if t is None:
+                    raise ValueError(f"{os.path.basename(path)}: CSV parse failed")
     
-            if len(res) == 1:
-                pts, xm, ym = res[0]
-                Clock.schedule_once(
-                    lambda *_: self.graph.update_graph([pts], [], xm, ym)
-                )
+                # FFT → 속도(mm/s RMS)
+                n   = len(a)
+                dt  = (t[-1]-t[0])/(n-1) if n>1 else 0.01
+                sig = (a - a.mean()) * np.hanning(n)
     
+                raw    = np.fft.fft(sig)
+                freq   = np.fft.fftfreq(n, d=dt)[:n//2]
+                amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))               # m/s²
+                sel    = freq <= 50
+                freq, amp_a = freq[sel], amp_a[sel]
+    
+                amp_v = amp_a/(2*np.pi*np.where(freq<1e-6,1e-6,freq))*1e3   # mm/s
+    
+                rms_line, pk_line = [], []
+                for lo in np.arange(0, 50, BAND_HZ):
+                    hi  = lo + BAND_HZ
+                    m   = (freq >= lo) & (freq < hi)
+                    if not m.any():          # 빈 대역 skip
+                        continue
+                    rms  = np.sqrt(np.mean(amp_v[m]**2))
+                    pk   = amp_v[m].max()
+    
+                    db_r = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
+                    db_p = 20*np.log10(max(pk , REF_MM_S*1e-4)/REF_MM_S)
+    
+                    rms_line.append(((lo+hi)/2, db_r))
+                    pk_line .append(((lo+hi)/2, db_p))
+    
+                # 가벼운 스무딩
+                if len(rms_line) > 2:
+                    y = np.convolve([y for _,y in rms_line], np.ones(3)/3, "same")
+                    rms_line = list(zip([x for x,_ in rms_line], y))
+    
+                all_sets.append([rms_line, pk_line])
+                ym = max(ym, max(y for _,y in rms_line+pk_line))
+    
+            # ── 2) 단일/쌍파일에 따라 그래프 데이터 구성 ──
+            if len(all_sets) == 1:
+                lines = all_sets[0][0] + all_sets[0][1]     # RMS+피크
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([lines], [], 50, ym))
             else:
-                (f1, x1, y1), (f2, x2, y2) = res
-                if not f1 or not f2:
-                    raise ValueError("empty dataset")
+                (r1, p1), (r2, p2) = (all_sets[0], all_sets[1])
     
-                # ── 차이선 y 축 올려주기 ──────────────────────────
-                diff = [
-                    (f1[i][0], abs(f1[i][1] - f2[i][1]) + self.OFFSET_DB)
-                    for i in range(min(len(f1), len(f2)))
-                ]
+                # 차이(RMS 라인 기준) + OFFSET_DB 로 위로 올림
+                diff = [(x, abs(y1-y2)+OFFSET_DB)
+                        for (x,y1),(_,y2) in zip(r1, r2)]
     
-                xm = max(x1, x2)
-                ym = max(y1, y2, max(y for _, y in diff))
-    
-                Clock.schedule_once(
-                    lambda *_: self.graph.update_graph([f1, f2], diff, xm, ym)
-                )
+                ym = max(ym, max(y for _,y in diff))
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([r1+p1, r2+p2], diff, 50, ym))
     
         except Exception as e:
-            msg = str(e)
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {msg}"))
-    
+            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
+            
+
+    # CSV → 시계열 배열 읽기
+    def _load_csv(self, path: str):
+        num_re = re.compile(r"^-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?$")
+        try:
+            t, a = [], []
+            with open(path, encoding="utf-8", errors="replace") as f:
+                sample = f.read(1024); f.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
+                except csv.Error:
+                    dialect = csv.get_dialect("excel")
+    
+                for row in csv.reader(f, dialect):
+                    if len(row) < 2: continue
+                    if not (num_re.match(row[0].strip()) and num_re.match(row[1].strip())):
+                        continue
+                    t.append(float(row[0].replace(",", ".")))
+                    a.append(float(row[1].replace(",", ".")))
+            if len(a) < 2:
+                return None, None
+            return np.asarray(t,float), np.asarray(a,float)
+        except Exception as e:
+            Logger.error(f"CSV read err ({os.path.basename(path)}): {e}")
+            return None, None
+
+
         
     @staticmethod
     def csv_fft(path: str):
@@ -605,26 +696,44 @@ class FFTApp(App):
                 dt = 0.01                   # 100 Hz 가정(안전)
     
 
-            # ---------- FFT(가속도, RMS) ----------
-            n     = len(a)
-            raw   = np.fft.fft(a * np.hanning(n))
-            amp_a = 2 * np.abs(raw[:n // 2]) / (n * np.sqrt(2))   # m/s² RMS
-            freq  = np.fft.fftfreq(n, d=dt)[:n // 2]
+            # ---------- FFT(가속도 → 속도) ----------
+            n      = len(a)
+            sig    = (a - np.mean(a)) * np.hanning(n)
+            raw    = np.fft.fft(sig)
+            amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))          # m/s² RMS
+            freq   = np.fft.fftfreq(n, d=dt)[:n//2]
             
             mask        = freq <= 50
             freq, amp_a = freq[mask], amp_a[mask]
             
-            # ★ 가속도 → dB
-            # --- 가속도 → 속도(mm/s RMS) ---
-            f_nz  = np.where(freq < 2.0, 2.0, freq)        # 0‥2 Hz 보호
-            amp_v = amp_a / (2*np.pi*f_nz) * 1e3           # mm/s
+            # ---- 가속도 → 속도(mm/s RMS) ----
+            f_nz  = np.where(freq < 1e-6, 1e-6, freq)
+            amp_v = amp_a/(2*np.pi*f_nz)*1e3                     # mm/s
             
-            # --- dB 변환 ---
-            ref    = 1.0          # 1 mm/s RMS → 0 dB
-            amp_db = 20*np.log10(np.maximum(amp_v, ref*1e-4)/ref)
+            # ── ① 2 Hz 대역 RMS ─────────────────────
+            band_db = []
+            band_pk = []                                         # ② 선형 최고치
+            for lo in np.arange(0, 50, BAND_HZ):
+                hi   = lo + BAND_HZ
+                sel  = (freq >= lo) & (freq < hi)
+                if not np.any(sel):
+                    continue
+                # 대역 RMS
+                rms = np.sqrt(np.mean(amp_v[sel]**2))
+                db  = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
+                band_db.append((lo+hi)/2, db)
             
-            smooth  = np.convolve(amp_db, np.ones(10) / 10, 'same')
-            return list(zip(freq, smooth)), 50, smooth.max()
+                # 대역 선형 피크
+                pk  = amp_v[sel].max()
+                pkd = 20*np.log10(max(pk, REF_MM_S*1e-4)/REF_MM_S)
+                band_pk.append(((lo+hi)/2, pkd))
+            
+            # 스무딩은 RMS 값에만 (선택)
+            pts_rms = np.convolve([y for _,y in band_db], np.ones(3)/3, "same")
+            pts_rms = list(zip([x for x,_ in band_db], pts_rms))
+            
+            return pts_rms, band_pk, 50, max(max(y for _,y in pts_rms),
+                                             max(y for _,y in band_pk))
     
         except Exception as e:
             Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
