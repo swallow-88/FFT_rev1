@@ -436,7 +436,7 @@ class FFTApp(App):
                 # ── ③ 2 Hz 대역별  RMS(dB) + 피크(dB) ──
                 band_rms = []
                 band_pk  = []
-                for lo in np.arange(0, 50, BAND_HZ):
+                for lo in np.arange(2, 50, BAND_HZ):
                     hi  = lo + BAND_HZ
                     s   = (freq >= lo) & (freq < hi)
                     if not np.any(s):
@@ -585,7 +585,7 @@ class FFTApp(App):
                 amp_v = amp_a / (2 * np.pi * np.where(freq < 1e-6, 1e-6, freq)) * 1e3  # mm/s RMS
 
                 rms_line, pk_line = [], []
-                for lo in np.arange(0, 50, BAND_HZ):
+                for lo in np.arange(2, 50, BAND_HZ):
                     hi = lo + BAND_HZ
                     m  = (freq >= lo) & (freq < hi)
                     if not m.any():
@@ -615,7 +615,7 @@ class FFTApp(App):
             if len(all_sets) == 1:
                 r, p = all_sets[0]
                 Clock.schedule_once(lambda *_:
-                                    self.graph.update_graph([r + p], [], 50, ym))
+                                    self.graph.update_graph([r , p], [], 50, ym))
             else:
                 (r1, p1), (r2, p2) = all_sets[:2]
 
@@ -624,8 +624,8 @@ class FFTApp(App):
 
                 ym = max(ym, max(y for _, y in diff))
                 Clock.schedule_once(lambda *_:
-                                    self.graph.update_graph([r1 + p1,
-                                                             r2 + p2],
+                                    self.graph.update_graph([r1 , p1,
+                                                             r2 , p2],
                                                             diff, 50, ym))
 
         except Exception as e:
@@ -718,7 +718,7 @@ class FFTApp(App):
             # ── ① 2 Hz 대역 RMS ─────────────────────
             # ---- 2 Hz 대역 RMS / Peak ---------------------------------
             band_db, band_pk = [], []
-            for lo in np.arange(0, 50, BAND_HZ):
+            for lo in np.arange(2, 50, BAND_HZ):
                 hi  = lo + BAND_HZ
                 sel = (freq >= lo) & (freq < hi)
                 if not np.any(sel):
