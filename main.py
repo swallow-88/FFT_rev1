@@ -108,8 +108,30 @@ def uri_to_file(u: str) -> str | None:
     return None
 
 
-# ── 그래프 위젯 (기존 그대로) ───────────────────────────────────────
-# ── 그래프 위젯 (Y축 고정 · 세미로그) ───────────────────────────────
+def dashed_line(canvas, pts, dash=8, gap=6, **kw):
+    """
+    pts=[x1,y1,x2,y2,…] 를 (dash, gap) 패턴으로 잘라 그린다.
+    OpenGL-ES(안드로이드)에서도 동작하는 ‘가짜 점선’ 구현.
+    """
+    if len(pts) < 4:
+        return
+    for i in range(0, len(pts)-2, 2):
+        x1, y1, x2, y2 = pts[i:i+4]
+        seg_len = ((x2-x1)**2 + (y2-y1)**2) ** 0.5
+        if seg_len == 0:
+            continue
+        nx, ny = (x2-x1)/seg_len, (y2-y1)/seg_len
+        s, draw = 0.0, True
+        while s < seg_len:
+            length = min(dash if draw else gap, seg_len - s)
+            if draw:
+                Line(points=[x1+nx*s, y1+ny*s,
+                             x1+nx*(s+length), y1+ny*(s+length)],
+                     **kw)
+            s += length
+            draw = not draw
+
+
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
@@ -235,38 +257,34 @@ class GraphWidget(Widget):
             self._grid(); self._labels()
 
             # ── RMS · Peak 그리기 ─────────────────────────────
+            # ── RMS·Peak 라인 그리기 ───────────────────────────────────────────
             for idx, pts in enumerate(self.datasets):
                 if not pts:
                     continue
-
-                # (1) 축 번호 : 0=X, 1=Y, 2=Z  …  n = idx // 2
-                axis_idx = idx // 2
-
-                # (2) 각 축마다 고유 색 - RMS·Peak 공통
+            
+                axis_idx = idx // 2                       # 0:X, 1:Y, 2:Z …
                 Color(*self.COLORS[axis_idx % len(self.COLORS)])
-
-                # (3) 홀수 idx → Peak → 점선,  짝수 idx → RMS → 실선
-                if idx % 2:          # Peak
-                    Line(points=self._scale(pts),
-                         width=self.LINE_W,
-                         dash_length=3, dash_offset=2)   # 점선 패턴
-                else:                # RMS
-                    Line(points=self._scale(pts), width=self.LINE_W)
-
-                # (4) 피크 라벨은 RMS(실선)에서만 추출
-                if idx % 2 == 0:     # RMS 라인만
+            
+                scaled = self._scale(pts)
+            
+                if idx % 2:                               # ── Peak 라인(점선)
+                    dashed_line(self.canvas, scaled,
+                                dash=10, gap=6, width=self.LINE_W)
+                else:                                     # ── RMS 라인(실선)
+                    Line(points=scaled, width=self.LINE_W)
+            
+                    # 피크 주파수 라벨은 RMS(실선)에서만
                     try:
                         fx, fy = max(pts, key=lambda p: p[1])
                         sx, sy = self._scale([(fx, fy)])[0:2]
                         peaks.append((fx, fy, sx, sy))
                     except ValueError:
                         pass
- 
-
+            
+            # ── 두 CSV 차이선(흰색 실선) ────────────────────────────────────────
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
-                
 
         # 피크 라벨
         for fx, fy, sx, sy in peaks:
