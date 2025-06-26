@@ -162,10 +162,12 @@ def acc_to_spec(freq, amp_a):
 
 
 # ── 공통 스무딩 함수 ─────────────────
-def smooth_y(vals, n: int):
+def smooth_y(vals, n=None):
     """n-point moving-average; n==1 ➜ no smoothing"""
+    if n is None:            # ← 호출자가 n을 안 줘도 되도록
+        n = SMOOTH_N
     if n <= 1 or len(vals) < n:
-        return vals[:]            # 그대로 복사
+        return vals[:]
     kernel = np.ones(n)/n
     return np.convolve(vals, kernel, mode="same")
 
