@@ -687,18 +687,32 @@ class FFTApp(App):
                          max(y for _, y in pk_line))
 
             # 2) 그래프 그리기 데이터 구성
-            if len(all_sets) == 1:
+            # 2) 그래프 그리기 데이터 구성
+            if len(all_sets) == 1:                      # ── 단일 파일 ──
                 r, p = all_sets[0]
                 Clock.schedule_once(lambda *_:
-                                    self.graph.update_graph([r, p], [], 50, ym))
- 
-            else:
-                # 두 파일 비교 모드
+                    self.graph.update_graph([r, p], [], 50, ym))
+
+            else:                                       # ── 두 파일 비교 ──
                 (r1, p1), (r2, p2) = all_sets[:2]
-                fn1 = max(r1, key=lambda p: p[1])[0]
-                fn2 = max(r2, key=lambda p: p[1])[0]
+
+                # Δ(dB) 선 계산 - y축에서 다른 라인보다 위로 올려서 표시
+                diff = [(x, abs(y1 - y2) + self.OFFSET_DB)
+                        for (x, y1), (_, y2) in zip(r1, r2)]
+
+                ym = max(ym, max(y for _, y in diff))
+
+                # ※ 그래프 갱신!
                 Clock.schedule_once(lambda *_:
-                    self.log(f"CSV ΔF = {abs(fn1 - fn2):.2f} Hz "
+                    self.graph.update_graph([r1, p1,   # 첫 번째 파일 RMS·PK
+                                             r2, p2],   # 두 번째 파일 RMS·PK
+                                            diff, 50, ym))
+
+                # ΔF 로그 출력
+                fn1 = max(r1, key=lambda p: p[1])[0]    # 첫 파일 공진
+                fn2 = max(r2, key=lambda p: p[1])[0]    # 둘째 파일 공진
+                Clock.schedule_once(lambda *_:
+                    self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz "
                              f"({fn1:.2f} → {fn2:.2f})"))
 
         
