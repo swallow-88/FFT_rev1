@@ -632,16 +632,16 @@ class FFTApp(App):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
     
         # ── 상단 안내 라벨 ────────────────────────────────
-        self.label = Label(text="Pick 1 or 2 CSV files", size_hint=(1, .10))
+        self.label = Label(text="Pick 1 or 2 CSV files", size_hint=(1, .05))
         root.add_widget(self.label)
     
         # ── 파일/실행/녹음 버튼 ───────────────────────────
         self.btn_sel = Button(text="Select CSV", disabled=True,
-                              size_hint=(1, .08), on_press=self.open_chooser)
+                              size_hint=(1, .05), on_press=self.open_chooser)
         self.btn_run = Button(text="FFT RUN", disabled=True,
-                              size_hint=(1, .08), on_press=self.run_fft)
+                              size_hint=(1, .05), on_press=self.run_fft)
         self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
-                              disabled=True, size_hint=(1, .08),
+                              disabled=True, size_hint=(1, .05),
                               on_press=self.start_recording)
     
         root.add_widget(self.btn_sel)
@@ -651,19 +651,19 @@ class FFTApp(App):
         # ── 녹음 길이 Spinner ─────────────────────────────
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=('10 s', '30 s', '60 s', '120 s'),
-                                size_hint=(1, .08))
+                                size_hint=(1, .05))
         self.spin_dur.bind(text=self._set_rec_dur)
         root.add_widget(self.spin_dur)
     
         # ── 측정 모드 토글 ────────────────────────────────
-        self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1, .08),
+        self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1, .05),
                                on_press=self._toggle_mode)
         root.add_widget(self.btn_mode)
     
         # ── 기준 F₀ / Realtime 토글 ───────────────────────
         self.btn_setF0 = Button(text="Set F₀ (baseline)",
-                                size_hint=(1, .08), on_press=self._save_baseline)
-        self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1, .08),
+                                size_hint=(1, .05), on_press=self._save_baseline)
+        self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1, .05),
                              on_press=self.toggle_realtime)
     
         # build() 안 — 레이아웃 구성 중
@@ -671,7 +671,7 @@ class FFTApp(App):
         self.spin_sm = Spinner(
                 text=str(SMOOTH_N),
                 values=('1','2','3','4', '5'),     # 필요 수치만 넣으세요
-                size_hint=(1, .08))
+                size_hint=(1, .05))
         self.spin_sm.bind(text=self._set_smooth)
         
         # (2) 원하는 위치에 add_widget
@@ -681,7 +681,7 @@ class FFTApp(App):
         root.add_widget(self.btn_rt)
     
         # ── 그래프 ────────────────────────────────────────
-        self.graph = GraphWidget(size_hint=(1, .40))
+        self.graph = GraphWidget(size_hint=(1, .50))
         root.add_widget(self.graph)
     
         # ── 권한 확인 트리거 ──────────────────────────────
@@ -692,16 +692,16 @@ class FFTApp(App):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
         self.btn_mode.text = f"Mode: {MEAS_MODE}"
-        self.log(f"▶ 측정 모드 변경 → {MEAS_MODE}")
+        self.log(f"▶ Change the measure mode → {MEAS_MODE}")
 
 
     # ⊕ 버튼 콜백
     def _save_baseline(self,*_):
         if self.last_fn is None:
-            self.log("❌ 아직 Fₙ 값을 알 수 없습니다")
+            self.log("X don't know Fₙ ")
         else:
             self.F0 = self.last_fn
-            self.log(f"✅ 기준 공진수 F₀ = {self.F0:.2f} Hz 저장")
+            self.log(f"Main Resonance Freq F₀ = {self.F0:.2f} Hz SAVE")
 
 
 
@@ -725,14 +725,14 @@ class FFTApp(App):
                                               self._goto_allfiles_permission())))
                     mv.add_widget(box); mv.open(); return
             except Exception:
-                Logger.exception("ALL-FILES check 오류")
+                Logger.exception("ALL-FILES check error")
         if ANDROID and SharedStorage:
             try:
                 SharedStorage().open_file(callback=self.on_choose,
                                           multiple=True,mime_type="text/*")
                 return
             except Exception as e:
-                Logger.exception("SAF picker fail"); self.log(f"SAF 오류: {e}")
+                Logger.exception("SAF picker fail"); self.log(f"SAF error: {e}")
         try:
             filechooser.open_file(on_selection=self.on_choose,multiple=True,
                                   filters=[("CSV","*.csv")],native=False,
