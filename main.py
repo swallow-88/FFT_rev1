@@ -22,14 +22,17 @@ from kivy.uix.popup      import Popup
 from kivy.graphics       import Line, Color
 from kivy.utils          import platform
 from plyer               import filechooser     # (SAF 실패 시 fallback)
+from kivy.uix.spinner import Spinner
 
 # ---------- 사용자 조정값 ---------- #
 BAND_HZ     = 2.0
 REF_MM_S    = 0.01
+REF_ACC = 0.01
 MEAS_MODE = "VEL"
 PEAK_COLOR  = (1,1,1)
 SMOOTH_N = 2
 HPF_CUTOFF = 5.0
+REC_DURATION_DEFAULT = 60.0
 
 # 공진 탐색 범위 ↓ (기존 (5,25) → 상한 50 Hz 로 확대)
 FN_BAND     = (5, 50)   # ← 이렇게만 변경
@@ -146,13 +149,13 @@ def acc_to_spec(freq, amp_a):
       • ACC :  가속도 [m/s² RMS] (0 dB 기준 = 0.981 ≒ 0.1 g)
     return  (amp, ref)  : 선형 스펙트럼값, 0 dB 기준값
     """
-    if MEAS_MODE == "VEL":
+    if MEAS_MODE == "VEL":            # 그대로
         f_nz = np.where(freq < 1e-6, 1e-6, freq)
-        amp  = amp_a / (2*np.pi*f_nz) * 1e3        # mm/s
+        amp  = amp_a / (2*np.pi*f_nz) * 1e3
         ref  = REF_MM_S
-    else:                           # "ACC"
-        amp  = amp_a                                # 그대로
-        ref  = 0.981                                # 0 dB = 0.1 g
+    else:                             # "ACC"
+        amp  = amp_a
+        ref  = REF_ACC               # ← 여기!
     return amp, ref
 # ★★★ ① 끝 ★★★
 
@@ -356,7 +359,7 @@ class GraphWidget(Widget):
 
 # ── 메인 앱 ────────────────────────────────────────────────────────
 class FFTApp(App):
-    REC_DURATION = 30.0          # 기록 길이(초)
+
     OFFSET_DB = 20 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -366,13 +369,22 @@ class FFTApp(App):
         self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in ('x','y','z')}
 
 
-        # 30 초 기록
+        # 60 초 기록
         self.rec_on = False
         self.rec_start = 0.0
         self.rec_files = {}
+        self.REC_DURATION = REC_DURATION_DEFAULT   # 필요 시 메뉴로 수정
         
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
+
+    # ---------------  FFTApp 클래스 안  ----------------
+    def _set_rec_dur(self, spinner, txt):
+        """Spinner 콜백 – 녹음 길이 변경"""
+        self.REC_DURATION       = float(txt.split()[0])
+        self.btn_rec.text       = f"Record {int(self.REC_DURATION)} s"
+        self.log(f"▶ 녹음 길이 {self.REC_DURATION:.0f} s 로 설정")
+    # ---------------------------------------------------
 
     # ── 공통 로그 ───────────────────────────────────────────────
     def log(self, msg: str):
@@ -440,7 +452,7 @@ class FFTApp(App):
         self.rec_on=True
         self.rec_start=time.time()
         self.btn_rec.disabled=True
-        self.label.text="Recording 0/30 s …"
+        self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
         Clock.schedule_interval(self._record_poll, 0.02)
 
     def _record_poll(self, dt):
@@ -456,7 +468,7 @@ class FFTApp(App):
             for ax_name,val in (('x',ax),('y',ay),('z',az)):
                 csv.writer(self.rec_files[ax_name]).writerow([t,val])
         if int(elapsed*2)%1==0:
-            self.label.text=f"Recording {elapsed:4.1f}/30 s …"
+            self.label.text = f"Recording {elapsed:4.1f}/{int(self.REC_DURATION)} s …"
         if elapsed>=self.REC_DURATION:
             self._stop_recording(); return False
         return True
@@ -471,7 +483,7 @@ class FFTApp(App):
         if not self.rt_on:
             try: accelerometer.disable()
             except Exception: pass
-        self.log("✅ 30 초 기록 완료!")
+        self.log(f"✅ {int(self.REC_DURATION)} 초 기록 완료!")
 
     # ──────────────────────────────────────────────────────────
     # ② 실시간 FFT (기존)
@@ -609,44 +621,53 @@ class FFTApp(App):
             Clock.schedule_once(lambda *_: setattr(self.btn_rt,
                                                    'text', 'Realtime FFT (OFF)'))
     # ── UI 구성 ───────────────────────────────────────────────
-    def build(self):
-        root = BoxLayout(orientation="vertical",padding=10,spacing=10)
-        self.label   = Label(text="Pick 1 or 2 CSV files",size_hint=(1,.10))
-        self.btn_sel = Button(text="Select CSV",disabled=True,size_hint=(1,.08),
-                              on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",disabled=True,size_hint=(1,.08),
-                              on_press=self.run_fft)
-        # ★ 30 초 기록 버튼
-        self.btn_rec = Button(text="Record 30 s",disabled=True,size_hint=(1,.08),
-                              on_press=self.start_recording)
+def build(self):
+    root = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
-        # build() 안에서 self.btn_rec 밑에 추가
-        self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1,.08), on_press=self._toggle_mode)
-        root.add_widget(self.btn_mode)
+    # ── 상단 안내 라벨 ────────────────────────────────
+    self.label = Label(text="Pick 1 or 2 CSV files", size_hint=(1, .10))
+    root.add_widget(self.label)
 
- 
+    # ── 파일/실행/녹음 버튼 ───────────────────────────
+    self.btn_sel = Button(text="Select CSV", disabled=True,
+                          size_hint=(1, .08), on_press=self.open_chooser)
+    self.btn_run = Button(text="FFT RUN", disabled=True,
+                          size_hint=(1, .08), on_press=self.run_fft)
+    self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
+                          disabled=True, size_hint=(1, .08),
+                          on_press=self.start_recording)
 
-        
-        root.add_widget(self.label)
-        root.add_widget(self.btn_sel)
-        root.add_widget(self.btn_run)
-        root.add_widget(self.btn_rec)
+    root.add_widget(self.btn_sel)
+    root.add_widget(self.btn_run)
+    root.add_widget(self.btn_rec)
 
+    # ── 녹음 길이 Spinner ─────────────────────────────
+    self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
+                            values=('10 s', '30 s', '60 s', '120 s'),
+                            size_hint=(1, .08))
+    self.spin_dur.bind(text=self._set_rec_dur)
+    root.add_widget(self.spin_dur)
 
-        self.btn_setF0 = Button(text="Set F₀ (baseline)",
-                                size_hint=(1,.08),
-                                on_press=self._save_baseline)
-        root.add_widget(self.btn_setF0)
+    # ── 측정 모드 토글 ────────────────────────────────
+    self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1, .08),
+                           on_press=self._toggle_mode)
+    root.add_widget(self.btn_mode)
 
-        
+    # ── 기준 F₀ / Realtime 토글 ───────────────────────
+    self.btn_setF0 = Button(text="Set F₀ (baseline)",
+                            size_hint=(1, .08), on_press=self._save_baseline)
+    self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1, .08),
+                         on_press=self.toggle_realtime)
+    root.add_widget(self.btn_setF0)
+    root.add_widget(self.btn_rt)
 
-        self.btn_rt  = Button(text="Realtime FFT (OFF)",size_hint=(1,.08),
-                              on_press=self.toggle_realtime)
-        root.add_widget(self.btn_rt)
+    # ── 그래프 ────────────────────────────────────────
+    self.graph = GraphWidget(size_hint=(1, .45))
+    root.add_widget(self.graph)
 
-        self.graph = GraphWidget(size_hint=(1,0.45)); root.add_widget(self.graph)
-        Clock.schedule_once(self._ask_perm, 0)
-        return root
+    # ── 권한 확인 트리거 ──────────────────────────────
+    Clock.schedule_once(self._ask_perm, 0)
+    return root
 
     def _toggle_mode(self, *_):
         global MEAS_MODE
