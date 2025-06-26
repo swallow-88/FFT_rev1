@@ -162,7 +162,7 @@ def acc_to_spec(freq, amp_a):
 
 
 # ── 공통 스무딩 함수 ─────────────────
-def smooth_y(vals, n: int = SMOOTH_N):
+def smooth_y(vals, n: int):
     """n-point moving-average; n==1 ➜ no smoothing"""
     if n <= 1 or len(vals) < n:
         return vals[:]            # 그대로 복사
@@ -195,9 +195,13 @@ class GraphWidget(Widget):
         self.datasets = [seq for seq in (ds or []) if seq]
         self.diff     = df or []
         # ▶ 최대값 받아서 20 dB 간격으로 라운드
-        top = max(20, ((int(ym) // 20) + 1) * 20)      # 23 → 40, 67 → 80, …
-        self.Y_TICKS = list(range(0, top + 1, 20))
-        self.Y_MAX   = self.Y_TICKS[-1]
+        # ── GraphWidget.update_graph() ───────────────────
+
+        top  = max(20, ((int(ym) // 20) + 1) * 20)
+        low  = min(0,  ((int(min_y) // 20) - 1) * 20)   # min_y : 이 구간 최소 dB
+        self.Y_TICKS = list(range(low, top + 1, 20))
+        self.Y_MIN   = low
+        self.Y_MAX   = top
         
         self.redraw()
 
@@ -208,7 +212,10 @@ class GraphWidget(Widget):
         80-150: 70~100 %
         """
         h   = self.height - 2*self.PAD_Y
-        v   = max(0.0, min(v, self.Y_MAX))
+        # ── GraphWidget.y_pos()  (선형 매핑으로 단순화) ─────────
+
+        v = max(self.Y_MIN, min(v, self.Y_MAX))
+        
 
         if v <= 40:
             frac = 0.40 * (v / 40)
@@ -217,7 +224,7 @@ class GraphWidget(Widget):
         else:          # 80-150
             frac = 0.70 + 0.30 * ((v - 80) / 70)
 
-        return self.PAD_Y + frac * h
+        return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
 
     
     # ---------- 좌표 변환 ----------
@@ -595,7 +602,7 @@ class FFTApp(App):
 
                     # ── ⑥ 스무딩(선택) ────────────────────────
                     if len(band_rms) >= SMOOTH_N:
-                        y_sm = smooth_y([y for _, y in band_rms])
+                        y_sm = smooth_y([y for _, y in band_rms], SMOOTH_N)
                         band_rms = list(zip([x for x, _ in band_rms], y_sm))
 
                     # ── ⑦ 공진수 추적 ─────────────────────────
