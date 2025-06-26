@@ -280,7 +280,12 @@ class FFTApp(App):
         super().__init__(**kw)
         # 실시간 FFT
         self.rt_on = False
-        self.rt_buf = {ax: deque(maxlen=256) for ax in ('x','y','z')}
+
+        BUF_LEN = 1024                      # 원하는 창 크기
+        MIN_LEN = 256                       # ¼쯤 채워지면 FFT 시작
+        self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in ('x','y','z')}
+
+
         # 30 초 기록
         self.rec_on = False
         self.rec_start = 0.0
@@ -426,7 +431,8 @@ class FFTApp(App):
             time.sleep(0.5)
     
             # 샘플 수 부족 시 continue
-            if any(len(self.rt_buf[ax]) < 64 for ax in ('x', 'y', 'z')):
+
+            if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x','y','z')):
                 continue
     
             datasets = []          # 그래프에 그릴 모든 라인
