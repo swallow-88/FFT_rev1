@@ -441,14 +441,26 @@ class FFTApp(App):
             except Exception: pass
 
     def _poll_accel(self, dt):
-        if not self.rt_on: return False
+        if not self.rt_on:
+            return False
+    
         try:
-            ax,ay,az = accelerometer.acceleration
-            if None in (ax,ay,az): return
-            now=time.time()
-            self.rt_buf['x'].append((now,abs(ax)))
-            self.rt_buf['y'].append((now,abs(ay)))
-            self.rt_buf['z'].append((now,abs(az)))
+            ax, ay, az = accelerometer.acceleration
+    
+            # 1️⃣ None 여부 먼저 확인
+            if None in (ax, ay, az):
+                Logger.debug("ACC NONE")
+                return
+    
+            # 2️⃣ 로그 출력
+            Logger.debug(f"ACC={ax:.3f}, {ay:.3f}, {az:.3f}")
+    
+            now = time.time()
+            self.rt_buf['x'].append((now, abs(ax)))
+            self.rt_buf['y'].append((now, abs(ay)))
+            self.rt_buf['z'].append((now, abs(az)))
+            Logger.debug(f"buf_len={len(self.rt_buf['x'])}")
+    
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
 
@@ -475,6 +487,10 @@ class FFTApp(App):
                 n       = len(sig)
     
                 dt  = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 0.01
+                if dt <= 0:
+                    Logger.warning("⚠️  dt<=0, skip FFT")
+                    continue
+
                 sig = (sig - sig.mean()) * np.hanning(n)
     
                 # ── ② 가속도 → 속도(mm/s RMS) 스펙트럼 ─
