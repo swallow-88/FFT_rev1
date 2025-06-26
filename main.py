@@ -27,6 +27,7 @@ from plyer               import filechooser     # (SAF 실패 시 fallback)
 BAND_HZ     = 2.0
 REF_MM_S    = 0.01
 PEAK_COLOR  = (1,1,1)
+SMOOTH_N = 2
 
 # 공진 탐색 범위 ↓ (기존 (5,25) → 상한 50 Hz 로 확대)
 FN_BAND     = (5, 50)   # ← 이렇게만 변경
@@ -130,6 +131,14 @@ def dashed_line(canvas, pts, dash=8, gap=6, **kw):
                      **kw)
             s += length
             draw = not draw
+
+# ── 공통 스무딩 함수 ─────────────────
+def smooth_y(vals, n: int = SMOOTH_N):
+    """n-point moving-average; n==1 ➜ no smoothing"""
+    if n <= 1 or len(vals) < n:
+        return vals[:]            # 그대로 복사
+    kernel = np.ones(n)/n
+    return np.convolve(vals, kernel, mode="same")
 
 
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
@@ -541,9 +550,9 @@ class FFTApp(App):
                     db_p = 20*np.log10(max(pk, REF_MM_S*1e-4)/REF_MM_S)
                     band_pk.append(((lo+hi)/2, db_p))
     
-                # 살짝 스무딩
+                # ── ③ 대역별 RMS·Peak 계산 이후 ──
                 if len(band_rms) > 2:
-                    y = np.convolve([y for _, y in band_rms], np.ones(3)/3, "same")
+                    y = smooth_y([y for _, y in band_rms])
                     band_rms = list(zip([x for x, _ in band_rms], y))
 
 
@@ -733,11 +742,11 @@ class FFTApp(App):
                     rms_line.append((centre, db_r))
                     pk_line.append((centre, db_p))
 
-                # 살짝 스무딩(RMS 라인만)
+        
+                # 스무딩(RMS 라인만)
                 if len(rms_line) > 2:
-                    y_sm = np.convolve([y for _, y in rms_line], np.ones(3) / 3, mode="same")
+                    y_sm = smooth_y([y for _, y in rms_line])
                     rms_line = list(zip([x for x, _ in rms_line], y_sm))
-
 
                 loF, hiF = FN_BAND
                 if rms_line:
@@ -890,9 +899,9 @@ class FFTApp(App):
                 band_db.append((centre, db))
                 band_pk.append((centre, pkd))
             
-            # --- RMS 스무딩(3-point) ---
-            if len(band_db) >= 3:
-                y_smooth = np.convolve([y for _, y in band_db], np.ones(3)/3, mode="same")
+            # --- RMS 스무딩(선택) ---
+            if len(band_db) >= SMOOTH_N:
+                y_smooth = smooth_y([y for _, y in band_db])
                 band_db  = list(zip([x for x, _ in band_db], y_smooth))
             
             ymax = max(max(y for _, y in band_db), max(y for _, y in band_pk))
