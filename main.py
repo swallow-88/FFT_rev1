@@ -878,10 +878,10 @@ class FFTApp(App):
                 Clock.schedule_once(lambda *_:
                         self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz "
                                  f"({fn1:.2f} → {fn2:.2f})"))
-
+        
         except Exception as e:
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {err}"))
-             
+            msg = f"FFT 오류: {e}"
+            Clock.schedule_once(lambda *_: self.log(msg)) 
 
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_run,
