@@ -500,100 +500,93 @@ class FFTApp(App):
         try:
             while self.rt_on:
                 time.sleep(0.5)
-        
-                # 샘플 수 부족 시 continue
     
-                if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x','y','z')):
+                # ── 샘플 수 확인 ───────────────────────────
+                if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x', 'y', 'z')):
                     continue
-        
-                datasets = []          # 그래프에 그릴 모든 라인
-                ymax     = 0
-                xmax     = 50          # 항상 0-50 Hz
-        
+    
+                datasets = []
+                ymax = 0
+                xmax = 50     # 0-50 Hz 고정
+    
+                # ───────────────── FFT 계산 루프 ─────────────────
                 for axis in ('x', 'y', 'z'):
-                    # ── ① 신호 가져오기 ─────────────────────
                     ts, val = zip(*self.rt_buf[axis])
-                    sig     = np.asarray(val, float)
-                    n       = len(sig)
-        
-                    dt  = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 0.01
+                    sig = np.asarray(val, float)
+                    n   = len(sig)
+    
+                    dt = (ts[-1] - ts[0]) / (n - 1) if n > 1 else 0.01
                     if dt <= 0:
-                        Logger.warning("⚠️  dt<=0, skip FFT")
+                        Logger.warning("⚠️ dt<=0, skip FFT")
                         continue
     
                     sig = (sig - sig.mean()) * np.hanning(n)
-        
-                    # ── ② 가속도 → 속도(mm/s RMS) 스펙트럼 ─
-                    raw    = np.fft.fft(sig)
-                    amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))        # m/s² RMS
-                    freq   = np.fft.fftfreq(n, d=dt)[:n//2]
-        
-                    sel            = freq <= 50
-                    freq, amp_a    = freq[sel], amp_a[sel]
-        
+    
+                    raw   = np.fft.fft(sig)
+                    amp_a = 2 * np.abs(raw[:n//2]) / (n * np.sqrt(2))
+                    freq  = np.fft.fftfreq(n, d=dt)[:n//2]
+    
+                    sel = freq <= 50
+                    freq, amp_a = freq[sel], amp_a[sel]
+    
                     f_nz  = np.where(freq < 1e-6, 1e-6, freq)
-                    amp_v = amp_a/(2*np.pi*f_nz)*1e3                    # mm/s RMS
-        
-                    # ── ③ 2 Hz 대역별  RMS(dB) + 피크(dB) ──
-                    band_rms = []
-                    band_pk  = []
+                    amp_v = amp_a / (2*np.pi*f_nz) * 1e3     # mm/s RMS
+    
+                    # ── 2 Hz 대역별 RMS/Peak ───────────────────
+                    band_rms, band_pk = [], []
                     for lo in np.arange(2, 50, BAND_HZ):
-                        hi  = lo + BAND_HZ
-                        s   = (freq >= lo) & (freq < hi)
-                        if not np.any(s):
+                        hi = lo + BAND_HZ
+                        m  = (freq >= lo) & (freq < hi)
+                        if not np.any(m):
                             continue
-        
-                        # RMS
-                        rms  = np.sqrt(np.mean(amp_v[s]**2))
-                        db_r = 20*np.log10(max(rms, REF_MM_S*1e-4)/REF_MM_S)
-                        band_rms.append(((lo+hi)/2, db_r))
-        
-                        # 피크
-                        pk   = amp_v[s].max()
-                        db_p = 20*np.log10(max(pk, REF_MM_S*1e-4)/REF_MM_S)
-                        band_pk.append(((lo+hi)/2, db_p))
-        
-                    # ── ③ 대역별 RMS·Peak 계산 이후 ──
-                    if len(band_rms) > 2:
-                        y = smooth_y([y for _, y in band_rms])
-                        band_rms = list(zip([x for x, _ in band_rms], y))
     
+                        rms = np.sqrt(np.mean(amp_v[m] ** 2))
+                        pk  = amp_v[m].max()
     
-                    # ── ★★★ 여기에 삽입 ★★★  ───────────────
-                    loF, hiF = FN_BAND                # (5, 50)
-                    if band_rms:                      # 비어 있지 않을 때만
+                        db_r = 20 * np.log10(max(rms, REF_MM_S*1e-4) / REF_MM_S)
+                        db_p = 20 * np.log10(max(pk , REF_MM_S*1e-4) / REF_MM_S)
+    
+                        centre = (lo + hi) / 2
+                        band_rms.append((centre, db_r))
+                        band_pk.append((centre, db_p))
+    
+                    if len(band_rms) > 2:                 # 스무딩
+                        y_sm = smooth_y([y for _, y in band_rms])
+                        band_rms = list(zip([x for x, _ in band_rms], y_sm))
+    
+                    # ── 공진수 추적 ───────────────────────
+                    loF, hiF = FN_BAND
+                    if band_rms:
                         centres = np.array([x for x, _ in band_rms])
                         mags    = np.array([y for _, y in band_rms])
                         maskF   = (centres >= loF) & (centres <= hiF)
                         if maskF.any():
-                            fn_cur = centres[maskF][mags[maskF].argmax()]
-                            self.last_fn = fn_cur       # ⇦ 현재 Fₙ 저장
-                    
-        
-                    # ── ④ 그래프용 데이터 push ─────────────────
-                    datasets.append(band_rms)   # 색선
-                    datasets.append(band_pk)    # 흰선
-        
+                            self.last_fn = centres[maskF][mags[maskF].argmax()]
+    
+                    datasets.extend([band_rms, band_pk])
                     ymax = max(ymax,
                                max(y for _, y in band_rms),
                                max(y for _, y in band_pk))
     
+                # ── ΔF 경고 ─────────────────────────────────
                 if self.F0 is not None and self.last_fn is not None:
                     df = abs(self.last_fn - self.F0)
                     if df > THR_DF:
-                        Clock.schedule_once(lambda *_:
-                            self.log(f"⚠️ ΔF={df:.2f} Hz > {THR_DF} Hz — 고무 열화 의심"))
-                    
-                # ── ⑤ UI 스레드로 그리기 요청 ─────────────────
+                        Clock.schedule_once(
+                            lambda *_: self.log(f"⚠️ ΔF={df:.2f} Hz > {THR_DF} Hz — 고무 열화 의심")
+                        )
+    
+                # ── 그래프 갱신 (UI 스레드) ──────────────────
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax)
                 )
-
-            except Exception:
-                Logger.exception("Realtime FFT thread crashed")
-                self.rt_on = False
-                Clock.schedule_once(lambda *_: self.btn_rt.text = "Realtime FFT (OFF)")
-
+    
+        except Exception:
+            Logger.exception("Realtime FFT thread crashed")
+            self.rt_on = False
+            Clock.schedule_once(
+                lambda *_: setattr(self.btn_rt, 'text', "Realtime FFT (OFF)")
+            )
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical",padding=10,spacing=10)
