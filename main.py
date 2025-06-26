@@ -113,8 +113,11 @@ def uri_to_file(u: str) -> str | None:
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 30
-    COLORS   = [(1,0,0), (0,1,0), (0,0,1), PEAK_COLOR]   # ← 맨 뒤 추가
-    DIFF_CLR = (0,0,1)
+
+    #            0        1        2        3        4        5
+    COLORS   = [(1,0,0), (1,1,0), (0,1,0), (0,1,1), (0,0,1), (1,0,1)]
+    #            빨강     노랑     초록     시안     파랑     자홍
+    DIFF_CLR = (1,1,1)          # 두 CSV 차이선은 흰색
     LINE_W   = 2.5
 
     Y_TICKS = [0, 40, 80, 150]
@@ -174,41 +177,48 @@ class GraphWidget(Widget):
 
     # ---------- 그리드 ----------
     def _grid(self):
-        gx = float(self.width - 2*self.PAD_X)/10
-        Color(.6,.6,.6)
-        for i in range(11):
-            Line(points=[self.PAD_X+i*gx, self.PAD_Y,
-                         self.PAD_X+i*gx, self.height-self.PAD_Y])
+        """세로 그리드: 0·10·20·30·40·50 Hz  → 6줄"""
+        n_tick   = int(self.max_x // 10) + 1       # 50 Hz면 6칸
+        gx       = float(self.width - 2*self.PAD_X) / (n_tick - 1)
+        Color(.6, .6, .6)
+        for i in range(n_tick):
+            Line(points=[self.PAD_X + i*gx, self.PAD_Y,
+                         self.PAD_X + i*gx, self.height - self.PAD_Y])
+
+        # 기존 Y-축(가로) 그리드는 그대로
         for v in self.Y_TICKS:
-            y = self._scale([(0,v)])[1]
+            y = self._scale([(0, v)])[1]
             Line(points=[self.PAD_X, y,
-                         self.width-self.PAD_X, y])
+                         self.width - self.PAD_X, y])
 
     # ---------- 축 라벨 ----------
     def _labels(self):
-        # 이전 축 라벨 제거
+        """세로눈금 라벨: 10 Hz 간격"""
+        # ── 예전 라벨 지우기 ──────────────────
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
 
-        # X축
-        for i in range(11):
-            x = float(self.PAD_X + i*(self.width-2*self.PAD_X)/10 - 20)
-            lbl = Label(text=f"{int(self.max_x*i/10)} Hz",
-                        size_hint=(None,None), size=(60,20),
-                        pos=(x, float(self.PAD_Y-28)))
+        # ── X축 라벨 ─────────────────────────
+        n_tick = int(self.max_x // 10) + 1          # 6개
+        for i in range(n_tick):
+            x = self.PAD_X + i*(self.width - 2*self.PAD_X)/(n_tick - 1) - 20
+            lbl = Label(text=f"{10*i} Hz",
+                        size_hint=(None, None), size=(60, 20),
+                        pos=(float(x), float(self.PAD_Y - 28)))
             lbl._axis = True
             self.add_widget(lbl)
 
-        # Y축
+        # ── Y축 라벨(그대로) ──────────────────
         for v in self.Y_TICKS:
-            y = float(self._scale([(0,v)])[1] - 8)
-            for x_pos in (self.PAD_X-68, self.width-self.PAD_X+10):
+            y = float(self._scale([(0, v)])[1] - 8)
+            for x_pos in (self.PAD_X - 68, self.width - self.PAD_X + 10):
                 lbl = Label(text=f"{v}",
-                            size_hint=(None,None), size=(60,20),
+                            size_hint=(None, None), size=(60, 20),
                             pos=(float(x_pos), y))
                 lbl._axis = True
                 self.add_widget(lbl)
+    
 
     # ---------- 메인 그리기 ----------
     def redraw(self,*_):
@@ -224,20 +234,39 @@ class GraphWidget(Widget):
         with self.canvas:
             self._grid(); self._labels()
 
+            # ── RMS · Peak 그리기 ─────────────────────────────
             for idx, pts in enumerate(self.datasets):
-                if not pts: continue
-                Color(*self.COLORS[idx % len(self.COLORS)])
-                Line(points=self._scale(pts), width=self.LINE_W)
-                try:
-                    fx, fy = max(pts, key=lambda p: p[1])
-                    sx, sy = self._scale([(fx, fy)])[0:2]
-                    peaks.append((fx, fy, sx, sy))
-                except ValueError:
+                if not pts:
                     continue
+
+                # (1) 축 번호 : 0=X, 1=Y, 2=Z  …  n = idx // 2
+                axis_idx = idx // 2
+
+                # (2) 각 축마다 고유 색 - RMS·Peak 공통
+                Color(*self.COLORS[axis_idx % len(self.COLORS)])
+
+                # (3) 홀수 idx → Peak → 점선,  짝수 idx → RMS → 실선
+                if idx % 2:          # Peak
+                    Line(points=self._scale(pts),
+                         width=self.LINE_W,
+                         dash_length=3, dash_offset=2)   # 점선 패턴
+                else:                # RMS
+                    Line(points=self._scale(pts), width=self.LINE_W)
+
+                # (4) 피크 라벨은 RMS(실선)에서만 추출
+                if idx % 2 == 0:     # RMS 라인만
+                    try:
+                        fx, fy = max(pts, key=lambda p: p[1])
+                        sx, sy = self._scale([(fx, fy)])[0:2]
+                        peaks.append((fx, fy, sx, sy))
+                    except ValueError:
+                        pass
+ 
 
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
+                
 
         # 피크 라벨
         for fx, fy, sx, sy in peaks:
@@ -282,7 +311,7 @@ class FFTApp(App):
         self.rt_on = False
 
         BUF_LEN = 1024                      # 원하는 창 크기
-        MIN_LEN = 256                       # ¼쯤 채워지면 FFT 시작
+        MIN_LEN = 512                       # ¼쯤 채워지면 FFT 시작
         self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in ('x','y','z')}
 
 
