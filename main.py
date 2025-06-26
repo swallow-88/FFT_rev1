@@ -880,7 +880,8 @@ class FFTApp(App):
                                  f"({fn1:.2f} → {fn2:.2f})"))
 
         except Exception as e:
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
+            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {err}"))
+             
 
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_run,
