@@ -218,26 +218,21 @@ class GraphWidget(Widget):
         self.Y_MAX   = top
         self.redraw()
 
+
     def y_pos(self, v: float) -> float:
         """
-        0-40 : 하단 40 %
-        40-80: 40~70 %
-        80-150: 70~100 %
+        입력 dB 값 → 화면 y 좌표
+        (Y_MIN ~ Y_MAX 범위를 PAD_Y ~ height-PAD_Y 로 선형 매핑)
         """
+        h = self.height - 2*self.PAD_Y          # ← 높이 먼저 계산
+        if h <= 0:
+            return self.PAD_Y                   # 안전장치
 
+        # 클램핑
         v = max(self.Y_MIN, min(v, self.Y_MAX))
+
+        # 선형 변환(하단 PAD_Y → 상단 height-PAD_Y)
         return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
-                
-
-        if v <= 40:
-            frac = 0.40 * (v / 40)
-        elif v <= 80:
-            frac = 0.40 + 0.30 * ((v - 40) / 40)
-        else:          # 80-150
-            frac = 0.70 + 0.30 * ((v - 80) / 70)
-
-        return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
-
     
     # ---------- 좌표 변환 ----------
     def _scale(self, pts):
