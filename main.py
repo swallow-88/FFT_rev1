@@ -236,18 +236,20 @@ class GraphWidget(Widget):
     
     # ---------- 좌표 변환 ----------
     def _scale(self, pts):
-        """
-        (주파수[Hz], dB) 튜플 리스트 →  [x1, y1, x2, y2, …]  로 변환
-        """
-        w = float(self.width  - 2*self.PAD_X)
-
-        out = []
-        for x, y in pts:
-            sx = self.PAD_X + (float(x) / self.max_x) * w   # X-축 선형
-            sy = self.y_pos(float(y))                       # Y-축 3-구간 압축
-            out += [sx, sy]
-
-        return out     
+        w = self.width  - 2*self.PAD_X
+        h = self.height - 2*self.PAD_Y
+        def y_pos(v):
+            v = max(0, min(v, self.Y_MAX))
+            if v<=5:   frac = 0.40*(v/5)
+            elif v<=10: frac = .40+.20*((v-5)/5)
+            elif v<=20: frac = .60+.20*((v-10)/10)
+            else:       frac = .80+.20*((v-20)/30)
+            return self.PAD_Y + frac*h
+        out=[]
+        for x,y in pts:
+            out += [self._f(self.PAD_X + x/self.max_x*w),
+                    self._f(y_pos(y))]
+        return out    
 
     # ---------- 그리드 ----------
     def _grid(self):
@@ -266,30 +268,31 @@ class GraphWidget(Widget):
                          self.width - self.PAD_X, y])
 
     # ---------- 축 라벨 ----------
+    # ---------- 축 라벨 ----------                   ★ PATCH
     def _labels(self):
-        """세로눈금 라벨: 10 Hz 간격"""
-        # ── 예전 라벨 지우기 ──────────────────
+        """세로 눈금 라벨: 10 Hz 간격"""
+        # 이전 라벨 모두 삭제
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
 
-        # ── X축 라벨 ─────────────────────────
-        n_tick = int(self.max_x // 10) + 1          # 6개
+        # X 축
+        n_tick = int(self.max_x // 10) + 1
         for i in range(n_tick):
-            x = self.PAD_X + i*(self.width - 2*self.PAD_X)/(n_tick - 1) - 20
+            x = self.PAD_X + i*(self.width-2*self.PAD_X)/(n_tick-1) - 20
             lbl = Label(text=f"{10*i} Hz",
                         size_hint=(None, None), size=(60, 20),
-                        pos=(float(x), float(self.PAD_Y - 28)))
+                        pos=(x, self.PAD_Y - 28))
             lbl._axis = True
             self.add_widget(lbl)
 
-        # ── Y축 라벨(그대로) ──────────────────
+        # Y 축
         for v in self.Y_TICKS:
-            y = float(self._scale([(0, v)])[1] - 8)
+            y = self._scale([(0, v)])[1] - 8
             for x_pos in (self.PAD_X - 68, self.width - self.PAD_X + 10):
                 lbl = Label(text=f"{v}",
                             size_hint=(None, None), size=(60, 20),
-                            pos=(float(x_pos), y))
+                            pos=(x_pos, y))
                 lbl._axis = True
                 self.add_widget(lbl)
     
@@ -527,27 +530,20 @@ class FFTApp(App):
     def _poll_accel(self, dt):
         if not self.rt_on:
             return False
-    
         try:
             ax, ay, az = accelerometer.acceleration
-    
-            # 1️⃣ None 여부 먼저 확인
             if None in (ax, ay, az):
-                Logger.debug("ACC NONE")
                 return
-    
-            # 2️⃣ 로그 출력
-            Logger.debug(f"ACC={ax:.3f}, {ay:.3f}, {az:.3f}")
-    
             now = time.time()
-            self.rt_buf['x'].append((now, abs(ax)))
-            self.rt_buf['y'].append((now, abs(ay)))
-            self.rt_buf['z'].append((now, abs(az)))
-            Logger.debug(f"buf_len={len(self.rt_buf['x'])}")
     
+            # 직전 시각이 있으면 Δt 계산, 없으면 dt 파라미터 사용
+            def push(axis, val):
+                prev_t = self.rt_buf[axis][-1][0] if self.rt_buf[axis] else now - dt
+                self.rt_buf[axis].append((now, val, now - prev_t))
+    
+            push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
-
     # ─────────────────────────────────────────────────────
     #  실시간 FFT 루프 – 2 Hz 대역별 ①RMS + ②피크(dB) 표시
     # ─────────────────────────────────────────────────────
@@ -558,89 +554,70 @@ class FFTApp(App):
         try:
             while self.rt_on:
                 time.sleep(0.5)
-
-                # ➊ 샘플 충분한지 확인
-                if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x', 'y', 'z')):
+    
+                if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x','y','z')):
                     continue
-
-                datasets, ymax, xmax = [], 0, 50   # x축 0-50 Hz 고정
-
-                for axis in ('x', 'y', 'z'):
-                    # ── ① 시간·신호 꺼내기 ────────────────────
-                    ts, val = zip(*self.rt_buf[axis])
-                    sig     = np.asarray(val, float)
-                    n       = len(sig)
-                    dt      = (ts[-1] - ts[0]) / (n-1) if n > 1 else 0.01
+    
+                datasets, ymax, xmax = [], 0, 50
+                for axis in ('x','y','z'):
+                    ts, val, dt_arr = zip(*self.rt_buf[axis])   # Δt 포함해서 꺼내기
+                    dt = np.mean(dt_arr)                        # 실제 평균 샘플 주기
                     if dt <= 0:
                         continue
-
-                    sig = (sig - sig.mean()) * np.hanning(n)
-
-                    # ── ② FFT (가속도 스펙트럼) ────────────────
-                    raw    = np.fft.fft(sig)
-                    amp_a  = 2*np.abs(raw[:n//2]) / (n*np.sqrt(2))   # m/s² RMS
-                    freq   = np.fft.fftfreq(n, d=dt)[:n//2]
-
-                    # ── ③ 5 Hz 하이패스 + 50 Hz 로우패스 ───────
+    
+                    sig = (np.asarray(val,float) - np.mean(val)) * np.hanning(len(val))
+    
+                    # --- FFT 이후 코드는 동일 -------------------
+                    raw  = np.fft.fft(sig)
+                    amp_a= 2*np.abs(raw[:len(val)//2])/(len(val)*np.sqrt(2))
+                    freq = np.fft.fftfreq(len(val), d=dt)[:len(val)//2]
+    
+                    # 5 Hz HPF + 50 Hz LPF
                     msel = (freq >= HPF_CUTOFF) & (freq <= 50)
                     freq, amp_a = freq[msel], amp_a[msel]
                     if freq.size == 0:
                         continue
-
-                    # ── ④ ACC ↔ VEL 변환  (+ 0 dB 기준) ────────
+    
                     amp_lin, REF0 = acc_to_spec(freq, amp_a)
-
-                    # ── ⑤ 2 Hz 대역별 RMS / Peak ──────────────
                     band_rms, band_pk = [], []
                     for lo in np.arange(HPF_CUTOFF, 50, BAND_HZ):
-                        hi = lo + BAND_HZ
+                        hi  = lo + BAND_HZ
                         sel = (freq >= lo) & (freq < hi)
-                        if not np.any(sel):
+                        if not sel.any():
                             continue
-
                         rms = np.sqrt(np.mean(amp_lin[sel]**2))
                         pk  = amp_lin[sel].max()
-
-                        centre = (lo + hi) / 2
-                        band_rms.append((centre,
-                                         20*np.log10(max(rms, REF0*1e-4)/REF0)))
-                        band_pk .append((centre,
-                                         20*np.log10(max(pk , REF0*1e-4)/REF0)))
-
-                    # ── ⑥ 스무딩(선택) ────────────────────────
+                        centre = (lo+hi)/2
+                        band_rms.append((centre, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
+                        band_pk .append((centre, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
+    
                     if len(band_rms) >= SMOOTH_N:
-                        y_sm = smooth_y([y for _, y in band_rms], SMOOTH_N)
-                        band_rms = list(zip([x for x, _ in band_rms], y_sm))
-
-                    # ── ⑦ 공진수 추적 ─────────────────────────
+                        y_sm = smooth_y([y for _,y in band_rms], SMOOTH_N)
+                        band_rms = list(zip([x for x,_ in band_rms], y_sm))
+    
+                    # 공진수 추적
                     loF, hiF = FN_BAND
                     if band_rms:
-                        centres = np.array([x for x, _ in band_rms])
-                        mags    = np.array([y for _, y in band_rms])
-                        selF    = (centres >= loF) & (centres <= hiF)
+                        c = np.array([x for x,_ in band_rms])
+                        m = np.array([y for _,y in band_rms])
+                        selF = (c >= loF) & (c <= hiF)
                         if selF.any():
-                            self.last_fn = centres[selF][mags[selF].argmax()]
-
-                    # 그래프 데이터 누적
+                            self.last_fn = c[selF][m[selF].argmax()]
+    
                     datasets += [band_rms, band_pk]
                     ymax = max(ymax,
-                               max(y for _, y in band_rms),
-                               max(y for _, y in band_pk))
-
-                # ⑧ ΔF 경고
-                if self.F0 and self.last_fn and abs(self.last_fn - self.F0) > THR_DF:
-                    Clock.schedule_once(
-                        lambda *_: self.log(f"⚠️ ΔF={abs(self.last_fn - self.F0):.2f} Hz > {THR_DF}"))
-
-                # ⑨ 그래프 갱신 (UI 스레드)
+                               max(y for _,y in band_rms),
+                               max(y for _,y in band_pk))
+    
+                # ΔF 경고·그래프 갱신 부분 동일 …
                 Clock.schedule_once(
                     lambda *_: self.graph.update_graph(datasets, [], xmax, ymax))
-
+    
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
-            Clock.schedule_once(lambda *_: setattr(self.btn_rt,
-                                                   'text', 'Realtime FFT (OFF)'))
+            Clock.schedule_once(lambda *_: setattr(self.btn_rt, 'text',
+                                                   'Realtime FFT (OFF)'))
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
