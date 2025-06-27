@@ -252,40 +252,42 @@ class GraphWidget(Widget):
 
     # ---------- 그리드 ----------
     def _grid(self):
-        """세로 그리드: 0·10·20·30·40·50 Hz  → 6줄"""
-        n_tick   = int(self.max_x // 10) + 1       # 50 Hz면 6칸
-        gx       = float(self.width - 2*self.PAD_X) / (n_tick - 1)
+        """세로 그리드: 0 ~ 50 Hz / 10 Hz 간격"""
+        n_tick = int(self.max_x // 10) + 1
+        span   = max(n_tick - 1, 1)
+        gx     = (self.width - 2*self.PAD_X) / span
+
         Color(.6, .6, .6)
         for i in range(n_tick):
             Line(points=[self.PAD_X + i*gx, self.PAD_Y,
                          self.PAD_X + i*gx, self.height - self.PAD_Y])
 
-        # 기존 Y-축(가로) 그리드는 그대로
+        # 가로선은 그대로
         for v in self.Y_TICKS:
             y = self._scale([(0, v)])[1]
             Line(points=[self.PAD_X, y,
                          self.width - self.PAD_X, y])
 
     # ---------- 축 라벨 ----------
-    # ---------- 축 라벨 ----------                   ★ PATCH
     def _labels(self):
-        """세로 눈금 라벨: 10 Hz 간격"""
-        # 이전 라벨 모두 삭제
+        """세로 눈금 라벨을 그린다."""
+        # ── 예전 축 라벨 지우기 ──
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
 
-        # X 축
-        n_tick = int(self.max_x // 10) + 1
+        # ── X-축 (10 Hz 간격) ──────────────────
+        n_tick = int(self.max_x // 10) + 1          # 최소 1
+        span   = max(n_tick - 1, 1)                 # 0 나눗셈 방지
         for i in range(n_tick):
-            x = self.PAD_X + i*(self.width-2*self.PAD_X)/(n_tick-1) - 20
+            x = self.PAD_X + i * (self.width - 2*self.PAD_X) / span - 20
             lbl = Label(text=f"{10*i} Hz",
                         size_hint=(None, None), size=(60, 20),
                         pos=(x, self.PAD_Y - 28))
             lbl._axis = True
             self.add_widget(lbl)
 
-        # Y 축
+        # ── Y-축 (20 dB 간격) ──────────────────
         for v in self.Y_TICKS:
             y = self._scale([(0, v)])[1] - 8
             for x_pos in (self.PAD_X - 68, self.width - self.PAD_X + 10):
@@ -294,7 +296,6 @@ class GraphWidget(Widget):
                             pos=(x_pos, y))
                 lbl._axis = True
                 self.add_widget(lbl)
-    
 
     # ---------- 메인 그리기 ----------
     def redraw(self,*_):
@@ -564,7 +565,8 @@ class FFTApp(App):
                     if dt <= 0:
                         continue
     
-                    sig = (np.asarray(val,float) - np.mean(val)) * np.hanning(len(val))
+                    sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(len(val))
+
     
                     # --- FFT 이후 코드는 동일 -------------------
                     raw  = np.fft.fft(sig)
@@ -590,9 +592,10 @@ class FFTApp(App):
                         band_rms.append((centre, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
                         band_pk .append((centre, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
     
+                    # _rt_fft_loop  안
                     if len(band_rms) >= SMOOTH_N:
-                        y_sm = smooth_y([y for _,y in band_rms], SMOOTH_N)
-                        band_rms = list(zip([x for x,_ in band_rms], y_sm))
+                        y_sm = smooth_y([y for _, y in band_rms])   # ← 두 번째 인자 생략 OK
+                        band_rms = list(zip([x for x, _ in band_rms], y_sm))
     
                     # 공진수 추적
                     loF, hiF = FN_BAND
@@ -775,7 +778,7 @@ class FFTApp(App):
                 # ── ① FFT – 가속도 스펙트럼 ─────────────────────
                 n   = len(a)
                 dt  = (t[-1] - t[0]) / (n-1) if n > 1 else 0.01
-                sig = (a - a.mean()) * np.hanning(n)
+                sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(len(val))
 
                 raw    = np.fft.fft(sig)
                 amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))       # m/s² RMS
@@ -808,8 +811,9 @@ class FFTApp(App):
                                      20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
                 # ── ⑤ 스무딩 (선택) ────────────────────────────
+                # _fft_bg  안
                 if len(rms_line) >= SMOOTH_N:
-                    y_sm = smooth_y([y for _, y in rms_line])
+                    y_sm = smooth_y([y for _, y in rms_line])   # 동일
                     rms_line = list(zip([x for x, _ in rms_line], y_sm))
 
                 # ── ⑥ 공진주파수 저장 ─────────────────────────
@@ -919,7 +923,9 @@ class FFTApp(App):
             # ── ② FFT (가속도 스펙트럼) ─────────────────────
             n   = len(a)
             dt  = (t[-1] - t[0]) / (n-1) if n > 1 else 0.01
-            sig = (np.asarray(a,float) - np.mean(a)) * np.hanning(n)
+            sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(len(val))
+
+
 
             raw   = np.fft.fft(sig)
             amp_a = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))          # m/s² RMS
