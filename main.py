@@ -778,7 +778,7 @@ class FFTApp(App):
                 # ── ① FFT – 가속도 스펙트럼 ─────────────────────
                 n   = len(a)
                 dt  = (t[-1] - t[0]) / (n-1) if n > 1 else 0.01
-                sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(len(val))
+                sig = (a - a.mean()) * np.hanning(n)
 
                 raw    = np.fft.fft(sig)
                 amp_a  = 2*np.abs(raw[:n//2])/(n*np.sqrt(2))       # m/s² RMS
@@ -923,7 +923,7 @@ class FFTApp(App):
             # ── ② FFT (가속도 스펙트럼) ─────────────────────
             n   = len(a)
             dt  = (t[-1] - t[0]) / (n-1) if n > 1 else 0.01
-            sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(len(val))
+            sig = (np.asarray(a, float) - np.mean(a)) * np.hanning(n)
 
 
 
