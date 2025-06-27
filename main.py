@@ -235,21 +235,20 @@ class GraphWidget(Widget):
         return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
     
     # ---------- 좌표 변환 ----------
+    # ---------- 좌표 변환 ----------
     def _scale(self, pts):
-        w = self.width  - 2*self.PAD_X
-        h = self.height - 2*self.PAD_Y
-        def y_pos(v):
-            v = max(0, min(v, self.Y_MAX))
-            if v<=5:   frac = 0.40*(v/5)
-            elif v<=10: frac = .40+.20*((v-5)/5)
-            elif v<=20: frac = .60+.20*((v-10)/10)
-            else:       frac = .80+.20*((v-20)/30)
-            return self.PAD_Y + frac*h
-        out=[]
-        for x,y in pts:
-            out += [self._f(self.PAD_X + x/self.max_x*w),
-                    self._f(y_pos(y))]
-        return out    
+        """
+        (주파수[Hz], dB) 목록 → [x1, y1, x2, y2, …]  (캔버스 좌표계)
+        self._f(), h 변수 등을 사용하지 않고
+        GraphWidget.y_pos() 만 이용해 변환한다.
+        """
+        w = float(self.width) - 2 * self.PAD_X
+        out = []
+        for x, y in pts:
+            sx = self.PAD_X + (float(x) / self.max_x) * w      # X축 선형
+            sy = self.y_pos(float(y))                          # Y축 선형(전체-범위)
+            out += [sx, sy]
+        return out   
 
     # ---------- 그리드 ----------
     def _grid(self):
