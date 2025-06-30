@@ -561,7 +561,8 @@ class FFTApp(App):
                 datasets, ymax, xmax = [], 0, 50
                 for axis in ('x','y','z'):
                     ts, val, dt_arr = zip(*self.rt_buf[axis])   # Δt 포함해서 꺼내기
-                    dt = np.mean(dt_arr)                        # 실제 평균 샘플 주기
+                    #dt = np.mean(dt_arr)                        # 실제 평균 샘플 주기
+                    dt = np.median(dt_arr[-128:])
                     if dt <= 0:
                         continue
     
