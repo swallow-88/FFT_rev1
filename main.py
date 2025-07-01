@@ -748,42 +748,57 @@ class FFTApp(App):
 
     
     # ── CSV 선택 & FFT 실행 (기존) ───────────────────────────────
-    def open_chooser(self,*_):
-        if ANDROID and ANDROID_API>=30:
+    def open_chooser(self, *_):
+        """
+        CSV 선택 다이얼로그.
+        1) Android 11+ 이면서 MANAGE_EXTERNAL_STORAGE 권한이 없는 경우
+           → 안내 팝업으로 ‘모든-파일’ 권한 설정 창 유도
+        2) 권한이 이미 있거나 데스크톱/구버전 OS
+           → Downloads 경로에 직접 접근 (filechooser)
+           실패 -or- 권한 거부 → SAF picker 로 우회
+        """
+    
+        # ── Android 11+ : ‘모든-파일’ 권한 확인 ────────────────────
+        if ANDROID and ANDROID_API >= 30 and not self._has_allfiles_perm():
             try:
                 from jnius import autoclass
-                Env=autoclass("android.os.Environment")
-                if not Env.isExternalStorageManager():
-                    mv=ModalView(size_hint=(.8,.35))
-                    box=BoxLayout(orientation='vertical',spacing=10,padding=10)
+                Env = autoclass("android.os.Environment")
+                if not Env.isExternalStorageManager():   # 실제로 거부 상태?
+                    mv  = ModalView(size_hint=(.8, .35))
+                    box = BoxLayout(orientation='vertical', spacing=10, padding=10)
                     box.add_widget(Label(
                         text="⚠️ CSV 파일에 접근하려면\n'모든 파일' 권한이 필요합니다.",
                         halign="center"))
                     box.add_widget(Button(text="권한 설정으로 이동",
-                                          size_hint=(1,.4),
-                                          on_press=lambda *_:(
-                                              mv.dismiss(),
-                                              self._goto_allfiles_permission())))
-                    mv.add_widget(box); mv.open(); return
-            except Exception:
+                        size_hint=(1, .4),
+                        on_press=lambda *_: (mv.dismiss(),
+                                             self._goto_allfiles_permission())))
+                    mv.add_widget(box)
+                    mv.open()
+                    return
+            except Exception:         # jnius 오류 등
                 Logger.exception("ALL-FILES check error")
+    
+        # ── ① SAF picker (androidstorage4kivy) 우선 사용 ──────────
         if ANDROID and SharedStorage:
             try:
-                SharedStorage().open_file(callback=self.on_choose,
-                                          multiple=True,mime_type="text/*")
-                return
+                SharedStorage().open_file(
+                    callback=self.on_choose,
+                    multiple=True,
+                    mime_type="text/*"       # CSV 포함
+                )
+                return                      # 성공적으로 열었으면 여기서 끝
             except Exception as e:
-                Logger.exception("SAF picker fail"); self.log(f"SAF error: {e}")
-
-        # 권한이 없으면 filechooser → SAF 로 강제 전환
-        if ANDROID and not self._has_allfiles_perm():
-            self.log("Downloads 접근 권한 없음 → SAF 선택기로 전환")
-            SharedStorage().open_file(callback=self.on_choose,
-                                      multiple=True, mime_type="text/*")
-            return
-
+                Logger.warning(f"SAF picker 실패 → filechooser로 fallback: {e}")
+    
+        # ── ② 일반 filechooser ─────────────────────────────────────
         try:
-            filechooser.open_file(...)
+            filechooser.open_file(
+                on_selection=self.on_choose,
+                multiple=True,
+                filters=[("CSV", "*.csv")],
+                path=DOWNLOAD_DIR
+            )
         except Exception as e:
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
 
@@ -797,28 +812,24 @@ class FFTApp(App):
         act.startActivity(Intent(
             Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
 
-    def on_choose(self, sel):
-        if not sel: return
-        paths=[]
-        # ── after ──────────────────────────────
-        for raw in sel[:3]:       # ← 최대 3 개(x,y,z)까지 허용
+    # ↳ ❶  on_choose 시그니처 수정
+    def on_choose(self, sel, *_) :
+        """
+        sel : [path1, path2, ...]  또는 [uri1, uri2, ...]
+        *_  : 버전별 추가 인자 무시
+        """
+        if not sel:                # 취소
+            return
+        paths = []
+        for raw in sel[:3]:        # 최대 3개(X,Y,Z)까지
             real = uri_to_file(raw)
             if not real:
                 self.log("❌ 복사 실패"); return
-
-            if real in (None, "NO_PERMISSION"):
-                self.log("⚠️ Downloads 접근 권한이 없거나 복사 실패")
-                return                      # RUN 버튼 유지 OFF
             paths.append(real)
-            
-        if not paths:
-            self.btn_run.disabled = True
-            return
-            
-            
-        self.paths=paths
-        self.label.text=" · ".join(os.path.basename(p) for p in paths)
-        self.btn_run.disabled=False
+    
+        self.paths = paths
+        self.label.text = " · ".join(os.path.basename(p) for p in paths)
+        self.btn_run.disabled = False
 
     def run_fft(self,*_):
         self.btn_run.disabled=True
