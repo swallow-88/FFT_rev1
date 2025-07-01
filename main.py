@@ -590,34 +590,34 @@ class FFTApp(App):
             try: accelerometer.disable()
             except Exception: pass
 
-        # ────────────── FFTApp._poll_accel (발췌) ──────────────
-        def _poll_accel(self, dt):
-            if not self.rt_on:
-                return False
-            try:
-                ax, ay, az = accelerometer.acceleration
-                if None in (ax, ay, az):
-                    return
-    
-                now = time.time()
-                prev = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
-                dt_samp = now - prev
-    
-                # ✅ rec_start 기준 상대시간 사용
-                rel_time = now - self.rec_start if self.rec_start else 0
-    
-                def push(axis, raw):
-                    self.rt_buf[axis].append((now, raw, dt_samp))
-                    if self.rec_on and axis in self.rec_files:
-                        # ✅ 상대 시간으로 기록
-                        csv.writer(self.rec_files[axis]).writerow([rel_time, raw])
-    
-                push('x', abs(ax))
-                push('y', abs(ay))
-                push('z', abs(az))
-    
-            except Exception as e:
-                Logger.warning(f"acc read fail: {e}")
+    # ────────────── FFTApp._poll_accel (발췌) ──────────────
+    def _poll_accel(self, dt):
+        if not self.rt_on:
+            return False
+        try:
+            ax, ay, az = accelerometer.acceleration
+            if None in (ax, ay, az):
+                return
+
+            now = time.time()
+            prev = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_samp = now - prev
+
+            # ✅ rec_start 기준 상대시간 사용
+            rel_time = now - self.rec_start if self.rec_start else 0
+
+            def push(axis, raw):
+                self.rt_buf[axis].append((now, raw, dt_samp))
+                if self.rec_on and axis in self.rec_files:
+                    # ✅ 상대 시간으로 기록
+                    csv.writer(self.rec_files[axis]).writerow([rel_time, raw])
+
+            push('x', abs(ax))
+            push('y', abs(ay))
+            push('z', abs(az))
+
+        except Exception as e:
+            Logger.warning(f"acc read fail: {e}")
     # ─────────────────────────────────────────────────────
     #  실시간 FFT 루프 – 2 Hz 대역별 ①RMS + ②피크(dB) 표시
     # ─────────────────────────────────────────────────────
