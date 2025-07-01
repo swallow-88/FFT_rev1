@@ -297,72 +297,80 @@ class GraphWidget(Widget):
                 lbl._axis = True
                 self.add_widget(lbl)
 
-    # ---------- 메인 그리기 ----------
-    def redraw(self,*_):
-        self.canvas.clear()
+    
+    # ── 새로 추가 :  이전 축·피크 라벨 싹 지우기 ──────────────────
+    def _clear_labels(self):
+        """
+        self.children 중  _axis / _peak  플래그가 달린 위젯을
+        전부 제거한다.  ( redraw() 가 부를 때마다 호출 )
+        """
         for w in list(self.children):
-            if getattr(w, "_peak", False):
+            if getattr(w, "_axis", False) or getattr(w, "_peak", False):
                 self.remove_widget(w)
 
-        if not self.datasets:
+    
+    # ---------- 메인 그리기 ---------
+    def redraw(self, *_):
+        # ① 캔버스·라벨 초기화
+        self.canvas.clear()
+        self._clear_labels()     # ← 새로 만든 함수로 한 번에 정리
+
+        if not self.datasets:    # 데이터 없으면 끝
             return
 
+        # ② 그리드 + 라벨 다시 그리기
+        with self.canvas:
+            self._grid()
+        self._labels()           # 라벨은 Widget 으로 children 에 추가
+
+        # ③ 데이터 라인 & 피크
         peaks = []
         with self.canvas:
-            self._grid(); self._labels()
-
-            # ── RMS · Peak 그리기 ─────────────────────────────
-            # ── RMS·Peak 라인 그리기 ───────────────────────────────────────────
             for idx, pts in enumerate(self.datasets):
                 if not pts:
                     continue
-            
-                axis_idx = idx // 2                       # 0:X, 1:Y, 2:Z …
+                axis_idx = idx // 2
                 Color(*self.COLORS[axis_idx % len(self.COLORS)])
-            
                 scaled = self._scale(pts)
-            
-                if idx % 2:                               # ── Peak 라인(점선)
-                    dashed_line(self.canvas, scaled,
-                                dash=10, gap=6, width=self.LINE_W)
-                else:                                     # ── RMS 라인(실선)
+
+                # Peak(점선) / RMS(실선) 구분
+                if idx % 2:
+                    dashed_line(self.canvas, scaled, dash=10, gap=6, width=self.LINE_W)
+                else:
                     Line(points=scaled, width=self.LINE_W)
-            
-                    # 피크 주파수 라벨은 RMS(실선)에서만
                     try:
                         fx, fy = max(pts, key=lambda p: p[1])
                         sx, sy = self._scale([(fx, fy)])[0:2]
                         peaks.append((fx, fy, sx, sy))
                     except ValueError:
                         pass
-            
-            # ── 두 CSV 차이선(흰색 실선) ────────────────────────────────────────
+
+            # diff 라인이 있으면 추가
             if self.diff:
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
 
-        # 피크 라벨
+        # ④ 피크 주파수 라벨
         for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None,None), size=(85,22),
-                        pos=(float(sx-28), float(sy+6)))
+                        size_hint=(None, None), size=(85, 22),
+                        pos=(sx-28, sy+6))
             lbl._peak = True
             self.add_widget(lbl)
 
-        # Δ 표시
+        # ⑤ ΔF 표시
         if len(peaks) >= 2:
             delta = abs(peaks[0][0] - peaks[1][0])
             bad   = delta > 1.5
             clr   = (1,0,0,1) if bad else (0,1,0,1)
             info  = Label(text=f"Δ = {delta:.2f} Hz → {'고장' if bad else '정상'}",
                           size_hint=(None,None), size=(190,24),
-                          pos=(float(self.PAD_X),
-                               float(self.height-self.PAD_Y+6)),
+                          pos=(self.PAD_X, self.height-self.PAD_Y+6),
                           color=clr)
             info._peak = True
             self.add_widget(info)
 
-
+        # ⑥ 실시간 Fₙ 표시
         app = App.get_running_app()
         if getattr(app, "last_fn", None) is not None:
             lbl = Label(text=f"Fₙ={app.last_fn:.2f} Hz",
@@ -371,7 +379,6 @@ class GraphWidget(Widget):
                         color=(1,1,0,1))
             lbl._peak = True
             self.add_widget(lbl)
-
 
 
 # ── 메인 앱 ────────────────────────────────────────────────────────
