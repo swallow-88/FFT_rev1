@@ -781,7 +781,7 @@ class FFTApp(App):
             real = uri_to_file(raw)
             if not real:
                 self.log("❌ 복사 실패"); return
-    paths.append(real)
+            paths.append(real)
         self.paths=paths
         self.label.text=" · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
