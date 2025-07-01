@@ -599,20 +599,18 @@ class FFTApp(App):
             if None in (ax, ay, az):
                 return
     
-            now      = time.time()
-            prev     = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
-            dt_samp  = now - prev
+            now = time.time()
+            prev = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_samp = now - prev
     
             def push(axis, raw):
                 self.rt_buf[axis].append((now, raw, dt_samp))
-                # ──★ 녹음 중이면 CSV 에도 기록
-                if self.rec_on:
-                    rel_t = now - self.rec_start          # 0 s 기준
-                    csv.writer(self.rec_files[axis]).writerow([rel_t, raw])
-                    if len(self.rt_buf[axis]) % 200 == 0: # 가끔 flush
-                        self.rec_files[axis].flush()
+                if self.rec_on and axis in self.rec_files:
+                    csv.writer(self.rec_files[axis]).writerow([now, raw])
     
-            push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
+            push('x', abs(ax))
+            push('y', abs(ay))
+            push('z', abs(az))
     
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
