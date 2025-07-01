@@ -776,11 +776,12 @@ class FFTApp(App):
     def on_choose(self, sel):
         if not sel: return
         paths=[]
-        for raw in sel[:2]:
-            real=uri_to_file(raw)
+        # ── after ──────────────────────────────
+        for raw in sel[:3]:       # ← 최대 3 개(x,y,z)까지 허용
+            real = uri_to_file(raw)
             if not real:
                 self.log("❌ 복사 실패"); return
-            paths.append(real)
+    paths.append(real)
         self.paths=paths
         self.label.text=" · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
