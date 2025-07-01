@@ -509,7 +509,7 @@ class FFTApp(App):
         self.rec_start=time.time()
         self.btn_rec.disabled=True
         self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
-        Clock.schedule_interval(self._record_poll, 0.02)
+        Clock.schedule_once(self._stop_recording, self.REC_DURATION)
 
     def _record_poll(self, dt):
         if not self.rec_on: return False
@@ -529,17 +529,20 @@ class FFTApp(App):
             self._stop_recording(); return False
         return True
 
-    def _stop_recording(self):
+    # ────────────── (선택) _stop_recording 정리 ──────────────
+    def _stop_recording(self, *_):
+        if not self.rec_on:
+            return
         for f in self.rec_files.values():
             try: f.close()
             except Exception: pass
         self.rec_files.clear()
-        self.rec_on=False
-        self.btn_rec.disabled=False
+        self.rec_on        = False
+        self.btn_rec.disabled = False
         if not self.rt_on:
             try: accelerometer.disable()
             except Exception: pass
-        self.log(f"✅ {int(self.REC_DURATION)} 초 기록 완료!")
+        self.log(f"✅ {int(self.REC_DURATION)} s recording finished!")
 
     # ──────────────────────────────────────────────────────────
     # ② 실시간 FFT (기존)
@@ -559,6 +562,7 @@ class FFTApp(App):
             try: accelerometer.disable()
             except Exception: pass
 
+    # ────────────── FFTApp._poll_accel (발췌) ──────────────
     def _poll_accel(self, dt):
         if not self.rt_on:
             return False
@@ -567,24 +571,20 @@ class FFTApp(App):
             if None in (ax, ay, az):
                 return
     
-            now   = time.time()
-            prev  = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
-            dt_samp = now - prev            # 실제 샘플 간격 (s)
+            now      = time.time()
+            prev     = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_samp  = now - prev
     
             def push(axis, raw):
-                # ── ① 버퍼에 (t, 값, Δt) 저장 ──
                 self.rt_buf[axis].append((now, raw, dt_samp))
-    
-                # ── ② 기록 중이면 CSV 에도 동일하게 저장 ──
+                # ──★ 녹음 중이면 CSV 에도 기록
                 if self.rec_on:
-                    csv.writer(self.rec_files[axis]).writerow([now, raw])
-                    # 100줄마다 디스크 플러시(선택)
-                    if len(self.rt_buf[axis]) % 100 == 0:
+                    rel_t = now - self.rec_start          # 0 s 기준
+                    csv.writer(self.rec_files[axis]).writerow([rel_t, raw])
+                    if len(self.rt_buf[axis]) % 200 == 0: # 가끔 flush
                         self.rec_files[axis].flush()
     
-            push('x', abs(ax))
-            push('y', abs(ay))
-            push('z', abs(az))
+            push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
     
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
