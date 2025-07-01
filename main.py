@@ -509,24 +509,44 @@ class FFTApp(App):
         self.rec_start=time.time()
         self.btn_rec.disabled=True
         self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
+        Clock.schedule_interval(self._record_poll, 1 / 50.0)  # 센서 읽기 간격: 50Hz 기준
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
 
     def _record_poll(self, dt):
-        if not self.rec_on: return False
-        now=time.time()
-        elapsed=now-self.rec_start
-        try: ax,ay,az = accelerometer.acceleration
+        if not self.rec_on:
+            return False
+    
+        try:
+            ax, ay, az = accelerometer.acceleration
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
-            ax=ay=az=None
-        if None not in (ax,ay,az):
-            t=elapsed
-            for ax_name,val in (('x',ax),('y',ay),('z',az)):
-                csv.writer(self.rec_files[ax_name]).writerow([t,val])
-        if int(elapsed*2)%1==0:
+            ax = ay = az = None
+    
+        if None in (ax, ay, az):
+            self.label.text = "Waiting for sensor…"
+            return True
+    
+        now = time.time()
+    
+        # 유효한 센서 값이 처음 들어온 시점에서부터 rec_start를 설정
+        if self.rec_start is None:
+            self.rec_start = now
+            elapsed = 0
+        else:
+            elapsed = now - self.rec_start
+    
+        # CSV 기록
+        for ax_name, val in (('x', ax), ('y', ay), ('z', az)):
+            csv.writer(self.rec_files[ax_name]).writerow([elapsed, val])
+    
+        # 레코딩 진행 상태 표시 (0.5초마다 업데이트)
+        if int(elapsed * 2) % 2 == 0:
             self.label.text = f"Recording {elapsed:4.1f}/{int(self.REC_DURATION)} s …"
-        if elapsed>=self.REC_DURATION:
-            self._stop_recording(); return False
+    
+        if elapsed >= self.REC_DURATION:
+            self._stop_recording()
+            return False
+    
         return True
 
     # ────────────── (선택) _stop_recording 정리 ──────────────
@@ -534,14 +554,22 @@ class FFTApp(App):
         if not self.rec_on:
             return
         for f in self.rec_files.values():
-            try: f.close()
-            except Exception: pass
+            try:
+                f.close()
+            except Exception:
+                pass
         self.rec_files.clear()
-        self.rec_on        = False
+        self.rec_on = False
         self.btn_rec.disabled = False
+        self.rec_start = None  # 다음 레코딩을 위해 초기화
+    
         if not self.rt_on:
-            try: accelerometer.disable()
-            except Exception: pass
+            try:
+                accelerometer.disable()
+            except Exception:
+                pass
+    
+        self.label.text = "✅ Recording complete!"
         self.log(f"✅ {int(self.REC_DURATION)} s recording finished!")
 
     # ──────────────────────────────────────────────────────────
