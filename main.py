@@ -102,21 +102,31 @@ sys.excepthook = _ex
 
 # ── SAF URI → 로컬 파일 경로 ────────────────────────────────────────
 def uri_to_file(u: str) -> str | None:
+    """
+    content://, file://, 절대경로 모두 → 실제 파일로 복사(또는 검증) 후 경로 반환
+    실패 시 None
+    """
     if not u:
         return None
+
+    # ① file:// 스킴
     if u.startswith("file://"):
-        real = urllib.parse.unquote(u[7:])
+        real = urllib.parse.unquote(u[7:])      # file:///sdcard/... → /sdcard/...
         return real if os.path.exists(real) else None
-    if not u.startswith("content://"):
-        return u if os.path.exists(u) else None
-    if ANDROID and SharedStorage:
+
+    # ② content:// (SAF)
+    if u.startswith("content://") and ANDROID and SharedStorage:
         try:
-            return SharedStorage().copy_from_shared(
-                u, uuid.uuid4().hex, to_downloads=False)
+            # Downloads/fft_tmp_xxx.csv 로 임시 복사
+            dst = SharedStorage().copy_from_shared(
+                    u, uuid.uuid4().hex+".csv", to_downloads=True)
+            return dst
         except Exception as e:
             Logger.error(f"SAF copy fail: {e}")
-    return None
+            return None
 
+    # ③ 이미 절대경로인 경우
+    return u if os.path.exists(u) else None
 
 def dashed_line(canvas, pts, dash=8, gap=6, **kw):
     """
