@@ -541,14 +541,26 @@ class FFTApp(App):
             ax, ay, az = accelerometer.acceleration
             if None in (ax, ay, az):
                 return
-            now = time.time()
     
-            # 직전 시각이 있으면 Δt 계산, 없으면 dt 파라미터 사용
-            def push(axis, val):
-                prev_t = self.rt_buf[axis][-1][0] if self.rt_buf[axis] else now - dt
-                self.rt_buf[axis].append((now, val, now - prev_t))
+            now   = time.time()
+            prev  = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_samp = now - prev            # 실제 샘플 간격 (s)
     
-            push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
+            def push(axis, raw):
+                # ── ① 버퍼에 (t, 값, Δt) 저장 ──
+                self.rt_buf[axis].append((now, raw, dt_samp))
+    
+                # ── ② 기록 중이면 CSV 에도 동일하게 저장 ──
+                if self.rec_on:
+                    csv.writer(self.rec_files[axis]).writerow([now, raw])
+                    # 100줄마다 디스크 플러시(선택)
+                    if len(self.rt_buf[axis]) % 100 == 0:
+                        self.rec_files[axis].flush()
+    
+            push('x', abs(ax))
+            push('y', abs(ay))
+            push('z', abs(az))
+    
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
     # ─────────────────────────────────────────────────────
