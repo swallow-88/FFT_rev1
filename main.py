@@ -126,7 +126,12 @@ def uri_to_file(u: str) -> str | None:
             return None
 
     # ③ 이미 절대경로인 경우
-    return u if os.path.exists(u) else None
+    if os.path.exists(u):
+        return u
+
+    # ④ 마지막 Fallback ― 권한 부족 등으로 열 수 없음
+    Logger.warning(f"uri_to_file: cannot access {u}")
+    return "NO_PERMISSION"        # 호출자에게 권한 문제임을 알림
 
 def dashed_line(canvas, pts, dash=8, gap=6, **kw):
     """
@@ -460,6 +465,16 @@ class FFTApp(App):
         else:
             request_permissions(need,_cb)
 
+        #   ★ 여기 넣어 두면 다른 메서드들이 쉽게 호출
+    # ──────────────────────────────────────────────
+    def _has_allfiles_perm(self) -> bool:
+        """
+        Android 11+ ‘모든-파일’(MANAGE_EXTERNAL_STORAGE) 권한 보유 여부
+        * Android 10 이하는 해당 권한 자체가 없으므로 True 반환
+        """
+        MANAGE = getattr(Permission, "MANAGE_EXTERNAL_STORAGE", None)
+        return not MANAGE or check_permission(MANAGE)
+
     # ──────────────────────────────────────────────────────────
     # ① 30 초 가속도 기록 기능
     # ──────────────────────────────────────────────────────────
@@ -650,6 +665,9 @@ class FFTApp(App):
             self.rt_on = False
             Clock.schedule_once(lambda *_: setattr(self.btn_rt, 'text',
                                                    'Realtime FFT (OFF)'))
+
+
+    
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
@@ -756,10 +774,16 @@ class FFTApp(App):
                 return
             except Exception as e:
                 Logger.exception("SAF picker fail"); self.log(f"SAF error: {e}")
+
+        # 권한이 없으면 filechooser → SAF 로 강제 전환
+        if ANDROID and not self._has_allfiles_perm():
+            self.log("Downloads 접근 권한 없음 → SAF 선택기로 전환")
+            SharedStorage().open_file(callback=self.on_choose,
+                                      multiple=True, mime_type="text/*")
+            return
+
         try:
-            filechooser.open_file(on_selection=self.on_choose,multiple=True,
-                                  filters=[("CSV","*.csv")],native=False,
-                                  path=DOWNLOAD_DIR)
+            filechooser.open_file(...)
         except Exception as e:
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
 
@@ -781,7 +805,17 @@ class FFTApp(App):
             real = uri_to_file(raw)
             if not real:
                 self.log("❌ 복사 실패"); return
+
+            if real in (None, "NO_PERMISSION"):
+                self.log("⚠️ Downloads 접근 권한이 없거나 복사 실패")
+                return                      # RUN 버튼 유지 OFF
             paths.append(real)
+            
+        if not paths:
+            self.btn_run.disabled = True
+            return
+            
+            
         self.paths=paths
         self.label.text=" · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled=False
