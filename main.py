@@ -254,7 +254,23 @@ def welch_band_stats(sig: np.ndarray,
 
     return band_rms, band_pk
 
+# ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
+def _merge_band_lines(line1, line2, tol=1e-4):
+    """
+    line1, line2 : [(centre_Hz, mag_dB), …]  형태
+    tol          : 주파수 매칭 허용 오차(Hz). 0.0001 → 0.1 mHz 단위 매칭
+    return       : [(centre, |y1-y2|), …]       (centre 순서는 line1 기준)
+    """
+    # line2 를 (round(centre/tol) → mag) 테이블로
+    tbl = {round(x/tol): y for x, y in line2}
 
+    diff = []
+    for x1, y1 in line1:
+        key = round(x1 / tol)
+        if key in tbl:
+            diff.append((x1, abs(y1 - tbl[key])))
+    return diff
+# --------------------------------------------------- #
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
     PAD_X, PAD_Y = 80, 50
@@ -960,22 +976,7 @@ class FFTApp(App):
     #  ─ 파일마다 dt → Nyquist → FMAX 를 계산해 그래프 폭 자동 확대
     # ─────────────────────────────────────────────────────
     # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
-    def _merge_band_lines(line1, line2, tol=1e-4):
-        """
-        line1, line2 : [(centre_Hz, mag_dB), …]  형태
-        tol          : 주파수 매칭 허용 오차(Hz). 0.0001 → 0.1 mHz 단위 매칭
-        return       : [(centre, |y1-y2|), …]       (centre 순서는 line1 기준)
-        """
-        # line2 를 (round(centre/tol) → mag) 테이블로
-        tbl = {round(x/tol): y for x, y in line2}
-    
-        diff = []
-        for x1, y1 in line1:
-            key = round(x1 / tol)
-            if key in tbl:
-                diff.append((x1, abs(y1 - tbl[key])))
-        return diff
-    # --------------------------------------------------- #
+------------------------- #
     def _fft_bg(self):
         try:
             all_sets, ym = [], 0.0          # [[rms,pk] …], y축 최대
@@ -1173,7 +1174,8 @@ class FFTApp(App):
 
             ymax = max(max(y for _, y in band_rms),
                        max(y for _, y in band_pk))
-            return band_rms, band_pk, 50, ymax
+            return band_rms, band_pk, min(MAX_FMAX, 0.5/dt), ymax
+
 
         except Exception as e:
             Logger.error(f"FFT csv err ({os.path.basename(path)}): {e}")
