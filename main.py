@@ -505,11 +505,12 @@ class FFTApp(App):
             try: accelerometer.disable()
             except Exception: pass
             return
-        self.rec_on=True
-        self.rec_start=time.time()
-        self.btn_rec.disabled=True
-        self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
-        Clock.schedule_interval(self._record_poll, 1 / 50.0)  # 센서 읽기 간격: 50Hz 기준
+        self.rec_on    = True
+        self.rec_start = None           # ← 첫 샘플이 들어온 시점에 정함
+        self.btn_rec.disabled = True
+        self.label.text = f"Recording … 0 / {int(self.REC_DURATION)} s"
+
+        # ⛔  Clock.schedule_interval(self._record_poll, …)  **삭제**
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
 
     def _record_poll(self, dt):
@@ -555,22 +556,17 @@ class FFTApp(App):
             return
         for f in self.rec_files.values():
             try:
-                f.close()
+                f.flush();  f.close()
             except Exception:
                 pass
         self.rec_files.clear()
-        self.rec_on = False
+        self.rec_on   = False
+        self.rec_start = None
         self.btn_rec.disabled = False
-        self.rec_start = None  # 다음 레코딩을 위해 초기화
-    
         if not self.rt_on:
-            try:
-                accelerometer.disable()
-            except Exception:
-                pass
-    
+            try: accelerometer.disable()
+            except Exception: pass
         self.label.text = "✅ Recording complete!"
-        self.log(f"✅ {int(self.REC_DURATION)} s recording finished!")
 
     # ──────────────────────────────────────────────────────────
     # ② 실시간 FFT (기존)
@@ -599,22 +595,26 @@ class FFTApp(App):
             if None in (ax, ay, az):
                 return
 
-            now = time.time()
-            prev = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
-            dt_samp = now - prev
+            now   = time.time()
 
-            # ✅ rec_start 기준 상대시간 사용
-            rel_time = now - self.rec_start if self.rec_start else 0
+            # ── Δt 계산 (실시간 FFT 용) ───────────────────
+            prev   = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_smp = now - prev
+
+            # ── rec_start 를 “첫 유효 샘플” 시점으로 맞춤 ──
+            if self.rec_on and self.rec_start is None:
+                self.rec_start = now
+            rel_t = (now - self.rec_start) if self.rec_on and self.rec_start else 0
 
             def push(axis, raw):
-                self.rt_buf[axis].append((now, raw, dt_samp))
-                if self.rec_on and axis in self.rec_files:
-                    # ✅ 상대 시간으로 기록
-                    csv.writer(self.rec_files[axis]).writerow([rel_time, raw])
+                # ① FFT 버퍼
+                self.rt_buf[axis].append((now, raw, dt_smp))
 
-            push('x', abs(ax))
-            push('y', abs(ay))
-            push('z', abs(az))
+                # ② CSV 저장(레코딩 중일 때만)
+                if self.rec_on and axis in self.rec_files:
+                    csv.writer(self.rec_files[axis]).writerow([rel_t, raw])
+
+            push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
 
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
@@ -829,8 +829,15 @@ class FFTApp(App):
                 filters=[("CSV", "*.csv")],
                 path=DOWNLOAD_DIR
             )
+            return                              # ← 성공 시 바로 return
         except Exception as e:
             self.log(f"파일 선택기를 열 수 없습니다: {e}")
+            # 마지막 Fallback: SAF
+            if ANDROID and SharedStorage:
+                SharedStorage().open_file(
+                    callback=self.on_choose,
+                    multiple=True, mime_type="text/*")
+                
 
     def _goto_allfiles_permission(self):
         from jnius import autoclass
@@ -843,20 +850,19 @@ class FFTApp(App):
             Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
 
     # ↳ ❶  on_choose 시그니처 수정
-    def on_choose(self, sel, *_) :
-        """
-        sel : [path1, path2, ...]  또는 [uri1, uri2, ...]
-        *_  : 버전별 추가 인자 무시
-        """
-        if not sel:                # 취소
+    def on_choose(self, sel, *_):
+        if not sel:
             return
+
         paths = []
-        for raw in sel[:3]:        # 최대 3개(X,Y,Z)까지
+        for raw in sel[:3]:
             real = uri_to_file(raw)
+            if real == "NO_PERMISSION":
+                self.log("❌ Downloads 접근 권한 없음 — SAF 로 열어 주세요"); return
             if not real:
-                self.log("❌ 복사 실패"); return
-            paths.append(real)
-    
+                self.log("❌ 파일 복사 실패"); return
+            paths.append(real)           # ← 제대로 들여쓰기
+
         self.paths = paths
         self.label.text = " · ".join(os.path.basename(p) for p in paths)
         self.btn_run.disabled = False
