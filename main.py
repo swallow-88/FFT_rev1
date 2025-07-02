@@ -25,7 +25,7 @@ from plyer               import filechooser     # (SAF 실패 시 fallback)
 from kivy.uix.spinner import Spinner
 
 # ---------- 사용자 조정값 ---------- #
-BAND_HZ     = 2.0
+BAND_HZ     = 0.2
 REF_MM_S    = 0.01
 REF_ACC = 0.981
 MEAS_MODE = "VEL"
@@ -40,8 +40,8 @@ FN_BAND     = (5, 50)   # ← 이렇게만 변경
 THR_DF      = 0.5       # ΔF 경고 임계값 (필요 시 그대로)
 # ----------------------------------- #
 
-BUF_LEN   = 2048       # Realtime 버퍼 길이
-MIN_LEN   = 1024          # FFT 돌리기 전 최소 샘플 수
+BUF_LEN   = 16384      # Realtime 버퍼 길이
+MIN_LEN   = 8192          # FFT 돌리기 전 최소 샘플 수
 
 
 # ── Android 전용 모듈 ───────────────────────────────────────────────
