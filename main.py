@@ -478,41 +478,47 @@ class FFTApp(App):
     # ──────────────────────────────────────────────────────────
     # ① 30 초 가속도 기록 기능
     # ──────────────────────────────────────────────────────────
-    def start_recording(self,*_):
+    # ──────────────────────────────────────────────
+    # ① start_recording : *Realtime FFT 자동 On* + 타이머 정리
+    # ──────────────────────────────────────────────
+    def start_recording(self, *_):
         if self.rec_on:
             self.log("이미 기록 중입니다"); return
+        # 센서 시작 (Realtime FFT가 OFF라도 enable 필요)
         try:
             accelerometer.enable()
-        except (NotImplementedError,Exception) as e:
+        except (NotImplementedError, Exception) as e:
             self.log(f"센서 사용 불가: {e}"); return
-        # ★ 저장 폴더: 기기별 실제 Downloads 경로
+    
+        # ★ Realtime FFT가 꺼져 있으면 켠다 ────────────────
+        if not self.rt_on:
+            self.toggle_realtime()          # 버튼 텍스트까지 자동 갱신
+    
+        # CSV 3 개(x,y,z) 준비
         save_dir = DOWNLOAD_DIR
-        ok=True
-        ts=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.rec_files = {}
         try:
             os.makedirs(save_dir, exist_ok=True)
-            self.rec_files={}
-            for ax in ('x','y','z'):
-                path=os.path.join(save_dir, f"acc_{ax}_{ts}.csv")
-                f=open(path,"w",newline="",encoding="utf-8")
-                csv.writer(f).writerow(["time","acc"])
-                self.rec_files[ax]=f
-            self.log(f"📥 저장 위치: {save_dir}")
+            for ax in ('x', 'y', 'z'):
+                fp = open(os.path.join(save_dir, f"acc_{ax}_{ts}.csv"),
+                          "w", newline="", encoding="utf-8")
+                csv.writer(fp).writerow(["time", "acc"])
+                self.rec_files[ax] = fp
         except Exception as e:
             self.log(f"파일 열기 실패: {e}")
-            ok=False
-        if not ok:
-            try: accelerometer.disable()
-            except Exception: pass
+            accelerometer.disable()
             return
+    
+        # 녹음 상태 플래그
         self.rec_on    = True
-        self.rec_start = None           # ← 첫 샘플이 들어온 시점에 정함
+        self.rec_start = time.time()        # ↔ _poll_accel() 과 공유
         self.btn_rec.disabled = True
-        self.label.text = f"Recording … 0 / {int(self.REC_DURATION)} s"
-
-        # ⛔  Clock.schedule_interval(self._record_poll, …)  **삭제**
+        self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
+    
+        # REC_DURATION 뒤 자동 종료
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
-
+    
     def _record_poll(self, dt):
         if not self.rec_on:
             return False
@@ -551,22 +557,21 @@ class FFTApp(App):
         return True
 
     # ────────────── (선택) _stop_recording 정리 ──────────────
+    # ──────────────────────────────────────────────
+    # ③ _stop_recording : 타이머 해제만 하고 Realtime FFT는 건드리지 않음
+    # ──────────────────────────────────────────────
     def _stop_recording(self, *_):
         if not self.rec_on:
             return
         for f in self.rec_files.values():
-            try:
-                f.flush();  f.close()
-            except Exception:
-                pass
-        self.rec_files.clear()
-        self.rec_on   = False
-        self.rec_start = None
-        self.btn_rec.disabled = False
-        if not self.rt_on:
-            try: accelerometer.disable()
+            try: f.close()
             except Exception: pass
-        self.label.text = "✅ Recording complete!"
+        self.rec_files.clear()
+        self.rec_on      = False
+        self.btn_rec.disabled = False
+    
+        self.log("✅ Recording complete!")
+        self.label.text = "Recording complete!"
 
     # ──────────────────────────────────────────────────────────
     # ② 실시간 FFT (기존)
@@ -587,6 +592,10 @@ class FFTApp(App):
             except Exception: pass
 
     # ────────────── FFTApp._poll_accel (발췌) ──────────────
+    # ──────────────────────────────────────────────
+    # ② _poll_accel : 이미 들어가 있던 “CSV 기록” 블록만 확인
+    #    (self.rec_start 기준 상대시간 저장)
+    # ──────────────────────────────────────────────
     def _poll_accel(self, dt):
         if not self.rt_on:
             return False
@@ -594,28 +603,19 @@ class FFTApp(App):
             ax, ay, az = accelerometer.acceleration
             if None in (ax, ay, az):
                 return
-
-            now   = time.time()
-
-            # ── Δt 계산 (실시간 FFT 용) ───────────────────
-            prev   = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
-            dt_smp = now - prev
-
-            # ── rec_start 를 “첫 유효 샘플” 시점으로 맞춤 ──
-            if self.rec_on and self.rec_start is None:
-                self.rec_start = now
-            rel_t = (now - self.rec_start) if self.rec_on and self.rec_start else 0
-
+    
+            now = time.time()
+            prev     = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
+            dt_samp  = now - prev
+            rel_time = now - (self.rec_start or now)   # ★ 상대 t (s)
+    
             def push(axis, raw):
-                # ① FFT 버퍼
-                self.rt_buf[axis].append((now, raw, dt_smp))
-
-                # ② CSV 저장(레코딩 중일 때만)
+                self.rt_buf[axis].append((now, raw, dt_samp))
                 if self.rec_on and axis in self.rec_files:
-                    csv.writer(self.rec_files[axis]).writerow([rel_t, raw])
-
+                    csv.writer(self.rec_files[axis]).writerow([rel_time, raw])
+    
             push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
-
+    
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
     # ─────────────────────────────────────────────────────
