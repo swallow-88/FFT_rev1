@@ -596,6 +596,7 @@ class FFTApp(App):
     # ② _poll_accel : 이미 들어가 있던 “CSV 기록” 블록만 확인
     #    (self.rec_start 기준 상대시간 저장)
     # ──────────────────────────────────────────────
+    # ── class FFTApp 내부 ──────────────────────────
     def _poll_accel(self, dt):
         if not self.rt_on:
             return False
@@ -604,17 +605,26 @@ class FFTApp(App):
             if None in (ax, ay, az):
                 return
     
-            now = time.time()
+            now      = time.time()
             prev     = self.rt_buf['x'][-1][0] if self.rt_buf['x'] else now - dt
             dt_samp  = now - prev
-            rel_time = now - (self.rec_start or now)   # ★ 상대 t (s)
+            rel_time = now - (self.rec_start or now)          # ← 녹음 상대시간
     
+            # --------- 버퍼·CSV 기록 ---------
             def push(axis, raw):
                 self.rt_buf[axis].append((now, raw, dt_samp))
                 if self.rec_on and axis in self.rec_files:
                     csv.writer(self.rec_files[axis]).writerow([rel_time, raw])
     
             push('x', abs(ax));  push('y', abs(ay));  push('z', abs(az))
+    
+            # --------- ★ 진행 라벨 업데이트 ---------
+            if self.rec_on:
+                # 0.5 초마다 한 번만 갱신
+                if now - getattr(self, "_label_tick", 0) >= 0.5:
+                    self.label.text = (
+                        f"Recording {rel_time:4.1f}/{int(self.REC_DURATION)} s …")
+                    self._label_tick = now
     
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
