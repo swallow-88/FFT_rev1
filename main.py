@@ -25,7 +25,7 @@ from plyer               import filechooser     # (SAF 실패 시 fallback)
 from kivy.uix.spinner import Spinner
 
 # ---------- 사용자 조정값 ---------- #
-BAND_HZ     = 0.2
+BAND_HZ     = 0.5
 REF_MM_S    = 0.01
 REF_ACC = 0.981
 MEAS_MODE = "VEL"
