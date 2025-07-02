@@ -41,7 +41,7 @@ THR_DF      = 0.5       # ΔF 경고 임계값 (필요 시 그대로)
 # ----------------------------------- #
 
 BUF_LEN   = 16384      # Realtime 버퍼 길이
-MIN_LEN   = 8192          # FFT 돌리기 전 최소 샘플 수
+MIN_LEN   = 256          # FFT 돌리기 전 최소 샘플 수
 
 
 # ── Android 전용 모듈 ───────────────────────────────────────────────
@@ -187,10 +187,77 @@ def smooth_y(vals, n=None):
     kernel = np.ones(n)/n
     return np.convolve(vals, kernel, mode="same")
 
+# ── Welch 스펙트럼 -------------------------------------------------
+def welch_band_stats(sig: np.ndarray,
+                     fs: float,
+                     f_lo: float = HPF_CUTOFF,
+                     f_hi: float = MAX_FMAX,
+                     band_w: float = BAND_HZ,
+                     seg_n: int | None = None,
+                     overlap: float = 0.5):
+    """
+    sig         : 1-D 시계열 (평균 제거·윈도우링은 여기서 처리)
+    fs          : 샘플링 주파수 [Hz]
+    f_lo, f_hi  : 분석 대역
+    band_w      : 밴드 폭
+    seg_n       : 세그먼트 길이(샘플).  None → fs*4 (= 약4초)로 자동
+    overlap     : 0~1, 일반적 0.5
+    return      : [(centre, RMSdB), …] , [(centre, PKdB), …]
+    """
+    # ── 세그먼트 길이 · 창 준비 ───────────────────────
+    if seg_n is None:
+        seg_n = int(fs * 4)          # 4 s 구간
+    step   = int(seg_n * (1 - overlap))
+    win    = np.hanning(seg_n)
+
+    # ── 구간별 FFT → 파워 스펙트럼 누적 ─────────────
+    spec_sum = None
+    ptr = 0
+    while ptr + seg_n <= len(sig):
+        seg = (sig[ptr:ptr+seg_n] - sig[ptr:ptr+seg_n].mean()) * win
+        raw = np.fft.rfft(seg)
+        ps  = (np.abs(raw) ** 2) / (np.sum(win**2) * fs)  # PSD
+        spec_sum = ps if spec_sum is None else spec_sum + ps
+        ptr += step
+
+    if spec_sum is None:                 # 데이터 부족
+        return [], []
+
+    psd = spec_sum / ((ptr - step)//step + 1)  # 평균
+    freq = np.fft.rfftfreq(seg_n, d=1/fs)
+
+    # 필요 대역 자르기
+    msel = (freq >= f_lo) & (freq <= f_hi)
+    freq, psd = freq[msel], psd[msel]
+    amp_a = np.sqrt(psd * 2)              # 1-sided → RMS 가속도
+
+    # 선형단위 변환
+    amp_lin, REF0 = acc_to_spec(freq, amp_a)
+
+    # ── 대역별 RMS/Peak dB ─────────────────────────
+    band_rms, band_pk = [], []
+    for lo in np.arange(f_lo, f_hi, band_w):
+        hi = lo + band_w
+        s  = (freq >= lo) & (freq < hi)
+        if not s.any():
+            continue
+        rms = np.sqrt(np.mean(amp_lin[s] ** 2))
+        pk  = amp_lin[s].max()
+        cen = (lo + hi) / 2
+        band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
+        band_pk .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
+
+    # 선택적 스무딩
+    if len(band_rms) >= SMOOTH_N:
+        y_sm = smooth_y([y for _, y in band_rms])
+        band_rms = list(zip([x for x, _ in band_rms], y_sm))
+
+    return band_rms, band_pk
+
 
 # ── 그래프 위젯 (Y축 고정 · 세미로그 · 좌표 캐스팅) ───────────────
 class GraphWidget(Widget):
-    PAD_X, PAD_Y = 80, 30
+    PAD_X, PAD_Y = 80, 50
 
     #            0        1        2        3        4        5
     COLORS   = [(1,0,0), (1,1,0), (0,0,1), (0,1,1), (0,1,0), (1,0,1)]
@@ -395,6 +462,8 @@ class GraphWidget(Widget):
                         color=(1,1,0,1))
             lbl._peak = True
             self.add_widget(lbl)
+            
+    # ── FFTApp 클래스 정의 "바로 위" (아니면 파일 맨 아래도 OK) ──
 
 
 # ── 메인 앱 ────────────────────────────────────────────────────────
@@ -635,91 +704,74 @@ class FFTApp(App):
     # ─────────────────────────────────────────────────────
     #  실시간 FFT 루프 – 2 Hz 대역 RMS·Peak 표시
     # ─────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
+    #  실시간 FFT (Welch + 가변 FMAX)
+    # ──────────────────────────────────────────────────────────
     def _rt_fft_loop(self):
         """
-        실시간 2 Hz 대역-RMS/Peak 스펙트럼 계산.
-        ─ 센서 샘플 간격(dt)을 매번 계산 → Nyquist(Hz)까지 표시
-        ─ MAX_FMAX(전역 값)보다 크면 잘라-표시
+        * 0.5 s 마다 버퍼를 Welch-FFT 로 분석
+        * 실시간 샘플링 주파수(fs) → Nyquist 까지, MAX_FMAX 로 컷
+        * BAND_HZ 해상도로 RMS·Peak 를 그린다
         """
         try:
             while self.rt_on:
                 time.sleep(0.5)
 
-                # 버퍼 길이 체크
+                # 버퍼 길이 부족 → skip
                 if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x', 'y', 'z')):
                     continue
 
-                datasets, ymax = [], 0
-                FMAX_global    = 0      # 그래프 x축 최댓값(세 축 중 최대)
+                datasets, ymax, FMAX_global = [], 0, 0
 
                 for axis in ('x', 'y', 'z'):
-
-                    # ── 버퍼 꺼내기 ───────────────────────────
+                    # ── 버퍼 꺼내기 ─────────────────────
                     ts, val, dt_arr = zip(*self.rt_buf[axis])
-                    dt   = np.median(dt_arr[-128:])        # 최근 128개 Δt 중앙값
-                    if dt <= 0:
+                    fs = 1.0 / np.median(dt_arr[-512:])        # 최근 샘플링 주파수
+                    if fs <= 0:
                         continue
 
-                    nyq  = 0.5 / dt                        # Nyquist
-                    FMAX = int(min(nyq, MAX_FMAX))         # 그래프 상한
-                    if FMAX < HPF_CUTOFF + BAND_HZ:        # 표시에 충분치 않음
+                    nyq     = fs * 0.5
+                    f_hi    = min(nyq, MAX_FMAX)
+                    if f_hi < HPF_CUTOFF + BAND_HZ:
                         continue
 
-                    # ── FFT ───────────────────────────────
-                    sig   = (np.asarray(val) - np.mean(val)) * np.hanning(len(val))
-                    raw   = np.fft.fft(sig)
-                    amp_a = 2*np.abs(raw[:len(val)//2]) / (len(val)*np.sqrt(2))
-                    freq  = np.fft.fftfreq(len(val), d=dt)[:len(val)//2]
+                    sig = np.asarray(val, float)
 
-                    sel   = (freq >= HPF_CUTOFF) & (freq <= FMAX)
-                    freq, amp_a = freq[sel], amp_a[sel]
-                    if freq.size == 0:
+                    # ── Welch 스펙트럼 → 대역 RMS/Peak ───
+                    band_rms, band_pk = welch_band_stats(
+                        sig, fs,
+                        f_lo = HPF_CUTOFF,
+                        f_hi = f_hi,
+                        band_w = BAND_HZ)
+
+                    if not band_rms:
                         continue
-
-                    amp_lin, REF0 = acc_to_spec(freq, amp_a)
-
-                    # ── 2 Hz 대역 RMS/Peak ─────────────────
-                    band_rms, band_pk = [], []
-                    for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
-                        hi  = lo + BAND_HZ
-                        s   = (freq >= lo) & (freq < hi)
-                        if not s.any():
-                            continue
-                        rms = np.sqrt(np.mean(amp_lin[s]**2))
-                        pk  = amp_lin[s].max()
-                        cen = (lo + hi) / 2
-                        band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
-                        band_pk .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
-
-                    if len(band_rms) >= SMOOTH_N:
-                        y_sm = smooth_y([y for _, y in band_rms])
-                        band_rms = list(zip([x for x, _ in band_rms], y_sm))
 
                     # 공진수 추적
                     loF, hiF = FN_BAND
-                    if band_rms:
-                        c = np.array([x for x, _ in band_rms])
-                        m = np.array([y for _, y in band_rms])
-                        s = (c >= loF) & (c <= hiF)
-                        if s.any():
-                            self.last_fn = c[s][m[s].argmax()]
+                    c = np.array([x for x, _ in band_rms])
+                    m = np.array([y for _, y in band_rms])
+                    s = (c >= loF) & (c <= hiF)
+                    if s.any():
+                        self.last_fn = c[s][m[s].argmax()]
 
                     datasets += [band_rms, band_pk]
-                    ymax      = max(ymax,
-                                    max(y for _, y in band_rms),
-                                    max(y for _, y in band_pk))
-                    FMAX_global = max(FMAX_global, FMAX)
+                    ymax       = max(ymax,
+                                     max(y for _, y in band_rms),
+                                     max(y for _, y in band_pk))
+                    FMAX_global = max(FMAX_global, f_hi)
 
-                # 그래프 업데이트
+                # ── 그래프 갱신 ─────────────────────────
                 if datasets:
                     Clock.schedule_once(
-                        lambda *_: self.graph.update_graph(datasets, [], FMAX_global, ymax))
+                        lambda *_:
+                            self.graph.update_graph(datasets, [], FMAX_global, ymax))
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
-            Clock.schedule_once(lambda *_: setattr(self.btn_rt, 'text',
-                                                   'Realtime FFT (OFF)'))
+            Clock.schedule_once(lambda *_:
+                setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
 
     
     # ── UI 구성 ───────────────────────────────────────────────
@@ -895,12 +947,35 @@ class FFTApp(App):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
+    ########################################################################
+    ### PATCH BEGIN ―  _diff 안전화 + 0.5 Hz bin 대응 #######################
+    ########################################################################
+    # FFTApp 클래스 안쪽, _fft_bg() 선언 **바로 위** 아무곳에 넣어 두면 됩니다.
 
+    ########################################################################
+    ### PATCH END ##########################################################
     #   CSV 1 ~ 2개 FFT → 2 Hz 대역 RMS‧Peak + ΔF 계산
     # ─────────────────────────────────────────────────────
     #  CSV 1~3개 FFT → 2 Hz 대역 RMS·Peak + ΔF
     #  ─ 파일마다 dt → Nyquist → FMAX 를 계산해 그래프 폭 자동 확대
     # ─────────────────────────────────────────────────────
+    # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
+    def _merge_band_lines(line1, line2, tol=1e-4):
+        """
+        line1, line2 : [(centre_Hz, mag_dB), …]  형태
+        tol          : 주파수 매칭 허용 오차(Hz). 0.0001 → 0.1 mHz 단위 매칭
+        return       : [(centre, |y1-y2|), …]       (centre 순서는 line1 기준)
+        """
+        # line2 를 (round(centre/tol) → mag) 테이블로
+        tbl = {round(x/tol): y for x, y in line2}
+    
+        diff = []
+        for x1, y1 in line1:
+            key = round(x1 / tol)
+            if key in tbl:
+                diff.append((x1, abs(y1 - tbl[key])))
+        return diff
+    # --------------------------------------------------- #
     def _fft_bg(self):
         try:
             all_sets, ym = [], 0.0          # [[rms,pk] …], y축 최대
@@ -973,8 +1048,16 @@ class FFTApp(App):
                     self.graph.update_graph([r, p], [], FMAX_global, ym))
             else:
                 (r1, p1), (r2, p2) = all_sets[:2]
-                diff = [(x, abs(y1 - y2) + self.OFFSET_DB)
-                        for (x, y1), (_, y2) in zip(r1, r2)]
+                ########################################################################
+                ### PATCH ② – diff 계산 안전화 #########################################
+                ########################################################################
+                # centre 값(Hz)이 반드시 1:1 순서 맞는다는 가정 대신, 매칭 함수 사용
+                diff_core = _merge_band_lines(r1, r2)      # ← crash 방지 핵심!
+                if not diff_core:
+                    raise ValueError("두 CSV 의 주파수 격자가 일치하지 않습니다.")
+                diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
+                ########################################################################
+                ### END PATCH ② #######################################################
                 ym = max(ym, max(y for _, y in diff))
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([r1, p1, r2, p2],
