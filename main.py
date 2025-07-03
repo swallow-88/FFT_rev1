@@ -43,6 +43,10 @@ THR_DF      = 0.5       # ΔF 경고 임계값 (필요 시 그대로)
 BUF_LEN   = 16384      # Realtime 버퍼 길이
 MIN_LEN   = 256          # FFT 돌리기 전 최소 샘플 수
 
+# ---------- 사용자 조정값 ---------- #
+WELCH_SEC   = 1.0    # ← ① 스펙트럼 윈도 길이(초)
+WELCH_OVLP  = 0.75   # ← ② overlap 비율(0~1)
+REFRESH     = 0.2    # ← ③ 실시간 갱신 주기(초)
 
 # ── Android 전용 모듈 ───────────────────────────────────────────────
 ANDROID = platform == "android"
@@ -193,67 +197,68 @@ def welch_band_stats(sig: np.ndarray,
                      f_lo: float = HPF_CUTOFF,
                      f_hi: float = MAX_FMAX,
                      band_w: float = BAND_HZ,
-                     seg_n: int | None = None,
-                     overlap: float = 0.5):
+                     seg_sec: float = None,          # ← 윈도 길이(초) 직접 지정
+                     overlap: float = None):         # ← 겹치기 비율
     """
-    sig         : 1-D 시계열 (평균 제거·윈도우링은 여기서 처리)
-    fs          : 샘플링 주파수 [Hz]
-    f_lo, f_hi  : 분석 대역
-    band_w      : 밴드 폭
-    seg_n       : 세그먼트 길이(샘플).  None → fs*4 (= 약4초)로 자동
-    overlap     : 0~1, 일반적 0.5
-    return      : [(centre, RMSdB), …] , [(centre, PKdB), …]
+    sig  : 1-D 시계열
+    fs   : 샘플링 주파수 [Hz]
+    seg_sec : Welch 윈도 길이(초).  None → WELCH_SEC 전역값
+    overlap : 0~1. None → WELCH_OVLP 전역값
+    반환   : (band_rms, band_pk)
     """
-    # ── 세그먼트 길이 · 창 준비 ───────────────────────
-    if seg_n is None:
-        seg_n = int(fs * 4)          # 4 s 구간
-    step   = int(seg_n * (1 - overlap))
-    win    = np.hanning(seg_n)
-
-    # ── 구간별 FFT → 파워 스펙트럼 누적 ─────────────
-    spec_sum = None
-    ptr = 0
-    while ptr + seg_n <= len(sig):
-        seg = (sig[ptr:ptr+seg_n] - sig[ptr:ptr+seg_n].mean()) * win
-        raw = np.fft.rfft(seg)
-        ps  = (np.abs(raw) ** 2) / (np.sum(win**2) * fs)  # PSD
-        spec_sum = ps if spec_sum is None else spec_sum + ps
-        ptr += step
-
-    if spec_sum is None:                 # 데이터 부족
+    # ── 파라미터 결정 ───────────────────────────────
+    if seg_sec is None:
+        seg_sec = WELCH_SEC          # 예: 1.0 s
+    if overlap is None:
+        overlap = WELCH_OVLP         # 예: 0.75
+    seg_n = int(fs * seg_sec)        # 샘플 개수
+    if seg_n < 32:                   # 너무 짧으면 무시
         return [], []
 
-    psd = spec_sum / ((ptr - step)//step + 1)  # 평균
+    step = max(1, int(seg_n * (1 - overlap)))
+    win  = np.hanning(seg_n)
+
+    # ── 구간별 PSD 누적 ────────────────────────────
+    ps_sum, n_seg, ptr = None, 0, 0
+    while ptr + seg_n <= len(sig):
+        seg = (sig[ptr:ptr+seg_n] - sig[ptr:ptr+seg_n].mean()) * win
+        ps  = (np.abs(np.fft.rfft(seg)) ** 2) / (np.sum(win**2) * fs)
+        ps_sum = ps if ps_sum is None else ps_sum + ps
+        n_seg += 1
+        ptr += step
+    if n_seg == 0:
+        return [], []
+
+    psd  = ps_sum / n_seg
     freq = np.fft.rfftfreq(seg_n, d=1/fs)
 
-    # 필요 대역 자르기
-    msel = (freq >= f_lo) & (freq <= f_hi)
-    freq, psd = freq[msel], psd[msel]
-    amp_a = np.sqrt(psd * 2)              # 1-sided → RMS 가속도
+    # ── 관심 대역 자르기 ───────────────────────────
+    sel = (freq >= f_lo) & (freq <= f_hi)
+    freq, psd = freq[sel], psd[sel]
+    amp_a = np.sqrt(psd * 2)                # 1-sided → RMS 가속도
 
-    # 선형단위 변환
+    # ── 가속도→속도 변환 & 0 dB 기준 적용 ──────────
     amp_lin, REF0 = acc_to_spec(freq, amp_a)
 
-    # ── 대역별 RMS/Peak dB ─────────────────────────
+    # ── 밴드별 RMS / Peak 계산 ─────────────────────
     band_rms, band_pk = [], []
     for lo in np.arange(f_lo, f_hi, band_w):
-        hi = lo + band_w
-        s  = (freq >= lo) & (freq < hi)
+        hi  = lo + band_w
+        s   = (freq >= lo) & (freq < hi)
         if not s.any():
             continue
-        rms = np.sqrt(np.mean(amp_lin[s] ** 2))
+        rms = np.sqrt(np.mean(amp_lin[s]**2))
         pk  = amp_lin[s].max()
-        cen = (lo + hi) / 2
+        cen = (lo + hi) * 0.5
         band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
         band_pk .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-    # 선택적 스무딩
-    if len(band_rms) >= SMOOTH_N:
-        y_sm = smooth_y([y for _, y in band_rms])
-        band_rms = list(zip([x for x, _ in band_rms], y_sm))
+    # ── 선택적 스무딩 ───────────────────────────────
+    if len(band_rms) >= SMOOTH_N and SMOOTH_N > 1:
+        y_s = smooth_y([y for _, y in band_rms])
+        band_rms = list(zip([x for x, _ in band_rms], y_s))
 
     return band_rms, band_pk
-
 # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
 def _merge_band_lines(line1, line2, tol=1e-4):
     """
@@ -744,7 +749,7 @@ class FFTApp(App):
         """
         try:
             while self.rt_on:
-                time.sleep(0.5)
+                time.sleep(REFRESH)   # ★ 0.2 초마다 갱신
 
                 # 버퍼 길이 부족 → skip
                 if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x', 'y', 'z')):
