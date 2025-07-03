@@ -1074,7 +1074,10 @@ class FFTApp(App):
                     diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
                 # #######################################################################
                 # ## END PATCH ② #######################################################
-                ym = max(ym, max(y for _, y in diff))
+                # … diff 계산 직후
+                if diff:                                       # ← 빈 리스트면 건너뜀
+                    ym = max(ym, max(y for _, y in diff))
+                
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([r1, p1, r2, p2],
                                             diff, FMAX_global, ym))
