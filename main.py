@@ -520,7 +520,7 @@ class FFTApp(App):
         diff     : ΔF 라인 (없으면 [])
         """
         for i, g in enumerate(self.graphs):
-            if i == index and datasets:
+            if i == index and (datasets or diff):
                 g.update_graph(datasets, diff or [], xmax, ymax_est)
             else:                                   # 사용 안 하는 창은 비움
                 g.update_graph([], [], 1, 0)
@@ -1077,106 +1077,91 @@ class FFTApp(App):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
-    #   CSV 1 ~ 2개 FFT → 2 Hz 대역 RMS‧Peak + ΔF 계산
-    # ─────────────────────────────────────────────────────
-    #  CSV 1~3개 FFT → 2 Hz 대역 RMS·Peak + ΔF
-    #  ─ 파일마다 dt → Nyquist → FMAX 를 계산해 그래프 폭 자동 확대
-    # ─────────────────────────────────────────────────────
-    # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
-
+    # ──────────────────────────────────────────────────────────
+    #  CSV 1~2개 FFT → 밴드-RMS / Peak(dB) + ΔF, 3-분할 그래프 출력
+    # ──────────────────────────────────────────────────────────
     def _fft_bg(self):
         try:
-            all_sets, ym = [], 0.0          # [[rms,pk] …], y축 최대
-            FMAX_global  = 0                # x-축 최댓값 (모든 파일 중)
+            all_sets, ym = [], 0.0          # [[rms, pk] …], y-축 최대치
+            FMAX_global  = 0.0              # x-축 최댓값(모든 파일 중)
 
+            # ── ① 파일별 FFT ──────────────────────────────────
             for path in self.paths:
                 t, a = self._load_csv(path)
                 if t is None:
                     raise ValueError(f"{os.path.basename(path)}: CSV parse fail")
 
-                # ── ① dt · Nyquist · FMAX 계산 ──────────────────
-                dt  = np.median(np.diff(t))          # 센서 주기(중앙값)
-                if dt <= 0:                          # 파일 타임스탬프 이상
+                # 샘플 주기/최대 주파수
+                dt   = np.median(np.diff(t))
+                if dt <= 0:
                     raise ValueError("non-positive dt")
-                nyq   = 0.5 / dt
-                FMAX  = int(min(nyq, MAX_FMAX))
+                nyq  = 0.5 / dt
+                FMAX = int(min(nyq, MAX_FMAX))
                 if FMAX < HPF_CUTOFF + BAND_HZ:
-                    raise ValueError("sample-rate too low")
+                    raise ValueError("sample rate too low")
 
-                # ── ② FFT ───────────────────────────────────────
+                # FFT (RMS 가속도)
                 sig   = (a - a.mean()) * np.hanning(len(a))
-                raw   = np.fft.fft(sig)
-                amp_a = 2*np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
+                amp_a = 2*np.abs(np.fft.fft(sig)[:len(a)//2]) / (len(a)*np.sqrt(2))
                 freq  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
 
                 sel   = (freq >= HPF_CUTOFF) & (freq <= FMAX)
                 freq, amp_a = freq[sel], amp_a[sel]
-                if freq.size == 0:
+                if not freq.size:
                     raise ValueError("no data in band")
 
                 amp_lin, REF0 = acc_to_spec(freq, amp_a)
 
-                # ── ③ 2 Hz 대역 RMS / Peak ─────────────────────
+                # ② 밴드-RMS / Peak
                 rms_line, pk_line = [], []
                 for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
                     hi  = lo + BAND_HZ
-                    s   = (freq >= lo) & (freq < hi)
-                    if not s.any():
+                    m   = (freq >= lo) & (freq < hi)
+                    if not m.any():
                         continue
-                    rms = np.sqrt(np.mean(amp_lin[s]**2))
-                    pk  = amp_lin[s].max()
-                    cen = (lo + hi) / 2
+                    rms = np.sqrt(np.mean(amp_lin[m]**2))
+                    pk  = amp_lin[m].max()
+                    cen = (lo + hi) * 0.5
                     rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
                     pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-                if len(rms_line) >= SMOOTH_N:
+                if len(rms_line) >= SMOOTH_N and SMOOTH_N > 1:
                     y_sm = smooth_y([y for _, y in rms_line])
                     rms_line = list(zip([x for x, _ in rms_line], y_sm))
 
-                # 공진 주파수 저장
-                loF, hiF = FN_BAND
-                if rms_line:
-                    c = np.array([x for x, _ in rms_line])
-                    m = np.array([y for _, y in rms_line])
-                    s = (c >= loF) & (c <= hiF)
-                    if s.any():
-                        self.last_fn = c[s][m[s].argmax()]
+                # 공진수 추적
+                c = np.array([x for x, _ in rms_line])
+                m = np.array([y for _, y in rms_line])
+                selF = (c >= FN_BAND[0]) & (c <= FN_BAND[1])
+                if selF.any():
+                    self.last_fn = c[selF][m[selF].argmax()]
 
-                # 누적
                 all_sets.append([rms_line, pk_line])
-                ym          = max(ym,
-                                  max(y for _, y in rms_line),
-                                  max(y for _, y in pk_line))
+                ym          = max(ym, max(y for _, y in rms_line), max(y for _, y in pk_line))
                 FMAX_global = max(FMAX_global, FMAX)
 
-            # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
-            # ▶▶▶ _fft_bg() 의 “그래프 갱신 & ΔF” 부분 교체 ◀◀◀
-            # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
-            if len(all_sets) == 1:                      # CSV 1 개
+            # ── ③ 그래프 분배 ─────────────────────────────────
+            if len(all_sets) == 1:
                 r, p = all_sets[0]
-                Clock.schedule_once(lambda *_: (
-                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym),   # 0번 창
-                    self._draw_to_graph(1, [],      [], 1, 0),             # 나머지 비우기
-                    self._draw_to_graph(2, [],      [], 1, 0)
-                ))
-            
-            else:                                       # CSV 2 개 (diff 포함)
+                Clock.schedule_once(lambda *_:
+                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym))
+
+            else:   # 두 파일 + 차이
                 (r1, p1), (r2, p2) = all_sets[:2]
-            
                 diff_core = _merge_band_lines(r1, r2)
                 diff = [(x, y + self.OFFSET_DB) for x, y in diff_core] if diff_core else []
-            
+
                 Clock.schedule_once(lambda *_: (
-                    self._draw_to_graph(0, [r1, p1], [],  FMAX_global, ym),   # 첫째 파일
-                    self._draw_to_graph(1, [r2, p2], [],  FMAX_global, ym),   # 둘째 파일
-                    self._draw_to_graph(2, [],       diff, FMAX_global, ym)   # ΔF 라인
+                    self._draw_to_graph(0, [r1, p1], [],  FMAX_global, ym),
+                    self._draw_to_graph(1, [r2, p2], [],  FMAX_global, ym),
+                    self._draw_to_graph(2, [],        diff, FMAX_global, ym)
                 ))
-            
-                if diff_core:          # ΔF 텍스트 로그
+
+                if diff_core:
                     fn1 = max(r1, key=lambda p: p[1])[0]
                     fn2 = max(r2, key=lambda p: p[1])[0]
                     Clock.schedule_once(lambda *_:
-                        self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz ({fn1:.2f} → {fn2:.2f})"))
+                        self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz ({fn1:.2f}→{fn2:.2f})"))
 
         except Exception as e:
             Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
@@ -1185,29 +1170,43 @@ class FFTApp(App):
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_run, "disabled", False))
     # CSV → 시계열 배열 읽기
+    # ★ (A) 기존 _load_csv 를 아래로 교체 ★
     def _load_csv(self, path: str):
-        num_re = re.compile(r"^-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?$")
-        try:
-            t, a = [], []
-            with open(path, encoding="utf-8", errors="replace") as f:
-                sample = f.read(1024); f.seek(0)
-                try:
-                    dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
-                except csv.Error:
-                    dialect = csv.get_dialect("excel")
+        """
+        CSV → (t,a) ndarray.
+        * 시계열이 2개 미만이면 ValueError 로 바로 올려보낸다.
+        * 숫자가 아닌 셀은 몽땅 건너뛴다.
+        """
+        num = re.compile(r"^-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?$")
     
-                for row in csv.reader(f, dialect):
-                    if len(row) < 2: continue
-                    if not (num_re.match(row[0].strip()) and num_re.match(row[1].strip())):
-                        continue
-                    t.append(float(row[0].replace(",", ".")))
-                    a.append(float(row[1].replace(",", ".")))
-            if len(a) < 2:
-                return None, None
-            return np.asarray(t,float), np.asarray(a,float)
-        except Exception as e:
-            Logger.error(f"CSV read err ({os.path.basename(path)}): {e}")
-            return None, None
+        rows = []
+        with open(path, encoding="utf-8", errors="replace") as f:
+            # ── 구분자 추정(실패 시 , 로 고정) ──
+            sample = f.read(1024); f.seek(0)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
+            except csv.Error:
+                dialect = csv.get_dialect("excel")
+    
+            for row in csv.reader(f, dialect):
+                if len(row) < 2:
+                    continue
+                if not (num.match(row[0].strip()) and num.match(row[1].strip())):
+                    continue           # 숫자 아니면 skip
+                rows.append((float(row[0].replace(",", ".")),
+                             float(row[1].replace(",", "."))))
+    
+        if len(rows) < 2:
+            raise ValueError(f"{os.path.basename(path)} : usable rows < 2")
+    
+        t, a = zip(*rows)
+        t, a = np.asarray(t, float), np.asarray(a, float)
+    
+        # ── 시간 중복/역순 보정 ──
+        if np.any(np.diff(t) <= 0):
+            t = np.arange(len(t)) * np.median(np.diff(t)[np.diff(t) > 0])
+    
+        return t, a
 
 
         
