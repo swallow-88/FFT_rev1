@@ -814,12 +814,13 @@ class FFTApp(App):
 
                 # ── 그래프 갱신 ─────────────────────────
                 # ▶▶▶ _rt_fft_loop() 의 “그래프 갱신” 부분 교체 ◀◀◀
-                if datasets:       # x-, y-, z-축을 각 창에
-                    def _show():
-                        for i in range(3):
-                            ds = datasets[i*2:i*2+2]   # rms, pk 한 쌍
-                            self._draw_to_graph(i, ds, [], FMAX_global, ymax)
-                    Clock.schedule_once(lambda *_: _show())
+                # 그래프 갱신
+                if datasets:
+                    Clock.schedule_once(lambda *_: (
+                        self._draw_to_graph(0, datasets[0:2], [], FMAX_global, ymax),  # X
+                        self._draw_to_graph(1, datasets[2:4], [], FMAX_global, ymax),  # Y
+                        self._draw_to_graph(2, datasets[4:6], [], FMAX_global, ymax)   # Z
+                    ))
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
@@ -1150,29 +1151,32 @@ class FFTApp(App):
 
             # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
             # ▶▶▶ _fft_bg() 의 “그래프 갱신 & ΔF” 부분 교체 ◀◀◀
-            if len(all_sets) == 1:                 # 파일 1 개
+            # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
+            if len(all_sets) == 1:                      # CSV 1 개
                 r, p = all_sets[0]
-                Clock.schedule_once(lambda *_:
-                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym))
-
-            else:                                  # 2 개 + diff
+                Clock.schedule_once(lambda *_: (
+                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym),   # 0번 창
+                    self._draw_to_graph(1, [],      [], 1, 0),             # 나머지 비우기
+                    self._draw_to_graph(2, [],      [], 1, 0)
+                ))
+            
+            else:                                       # CSV 2 개 (diff 포함)
                 (r1, p1), (r2, p2) = all_sets[:2]
+            
                 diff_core = _merge_band_lines(r1, r2)
                 diff = [(x, y + self.OFFSET_DB) for x, y in diff_core] if diff_core else []
+            
                 Clock.schedule_once(lambda *_: (
-                    self._draw_to_graph(0, [r1, p1], [], FMAX_global, ym),
-                    self._draw_to_graph(1, [r2, p2], [], FMAX_global, ym),
-                    self._draw_to_graph(2, [],       diff, FMAX_global, ym)
+                    self._draw_to_graph(0, [r1, p1], [],  FMAX_global, ym),   # 첫째 파일
+                    self._draw_to_graph(1, [r2, p2], [],  FMAX_global, ym),   # 둘째 파일
+                    self._draw_to_graph(2, [],       diff, FMAX_global, ym)   # ΔF 라인
                 ))
-                
-                Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([r1, p1, r2, p2],
-                                            diff, FMAX_global, ym))
-                fn1 = max(r1, key=lambda p: p[1])[0]
-                fn2 = max(r2, key=lambda p: p[1])[0]
-                Clock.schedule_once(lambda *_:
-                    self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz "
-                             f"({fn1:.2f} → {fn2:.2f})"))
+            
+                if diff_core:          # ΔF 텍스트 로그
+                    fn1 = max(r1, key=lambda p: p[1])[0]
+                    fn2 = max(r2, key=lambda p: p[1])[0]
+                    Clock.schedule_once(lambda *_:
+                        self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz ({fn1:.2f} → {fn2:.2f})"))
 
         except Exception as e:
             Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
