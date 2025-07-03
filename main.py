@@ -534,10 +534,7 @@ class FFTApp(App):
     
     # ▶▶▶  FFTApp 클래스 안 (메서드들 사이 아무 곳) ◀◀◀
     def _draw_to_graph(self, index: int, datasets=None, diff=None, xmax=50, ymax_est=0):
-        
-    
         for i, g in enumerate(self.graphs):
-                       
             # diff 만 있어도 반드시 갱신하게 변경
             if i == index and (datasets or diff):
                 g.update_graph(datasets or [], diff or [], xmax, ymax_est)
