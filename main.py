@@ -602,6 +602,12 @@ class FFTApp(App):
         self.btn_rec.disabled = True
         self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
     
+        # ────────────────────────────────────────
+        # ▼▼▼ 〈추가〉 진행-시간 / 센서 확인 타이머
+        Clock.schedule_interval(self._record_poll, 0.5)   # 0.5 s마다 호출
+        # ▲▲▲
+        # ────────────────────────────────────────
+    
         # REC_DURATION 뒤 자동 종료
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
     
@@ -649,9 +655,16 @@ class FFTApp(App):
     def _stop_recording(self, *_):
         if not self.rec_on:
             return
+    
+        # ▼▼▼ 〈추가〉 앞에서 건 타이머 제거
+        Clock.unschedule(self._record_poll)
+        # ▲▲▲
+    
         for f in self.rec_files.values():
-            try: f.close()
-            except Exception: pass
+            try:
+                f.close()
+            except Exception:
+                pass
         self.rec_files.clear()
         self.rec_on      = False
         self.btn_rec.disabled = False
@@ -963,13 +976,6 @@ class FFTApp(App):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
-    ########################################################################
-    ### PATCH BEGIN ―  _diff 안전화 + 0.5 Hz bin 대응 #######################
-    ########################################################################
-    # FFTApp 클래스 안쪽, _fft_bg() 선언 **바로 위** 아무곳에 넣어 두면 됩니다.
-
-    ########################################################################
-    ### PATCH END ##########################################################
     #   CSV 1 ~ 2개 FFT → 2 Hz 대역 RMS‧Peak + ΔF 계산
     # ─────────────────────────────────────────────────────
     #  CSV 1~3개 FFT → 2 Hz 대역 RMS·Peak + ΔF
