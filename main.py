@@ -809,7 +809,7 @@ class FFTApp(App):
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
 
-    
+    '''
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
@@ -870,7 +870,69 @@ class FFTApp(App):
         # ── 권한 확인 트리거 ──────────────────────────────
         Clock.schedule_once(self._ask_perm, 0)
         return root
+    '''
 
+    def build(self):
+        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
+
+        # ── 상단 안내 라벨 ────────────────────────────────
+        self.label = Label(text="Pick 1 or 2 CSV files", size_hint=(1, .05))
+        root.add_widget(self.label)
+
+        # ── 버튼들 ───────────────────────────────────────
+        self.btn_sel = Button(text="Select CSV", disabled=True)
+        self.btn_run = Button(text="FFT RUN",   disabled=True)
+        self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s", disabled=True)
+        self.btn_rt  = Button(text="Realtime FFT (OFF)")
+
+        # ① ‘Select CSV’ + ‘FFT RUN’  --- 1행
+        row_top = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+        for b in (self.btn_sel, self.btn_run):
+            b.size_hint_x = .5          # 가로 공간의 절반씩
+            row_top.add_widget(b)
+        root.add_widget(row_top)
+
+        # ② ‘Record …’ + ‘Realtime FFT’ --- 2행
+        row_mid = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+        for b in (self.btn_rec, self.btn_rt):
+            b.size_hint_x = .5
+            row_mid.add_widget(b)
+        root.add_widget(row_mid)
+
+        # ── 나머지 위젯(Spinner·그래프 등)은 그대로 ───────────
+        # 녹음 길이 Spinner
+        self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
+                                values=('10 s', '30 s', '60 s', '120 s'),
+                                size_hint=(1, .05))
+        self.spin_dur.bind(text=self._set_rec_dur)
+        root.add_widget(self.spin_dur)
+
+        # 모드 토글·기준 F0 버튼도 2개씩 한 행에
+        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}")
+        self.btn_setF0 = Button(text="Set F₀ (baseline)")
+
+        row_opt = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+        for b in (self.btn_mode, self.btn_setF0):
+            b.size_hint_x = .5
+            row_opt.add_widget(b)
+        root.add_widget(row_opt)
+
+        # 스무딩 Spinner
+        self.spin_sm = Spinner(text=str(SMOOTH_N),
+                               values=('1','2','3','4','5'),
+                               size_hint=(1, .05))
+        self.spin_sm.bind(text=self._set_smooth)
+        root.add_widget(self.spin_sm)
+
+        # 그래프
+        self.graph = GraphWidget(size_hint=(1, .50))
+        root.add_widget(self.graph)
+
+        # 권한 확인 트리거
+        Clock.schedule_once(self._ask_perm, 0)
+        return root
+
+    
     def _toggle_mode(self, *_):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
