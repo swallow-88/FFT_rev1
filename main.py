@@ -532,19 +532,16 @@ class FFTApp(App):
         self._draw_to_graph(2, ds[4:6], [], xmax, ymax)   # Z-axis
     
     # ▶▶▶  FFTApp 클래스 안 (메서드들 사이 아무 곳) ◀◀◀
-    def _draw_to_graph(self, index: int,
-                       datasets=None, diff=None,
+    def _draw_to_graph(self, index: int, datasets=None, diff=None,
                        xmax=50, ymax_est=0):
-        """
-        index    : 0,1,2   (그림을 넣을 그래프 번호)
-        datasets : [(rms_line, …, pk_line), …]  or  []
-        diff     : ΔF 라인 (없으면 [])
-        """
+    
         for i, g in enumerate(self.graphs):
-            if i == index and (datasets or diff):
-                g.update_graph(datasets, diff or [], xmax, ymax_est)
-            else:                                   # 사용 안 하는 창은 비움
-                g.update_graph([], [], 1, 0)
+    
+           # diff 만 있어도 반드시 갱신하게 변경
+           if i == index and (datasets or diff):
+               g.update_graph(datasets or [], diff or [], xmax, ymax_est)
+           else:
+               g.update_graph([], [], 1, 0)
 
     # ---------------  FFTApp 클래스 안  ----------------
     def _set_rec_dur(self, spinner, txt):
@@ -816,8 +813,11 @@ class FFTApp(App):
                         f_hi = f_hi,
                         band_w = BAND_HZ)
 
-                    if not band_rms:
+
+                    if not band_rms:            # ← 데이터가 없더라도
+                        datasets += [[], []]    #    빈 자리 두 칸 유지
                         continue
+
 
                     # 공진수 추적
                     loF, hiF = FN_BAND
@@ -1188,6 +1188,7 @@ class FFTApp(App):
         finally:
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_run, "disabled", False))
+            
     # CSV → 시계열 배열 읽기
     # ★ (A) 기존 _load_csv 를 아래로 교체 ★
     def _load_csv(self, path: str):
