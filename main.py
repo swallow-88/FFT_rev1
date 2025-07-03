@@ -510,7 +510,21 @@ class FFTApp(App):
         
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
-
+        
+    def _draw_to_graph(self, index: int,
+                       datasets=None, diff=None,
+                       xmax=50, ymax_est=0):
+        """
+        index : 0 ~ 2  (그래프 번호)
+        datasets : [rms_line, pk_line] 혹은 []
+        diff : ΔF 선 (없으면 [])
+        """
+        for i, g in enumerate(self.graphs):
+            if i == index and (datasets or diff):
+                g.update_graph(datasets or [], diff or [], xmax, ymax_est)
+            else:
+                # 빈 창으로 초기화
+                g.update_graph([], [], 1, 0)
     # ───────────────────────────────────────────────────────────
     #  (FFTApp 안) 3-way 그래프 갱신 헬퍼
     # ───────────────────────────────────────────────────────────
@@ -532,14 +546,7 @@ class FFTApp(App):
         self._draw_to_graph(1, ds[2:4], [], xmax, ymax)   # Y-axis
         self._draw_to_graph(2, ds[4:6], [], xmax, ymax)   # Z-axis
     
-    # ▶▶▶  FFTApp 클래스 안 (메서드들 사이 아무 곳) ◀◀◀
-    def _draw_to_graph(self, index: int, datasets=None, diff=None, xmax=50, ymax_est=0):
-        for i, g in enumerate(self.graphs):
-            # diff 만 있어도 반드시 갱신하게 변경
-            if i == index and (datasets or diff):
-                g.update_graph(datasets or [], diff or [], xmax, ymax_est)
-            else:
-                g.update_graph([], [], 1, 0)
+
 
     # ---------------  FFTApp 클래스 안  ----------------
     def _set_rec_dur(self, spinner, txt):
@@ -967,15 +974,18 @@ class FFTApp(App):
         root.add_widget(self.spin_sm)
     
         # ── 그래프 3 개(세로) ─────────────────────
+        # ── 그래프 3개 세로 배치 ────────────────────
         self.graphs = []
         gbox = BoxLayout(orientation='vertical',
-                         size_hint=(1, .60), spacing=4)
+                         size_hint=(1, .60),  # 화면 높이의 60 %
+                         spacing=4)
+        
         for _ in range(3):
-            gw = GraphWidget(size_hint=(1, 1/3))
+            gw = GraphWidget(size_hint=(1, 1/3))  # gbox 내부에서 동일 비율
             self.graphs.append(gw)
             gbox.add_widget(gw)
-        root.add_widget(gbox)
-    
+        
+        root.add_widget(gbox)    # ← 이 줄이 빠지면 아무 것도 안 보임
         # 권한 체크 트리거
         Clock.schedule_once(self._ask_perm, 0)
         return root
