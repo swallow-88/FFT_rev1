@@ -510,6 +510,27 @@ class FFTApp(App):
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
 
+    # ───────────────────────────────────────────────────────────
+    #  (FFTApp 안) 3-way 그래프 갱신 헬퍼
+    # ───────────────────────────────────────────────────────────
+    def _show_csv_one(self, rms, pk, xmax, ymax):
+        """CSV 1 개 → 0번 그래프만 사용"""
+        self._draw_to_graph(0, [rms, pk], [], xmax, ymax)
+        self._draw_to_graph(1, [], [], 1, 0)
+        self._draw_to_graph(2, [], [], 1, 0)
+    
+    def _show_csv_two(self, r1, p1, r2, p2, diff, xmax, ymax):
+        """CSV 2 개 + ΔF"""
+        self._draw_to_graph(0, [r1, p1], [],  xmax, ymax)
+        self._draw_to_graph(1, [r2, p2], [],  xmax, ymax)
+        self._draw_to_graph(2, [],       diff, xmax, ymax)
+    
+    def _show_rt(self, ds, xmax, ymax):
+        """Realtime X,Y,Z 각각 1 창씩"""
+        self._draw_to_graph(0, ds[0:2], [], xmax, ymax)   # X-axis
+        self._draw_to_graph(1, ds[2:4], [], xmax, ymax)   # Y-axis
+        self._draw_to_graph(2, ds[4:6], [], xmax, ymax)   # Z-axis
+    
     # ▶▶▶  FFTApp 클래스 안 (메서드들 사이 아무 곳) ◀◀◀
     def _draw_to_graph(self, index: int,
                        datasets=None, diff=None,
@@ -816,11 +837,8 @@ class FFTApp(App):
                 # ▶▶▶ _rt_fft_loop() 의 “그래프 갱신” 부분 교체 ◀◀◀
                 # 그래프 갱신
                 if datasets:
-                    Clock.schedule_once(lambda *_: (
-                        self._draw_to_graph(0, datasets[0:2], [], FMAX_global, ymax),  # X
-                        self._draw_to_graph(1, datasets[2:4], [], FMAX_global, ymax),  # Y
-                        self._draw_to_graph(2, datasets[4:6], [], FMAX_global, ymax)   # Z
-                    ))
+                    Clock.schedule_once(
+                        lambda *_: self._show_rt(datasets, FMAX_global, ymax))
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
@@ -1141,21 +1159,22 @@ class FFTApp(App):
                 FMAX_global = max(FMAX_global, FMAX)
 
             # ── ③ 그래프 분배 ─────────────────────────────────
-            if len(all_sets) == 1:
+            if len(all_sets) == 1:              # CSV 1 개
                 r, p = all_sets[0]
-                Clock.schedule_once(lambda *_:
-                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym))
+                Clock.schedule_once(
+                    lambda *_: self._show_csv_one(r, p, FMAX_global, ym))
+
+
 
             else:   # 두 파일 + 차이
                 (r1, p1), (r2, p2) = all_sets[:2]
                 diff_core = _merge_band_lines(r1, r2)
                 diff = [(x, y + self.OFFSET_DB) for x, y in diff_core] if diff_core else []
 
-                Clock.schedule_once(lambda *_: (
-                    self._draw_to_graph(0, [r1, p1], [],  FMAX_global, ym),
-                    self._draw_to_graph(1, [r2, p2], [],  FMAX_global, ym),
-                    self._draw_to_graph(2, [],        diff, FMAX_global, ym)
-                ))
+                Clock.schedule_once(
+                    lambda *_: self._show_csv_two(
+                        r1, p1, r2, p2, diff, FMAX_global, ym))
+
 
                 if diff_core:
                     fn1 = max(r1, key=lambda p: p[1])[0]
