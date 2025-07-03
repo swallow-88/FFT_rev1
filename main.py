@@ -438,9 +438,11 @@ class GraphWidget(Widget):
                 scaled = self._scale(pts)
 
                 # Peak(점선) / RMS(실선) 구분
-                if idx % 2:
-                    dashed_line(self.canvas, scaled, dash=10, gap=6, width=self.LINE_W)
-                else:
+                # Peak(점선) / RMS(실선) 구분
+                if idx % 2:       # ← peak 라인
+                    # dash·gap 을 짧게 조정하면 세밀한 스펙트럼에서도 점선이 또렷합니다
+                    dashed_line(self.canvas, scaled, dash=6, gap=4, width=self.LINE_W)
+                else:             # rms 라인
                     Line(points=scaled, width=self.LINE_W)
                     try:
                         fx, fy = max(pts, key=lambda p: p[1])
@@ -1060,16 +1062,18 @@ class FFTApp(App):
                     self.graph.update_graph([r, p], [], FMAX_global, ym))
             else:
                 (r1, p1), (r2, p2) = all_sets[:2]
-                ########################################################################
-                ### PATCH ② – diff 계산 안전화 #########################################
-                ########################################################################
+                # ####################################################################### 
+                # ## PATCH ② – diff 계산 안전화 #########################################
+                # #######################################################################
                 # centre 값(Hz)이 반드시 1:1 순서 맞는다는 가정 대신, 매칭 함수 사용
-                diff_core = _merge_band_lines(r1, r2)      # ← crash 방지 핵심!
-                if not diff_core:
-                    raise ValueError("두 CSV 의 주파수 격자가 일치하지 않습니다.")
-                diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
-                ########################################################################
-                ### END PATCH ② #######################################################
+                diff_core = _merge_band_lines(r1, r2)        # centre 매칭
+                if not diff_core:                            # 매칭 실패 → 그래프만 그리고 끝
+                    self.log("⚠︎ 다른 주파수 격자 – Δ 라인 생략")
+                    diff = []
+                else:
+                    diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
+                # #######################################################################
+                # ## END PATCH ② #######################################################
                 ym = max(ym, max(y for _, y in diff))
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([r1, p1, r2, p2],
