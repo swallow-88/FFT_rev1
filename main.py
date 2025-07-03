@@ -510,6 +510,21 @@ class FFTApp(App):
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
 
+    # ▶▶▶  FFTApp 클래스 안 (메서드들 사이 아무 곳) ◀◀◀
+    def _draw_to_graph(self, index: int,
+                       datasets=None, diff=None,
+                       xmax=50, ymax_est=0):
+        """
+        index    : 0,1,2   (그림을 넣을 그래프 번호)
+        datasets : [(rms_line, …, pk_line), …]  or  []
+        diff     : ΔF 라인 (없으면 [])
+        """
+        for i, g in enumerate(self.graphs):
+            if i == index and datasets:
+                g.update_graph(datasets, diff or [], xmax, ymax_est)
+            else:                                   # 사용 안 하는 창은 비움
+                g.update_graph([], [], 1, 0)
+
     # ---------------  FFTApp 클래스 안  ----------------
     def _set_rec_dur(self, spinner, txt):
         """Spinner 콜백 – 녹음 길이 변경"""
@@ -798,10 +813,13 @@ class FFTApp(App):
                     FMAX_global = max(FMAX_global, f_hi)
 
                 # ── 그래프 갱신 ─────────────────────────
-                if datasets:
-                    Clock.schedule_once(
-                        lambda *_:
-                            self.graph.update_graph(datasets, [], FMAX_global, ymax))
+                # ▶▶▶ _rt_fft_loop() 의 “그래프 갱신” 부분 교체 ◀◀◀
+                if datasets:       # x-, y-, z-축을 각 창에
+                    def _show():
+                        for i in range(3):
+                            ds = datasets[i*2:i*2+2]   # rms, pk 한 쌍
+                            self._draw_to_graph(i, ds, [], FMAX_global, ymax)
+                    Clock.schedule_once(lambda *_: _show())
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
@@ -871,67 +889,80 @@ class FFTApp(App):
         Clock.schedule_once(self._ask_perm, 0)
         return root
     '''
-
+    # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
-        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
-
-        # ── 상단 안내 라벨 ────────────────────────────────
-        self.label = Label(text="Pick 1 or 2 CSV files", size_hint=(1, .05))
+        root = BoxLayout(orientation="vertical",
+                         padding=10, spacing=10)
+    
+        # ── 안내 라벨 ────────────────────────────
+        self.label = Label(text="Pick 1 or 2 CSV files",
+                           size_hint=(1, .05))
         root.add_widget(self.label)
-
-        # ── 버튼들 ───────────────────────────────────────
-        self.btn_sel = Button(text="Select CSV", disabled=True)
-        self.btn_run = Button(text="FFT RUN",   disabled=True)
-        self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s", disabled=True)
-        self.btn_rt  = Button(text="Realtime FFT (OFF)")
-
-        # ① ‘Select CSV’ + ‘FFT RUN’  --- 1행
-        row_top = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+    
+        # ── 버튼 객체 생성 ───────────────────────
+        self.btn_sel = Button(text="Select CSV", disabled=True,
+                              on_press=self.open_chooser)
+        self.btn_run = Button(text="FFT RUN",   disabled=True,
+                              on_press=self.run_fft)
+        self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
+                              disabled=True,   on_press=self.start_recording)
+        self.btn_rt  = Button(text="Realtime FFT (OFF)",
+                              on_press=self.toggle_realtime)
+    
+        # ① Select / RUN  (1행)
+        row1 = BoxLayout(size_hint=(1, .06), spacing=5)
         for b in (self.btn_sel, self.btn_run):
-            b.size_hint_x = .5          # 가로 공간의 절반씩
-            row_top.add_widget(b)
-        root.add_widget(row_top)
-
-        # ② ‘Record …’ + ‘Realtime FFT’ --- 2행
-        row_mid = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+            b.size_hint_x = .5
+            row1.add_widget(b)
+        root.add_widget(row1)
+    
+        # ② Record / Realtime (2행)
+        row2 = BoxLayout(size_hint=(1, .06), spacing=5)
         for b in (self.btn_rec, self.btn_rt):
             b.size_hint_x = .5
-            row_mid.add_widget(b)
-        root.add_widget(row_mid)
-
-        # ── 나머지 위젯(Spinner·그래프 등)은 그대로 ───────────
-        # 녹음 길이 Spinner
+            row2.add_widget(b)
+        root.add_widget(row2)
+    
+        # ── 녹음 길이 스피너 ──────────────────────
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=('10 s', '30 s', '60 s', '120 s'),
                                 size_hint=(1, .05))
         self.spin_dur.bind(text=self._set_rec_dur)
         root.add_widget(self.spin_dur)
-
-        # 모드 토글·기준 F0 버튼도 2개씩 한 행에
-        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}")
-        self.btn_setF0 = Button(text="Set F₀ (baseline)")
-
-        row_opt = BoxLayout(orientation='horizontal', size_hint=(1, .06), spacing=5)
+    
+        # 모드 토글 / Set F₀  (3행)
+        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}",
+                                on_press=self._toggle_mode)
+        self.btn_setF0 = Button(text="Set F₀ (baseline)",
+                                on_press=self._save_baseline)
+    
+        row3 = BoxLayout(size_hint=(1, .06), spacing=5)
         for b in (self.btn_mode, self.btn_setF0):
             b.size_hint_x = .5
-            row_opt.add_widget(b)
-        root.add_widget(row_opt)
-
-        # 스무딩 Spinner
+            row3.add_widget(b)
+        root.add_widget(row3)
+    
+        # 스무딩 스피너
         self.spin_sm = Spinner(text=str(SMOOTH_N),
-                               values=('1','2','3','4','5'),
+                               values=('1', '2', '3', '4', '5'),
                                size_hint=(1, .05))
         self.spin_sm.bind(text=self._set_smooth)
         root.add_widget(self.spin_sm)
-
-        # 그래프
-        self.graph = GraphWidget(size_hint=(1, .50))
-        root.add_widget(self.graph)
-
-        # 권한 확인 트리거
+    
+        # ── 그래프 3 개(세로) ─────────────────────
+        self.graphs = []
+        gbox = BoxLayout(orientation='vertical',
+                         size_hint=(1, .60), spacing=4)
+        for _ in range(3):
+            gw = GraphWidget(size_hint=(1, 1/3))
+            self.graphs.append(gw)
+            gbox.add_widget(gw)
+        root.add_widget(gbox)
+    
+        # 권한 체크 트리거
         Clock.schedule_once(self._ask_perm, 0)
         return root
-
+    
     
     def _toggle_mode(self, *_):
         global MEAS_MODE
@@ -1118,27 +1149,21 @@ class FFTApp(App):
                 FMAX_global = max(FMAX_global, FMAX)
 
             # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
-            if len(all_sets) == 1:
+            # ▶▶▶ _fft_bg() 의 “그래프 갱신 & ΔF” 부분 교체 ◀◀◀
+            if len(all_sets) == 1:                 # 파일 1 개
                 r, p = all_sets[0]
                 Clock.schedule_once(lambda *_:
-                    self.graph.update_graph([r, p], [], FMAX_global, ym))
-            else:
+                    self._draw_to_graph(0, [r, p], [], FMAX_global, ym))
+
+            else:                                  # 2 개 + diff
                 (r1, p1), (r2, p2) = all_sets[:2]
-                # ####################################################################### 
-                # ## PATCH ② – diff 계산 안전화 #########################################
-                # #######################################################################
-                # centre 값(Hz)이 반드시 1:1 순서 맞는다는 가정 대신, 매칭 함수 사용
-                diff_core = _merge_band_lines(r1, r2)        # centre 매칭
-                if not diff_core:                            # 매칭 실패 → 그래프만 그리고 끝
-                    self.log("⚠︎ 다른 주파수 격자 – Δ 라인 생략")
-                    diff = []
-                else:
-                    diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
-                # #######################################################################
-                # ## END PATCH ② #######################################################
-                # … diff 계산 직후
-                if diff:                                       # ← 빈 리스트면 건너뜀
-                    ym = max(ym, max(y for _, y in diff))
+                diff_core = _merge_band_lines(r1, r2)
+                diff = [(x, y + self.OFFSET_DB) for x, y in diff_core] if diff_core else []
+                Clock.schedule_once(lambda *_: (
+                    self._draw_to_graph(0, [r1, p1], [], FMAX_global, ym),
+                    self._draw_to_graph(1, [r2, p2], [], FMAX_global, ym),
+                    self._draw_to_graph(2, [],       diff, FMAX_global, ym)
+                ))
                 
                 Clock.schedule_once(lambda *_:
                     self.graph.update_graph([r1, p1, r2, p2],
