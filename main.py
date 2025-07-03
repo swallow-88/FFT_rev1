@@ -419,8 +419,9 @@ class GraphWidget(Widget):
         self.canvas.clear()
         self._clear_labels()     # ← 새로 만든 함수로 한 번에 정리
 
-        if not self.datasets:    # 데이터 없으면 끝
-            return
+        
+        #if not self.datasets:    # 데이터 없으면 끝
+        #    return
 
         # ② 그리드 + 라벨 다시 그리기
         with self.canvas:
