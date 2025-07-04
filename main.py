@@ -74,27 +74,26 @@ if ANDROID:
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
         Permission = _P
     try:
-        from jnius import autoclass
-        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
-        # ★ 공식 Downloads 절대경로 가져오기
-        Environment = autoclass("android.os.Environment")
-        DOWNLOAD_DIR = Environment.getExternalStoragePublicDirectory(
-            Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-    except Exception:
-        ANDROID_API = 0
-        DOWNLOAD_DIR = "/sdcard/Download"
-else:                                   # 데스크톱 테스트용
-    DOWNLOAD_DIR = os.path.expanduser("~/Download")
+        # 0. 경로 결정 (안드로이드는 Documents, 데스크톱은 홈)
+        if ANDROID:
+            from jnius import autoclass
+            Environment = autoclass("android.os.Environment")
+            CRASH_PATH = os.path.join(
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOCUMENTS).getAbsolutePath(),
+                "fft_crash.log")
+        else:
+            CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
 
-# ── 전역 예외 → /sdcard/fft_crash.log ───────────────────────────────
 def _dump_crash(txt: str):
     try:
-        with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as fp:
+        with open(CRASH_PATH, "a", encoding="utf-8") as fp:
             fp.write("\n" + "="*60 + "\n" +
                      datetime.datetime.now().isoformat() + "\n" + txt + "\n")
-    except Exception:
-        pass
-    Logger.error(txt)
+    except Exception as e:
+        # 마지막 보루: 콘솔에는 반드시 찍기
+        print("!! cannot write crash log:", e, file=sys.stderr)
+        print(txt, file=sys.stderr)
 
 def _ex(et, ev, tb):
     _dump_crash("".join(traceback.format_exception(et, ev, tb)))
@@ -1321,4 +1320,8 @@ class FFTApp(App):
 
 # ── 실행 ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    FFTApp().run()
+    try:
+        FFTApp().run()
+    except Exception:
+        _ex(*sys.exc_info())   # 어떤 이유로든 run() 밖에서 난 예외도 로깅
+        raise
