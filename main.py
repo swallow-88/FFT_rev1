@@ -74,17 +74,13 @@ if ANDROID:
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
         Permission = _P
     try:
-        if ANDROID:
-            from jnius import autoclass
-            Environment = autoclass("android.os.Environment")
-            CRASH_PATH = os.path.join(
-                Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOCUMENTS).getAbsolutePath(),
-                "fft_crash.log")
-        else:
-            CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
+        from jnius import autoclass
+        Environment = autoclass("android.os.Environment")
+        CRASH_PATH = os.path.join(
+            Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOCUMENTS).getAbsolutePath(),
+            "fft_crash.log")
     except Exception:
-        # 마지막 보루 – 경로 결정 실패 시 홈 디렉토리로 폴백
         CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
 
 def _dump_crash(txt: str):
@@ -1075,14 +1071,17 @@ class FFTApp(App):
                 
 
     def _goto_allfiles_permission(self):
-        from jnius import autoclass
-        Intent  = autoclass("android.content.Intent")
-        Settings= autoclass("android.provider.Settings")
-        Uri     = autoclass("android.net.Uri")
-        act     = autoclass("org.kivy.android.PythonActivity").mActivity
-        uri = Uri.fromParts("package", act.getPackageName(), None)
-        act.startActivity(Intent(
-            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
+        try:
+            from jnius import autoclass
+            Intent  = autoclass("android.content.Intent")
+            Settings= autoclass("android.provider.Settings")
+            Uri     = autoclass("android.net.Uri")
+            act     = autoclass("org.kivy.android.PythonActivity").mActivity
+            uri = Uri.fromParts("package", act.getPackageName(), None)
+            act.startActivity(Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
+        except Exception as e:
+            self.log(f"권한 설정 화면 열기 실패: {e}")
 
     # ↳ ❶  on_choose 시그니처 수정
     def on_choose(self, sel, *_):
