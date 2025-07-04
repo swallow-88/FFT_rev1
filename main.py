@@ -532,11 +532,9 @@ class FFTApp(App):
     
     def _show_rt(self, ds, xmax, ymax):
         """Realtime X,Y,Z 각각 1 창씩"""
-        self._draw_to_graph(0, ds[0:2], [], xmax, ymax)   # X-axis
-        self._draw_to_graph(1, ds[2:4], [], xmax, ymax)   # Y-axis
-        self._draw_to_graph(2, ds[4:6], [], xmax, ymax)   # Z-axis
-    
-
+        self._draw_to_graph(0, ds[0:2], [], xmax, ymax, reset_others=False)
+        self._draw_to_graph(1, ds[2:4], [], xmax, ymax, reset_others=False)
+        self._draw_to_graph(2, ds[4:6], [], xmax, ymax, reset_others=False)
 
     # ---------------  FFTApp 클래스 안  ----------------
     def _set_rec_dur(self, spinner, txt):
@@ -563,8 +561,6 @@ class FFTApp(App):
 
     # ── 권한 체크 ───────────────────────────────────────────────
     def _ask_perm(self,*_):
-def _ask_perm(self, *_):
-
         if (not ANDROID) or (SharedStorage is not None):   # ← 조건 명시적
             self.btn_sel.disabled = False
             self.btn_rec.disabled = False
@@ -985,14 +981,17 @@ def _ask_perm(self, *_):
 
 
     #  (2-B) 3-way 그리기 헬퍼 — **한 창만 갱신**
-    def _draw_to_graph(self, idx, datasets=None, diff=None, xmax=50, ymax_est=0):
-        # ① 대상 창 갱신
+
+    def _draw_to_graph(self, idx, datasets=None, diff=None,
+                       xmax=50, ymax_est=0, reset_others=True):
+         # ① 대상 창 갱신
         self.graphs[idx].update_graph(datasets or [], diff or [], xmax, ymax_est)
-    
-        # ② 나머지 두 창은 “빈 그래프”로 리셋 → 이전 데이터 지우기
-        for i, g in enumerate(self.graphs):
-            if i != idx:
-                g.update_graph([], [], xmax, 0)   # ← 빈 선 & 축만 그대로
+ 
+         # ② 나머지 두 창은 빈 그래프로
+        if reset_others:
+            for i, g in enumerate(self.graphs):
+                if i != idx:
+                    g.update_graph([], [], xmax, 0)
                            
     def _toggle_mode(self, *_):
         global MEAS_MODE
