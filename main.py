@@ -43,10 +43,6 @@ THR_DF      = 0.5       # ΔF 경고 임계값 (필요 시 그대로)
 BUF_LEN   = 16384      # Realtime 버퍼 길이
 MIN_LEN   = 256          # FFT 돌리기 전 최소 샘플 수
 
-# ---------- 사용자 조정값 ---------- #
-WELCH_SEC   = 1.0    # ← ① 스펙트럼 윈도 길이(초)
-WELCH_OVLP  = 0.75   # ← ② overlap 비율(0~1)
-REFRESH     = 0.2    # ← ③ 실시간 갱신 주기(초)
 
 # ── Android 전용 모듈 ───────────────────────────────────────────────
 ANDROID = platform == "android"
@@ -61,10 +57,8 @@ if ANDROID:
         toast = None
     try:
         from androidstorage4kivy import SharedStorage
-        DOWNLOAD_DIR = SharedStorage().get_primary_public_directory('Download')
     except Exception:
         SharedStorage = None
-        DOWNLOAD_DIR = os.path.expanduser("~/Download")
     try:
         from android.permissions import (
             check_permission, request_permissions, Permission)
@@ -77,23 +71,26 @@ if ANDROID:
         Permission = _P
     try:
         from jnius import autoclass
+        ANDROID_API = autoclass("android.os.Build$VERSION").SDK_INT
+        # ★ 공식 Downloads 절대경로 가져오기
         Environment = autoclass("android.os.Environment")
-        CRASH_PATH = os.path.join(
-            Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOCUMENTS).getAbsolutePath(),
-            "fft_crash.log")
+        DOWNLOAD_DIR = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
     except Exception:
-        CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
+        ANDROID_API = 0
+        DOWNLOAD_DIR = "/sdcard/Download"
+else:                                   # 데스크톱 테스트용
+    DOWNLOAD_DIR = os.path.expanduser("~/Download")
 
+# ── 전역 예외 → /sdcard/fft_crash.log ───────────────────────────────
 def _dump_crash(txt: str):
     try:
-        with open(CRASH_PATH, "a", encoding="utf-8") as fp:
+        with open("/sdcard/fft_crash.log", "a", encoding="utf-8") as fp:
             fp.write("\n" + "="*60 + "\n" +
                      datetime.datetime.now().isoformat() + "\n" + txt + "\n")
-    except Exception as e:
-        # 마지막 보루: 콘솔에는 반드시 찍기
-        print("!! cannot write crash log:", e, file=sys.stderr)
-        print(txt, file=sys.stderr)
+    except Exception:
+        pass
+    Logger.error(txt)
 
 def _ex(et, ev, tb):
     _dump_crash("".join(traceback.format_exception(et, ev, tb)))
@@ -121,11 +118,9 @@ def uri_to_file(u: str) -> str | None:
     # ② content:// (SAF)
     if u.startswith("content://") and ANDROID and SharedStorage:
         try:
+            # Downloads/fft_tmp_xxx.csv 로 임시 복사
             dst = SharedStorage().copy_from_shared(
                     u, uuid.uuid4().hex+".csv", to_downloads=True)
-            if not dst:
-                Logger.error("SAF copy returned empty path.")
-                return None
             return dst
         except Exception as e:
             Logger.error(f"SAF copy fail: {e}")
@@ -198,68 +193,67 @@ def welch_band_stats(sig: np.ndarray,
                      f_lo: float = HPF_CUTOFF,
                      f_hi: float = MAX_FMAX,
                      band_w: float = BAND_HZ,
-                     seg_sec: float = None,          # ← 윈도 길이(초) 직접 지정
-                     overlap: float = None):         # ← 겹치기 비율
+                     seg_n: int | None = None,
+                     overlap: float = 0.5):
     """
-    sig  : 1-D 시계열
-    fs   : 샘플링 주파수 [Hz]
-    seg_sec : Welch 윈도 길이(초).  None → WELCH_SEC 전역값
-    overlap : 0~1. None → WELCH_OVLP 전역값
-    반환   : (band_rms, band_pk)
+    sig         : 1-D 시계열 (평균 제거·윈도우링은 여기서 처리)
+    fs          : 샘플링 주파수 [Hz]
+    f_lo, f_hi  : 분석 대역
+    band_w      : 밴드 폭
+    seg_n       : 세그먼트 길이(샘플).  None → fs*4 (= 약4초)로 자동
+    overlap     : 0~1, 일반적 0.5
+    return      : [(centre, RMSdB), …] , [(centre, PKdB), …]
     """
-    # ── 파라미터 결정 ───────────────────────────────
-    if seg_sec is None:
-        seg_sec = WELCH_SEC          # 예: 1.0 s
-    if overlap is None:
-        overlap = WELCH_OVLP         # 예: 0.75
-    seg_n = int(fs * seg_sec)        # 샘플 개수
-    if seg_n < 32:                   # 너무 짧으면 무시
-        return [], []
+    # ── 세그먼트 길이 · 창 준비 ───────────────────────
+    if seg_n is None:
+        seg_n = int(fs * 4)          # 4 s 구간
+    step   = int(seg_n * (1 - overlap))
+    win    = np.hanning(seg_n)
 
-    step = max(1, int(seg_n * (1 - overlap)))
-    win  = np.hanning(seg_n)
-
-    # ── 구간별 PSD 누적 ────────────────────────────
-    ps_sum, n_seg, ptr = None, 0, 0
+    # ── 구간별 FFT → 파워 스펙트럼 누적 ─────────────
+    spec_sum = None
+    ptr = 0
     while ptr + seg_n <= len(sig):
         seg = (sig[ptr:ptr+seg_n] - sig[ptr:ptr+seg_n].mean()) * win
-        ps  = (np.abs(np.fft.rfft(seg)) ** 2) / (np.sum(win**2) * fs)
-        ps_sum = ps if ps_sum is None else ps_sum + ps
-        n_seg += 1
+        raw = np.fft.rfft(seg)
+        ps  = (np.abs(raw) ** 2) / (np.sum(win**2) * fs)  # PSD
+        spec_sum = ps if spec_sum is None else spec_sum + ps
         ptr += step
-    if n_seg == 0:
+
+    if spec_sum is None:                 # 데이터 부족
         return [], []
 
-    psd  = ps_sum / n_seg
+    psd = spec_sum / ((ptr - step)//step + 1)  # 평균
     freq = np.fft.rfftfreq(seg_n, d=1/fs)
 
-    # ── 관심 대역 자르기 ───────────────────────────
-    sel = (freq >= f_lo) & (freq <= f_hi)
-    freq, psd = freq[sel], psd[sel]
-    amp_a = np.sqrt(psd * 2)                # 1-sided → RMS 가속도
+    # 필요 대역 자르기
+    msel = (freq >= f_lo) & (freq <= f_hi)
+    freq, psd = freq[msel], psd[msel]
+    amp_a = np.sqrt(psd * 2)              # 1-sided → RMS 가속도
 
-    # ── 가속도→속도 변환 & 0 dB 기준 적용 ──────────
+    # 선형단위 변환
     amp_lin, REF0 = acc_to_spec(freq, amp_a)
 
-    # ── 밴드별 RMS / Peak 계산 ─────────────────────
+    # ── 대역별 RMS/Peak dB ─────────────────────────
     band_rms, band_pk = [], []
     for lo in np.arange(f_lo, f_hi, band_w):
-        hi  = lo + band_w
-        s   = (freq >= lo) & (freq < hi)
+        hi = lo + band_w
+        s  = (freq >= lo) & (freq < hi)
         if not s.any():
             continue
-        rms = np.sqrt(np.mean(amp_lin[s]**2))
+        rms = np.sqrt(np.mean(amp_lin[s] ** 2))
         pk  = amp_lin[s].max()
-        cen = (lo + hi) * 0.5
+        cen = (lo + hi) / 2
         band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
         band_pk .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-    # ── 선택적 스무딩 ───────────────────────────────
-    if len(band_rms) >= SMOOTH_N and SMOOTH_N > 1:
-        y_s = smooth_y([y for _, y in band_rms])
-        band_rms = list(zip([x for x, _ in band_rms], y_s))
+    # 선택적 스무딩
+    if len(band_rms) >= SMOOTH_N:
+        y_sm = smooth_y([y for _, y in band_rms])
+        band_rms = list(zip([x for x, _ in band_rms], y_sm))
 
     return band_rms, band_pk
+
 # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
 def _merge_band_lines(line1, line2, tol=1e-4):
     """
@@ -286,7 +280,7 @@ class GraphWidget(Widget):
     #            빨강     노랑     파랑     시안     초록     자홍
     DIFF_CLR = (1,1,1)          # 두 CSV 차이선은 흰색
     LINE_W   = 2.5
-    Y_MIN = 0
+
     Y_TICKS = [0, 40, 80, 150]
     Y_MAX   = Y_TICKS[-1]
 
@@ -420,7 +414,6 @@ class GraphWidget(Widget):
         self.canvas.clear()
         self._clear_labels()     # ← 새로 만든 함수로 한 번에 정리
 
-        
         if not self.datasets:    # 데이터 없으면 끝
             return
 
@@ -435,18 +428,14 @@ class GraphWidget(Widget):
             for idx, pts in enumerate(self.datasets):
                 if not pts:
                     continue
-                # ★ 색상 선택: 이 Widget 이 몇 번째 창(X·Y·Z) 인지 사용
-                axis_idx = getattr(self, "axis_index", 0)
-                Color(*self.COLORS[axis_idx])
-        
+                axis_idx = idx // 2
+                Color(*self.COLORS[axis_idx % len(self.COLORS)])
                 scaled = self._scale(pts)
 
                 # Peak(점선) / RMS(실선) 구분
-                # Peak(점선) / RMS(실선) 구분
-                if idx % 2:       # ← peak 라인
-                    # dash·gap 을 짧게 조정하면 세밀한 스펙트럼에서도 점선이 또렷합니다
-                    dashed_line(self.canvas, scaled, dash=6, gap=4, width=self.LINE_W)
-                else:             # rms 라인
+                if idx % 2:
+                    dashed_line(self.canvas, scaled, dash=10, gap=6, width=self.LINE_W)
+                else:
                     Line(points=scaled, width=self.LINE_W)
                     try:
                         fx, fy = max(pts, key=lambda p: p[1])
@@ -503,7 +492,7 @@ class FFTApp(App):
         self.rt_on = False
 
         self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in ('x','y','z')}
-        self.graphs = []
+
 
         # 60 초 기록
         self.rec_on = False
@@ -513,28 +502,6 @@ class FFTApp(App):
         
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
-        
-
-    # ───────────────────────────────────────────────────────────
-    #  (FFTApp 안) 3-way 그래프 갱신 헬퍼
-    # ───────────────────────────────────────────────────────────
-    def _show_csv_one(self, rms, pk, xmax, ymax):
-        """CSV 1 개 → 0번 그래프만 사용"""
-        self._draw_to_graph(0, [rms, pk], [], xmax, ymax)
-        self._draw_to_graph(1, [], [], 1, 0)
-        self._draw_to_graph(2, [], [], 1, 0)
-    
-    def _show_csv_two(self, r1, p1, r2, p2, diff, xmax, ymax):
-        """CSV 2 개 + ΔF"""
-        self._draw_to_graph(0, [r1, p1], [],  xmax, ymax)
-        self._draw_to_graph(1, [r2, p2], [],  xmax, ymax)
-        self._draw_to_graph(2, [],       diff, xmax, ymax)
-    
-    def _show_rt(self, ds, xmax, ymax):
-        """Realtime X,Y,Z 각각 1 창씩"""
-        self._draw_to_graph(0, ds[0:2], [], xmax, ymax, reset_others=False)
-        self._draw_to_graph(1, ds[2:4], [], xmax, ymax, reset_others=False)
-        self._draw_to_graph(2, ds[4:6], [], xmax, ymax, reset_others=False)
 
     # ---------------  FFTApp 클래스 안  ----------------
     def _set_rec_dur(self, spinner, txt):
@@ -561,7 +528,7 @@ class FFTApp(App):
 
     # ── 권한 체크 ───────────────────────────────────────────────
     def _ask_perm(self,*_):
-        if (not ANDROID) or (SharedStorage is not None):   # ← 조건 명시적
+        if not ANDROID or SharedStorage:
             self.btn_sel.disabled = False
             self.btn_rec.disabled = False
             return
@@ -635,12 +602,6 @@ class FFTApp(App):
         self.btn_rec.disabled = True
         self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
     
-        # ────────────────────────────────────────
-        # ▼▼▼ 〈추가〉 진행-시간 / 센서 확인 타이머
-        Clock.schedule_interval(self._record_poll, 0.5)   # 0.5 s마다 호출
-        # ▲▲▲
-        # ────────────────────────────────────────
-    
         # REC_DURATION 뒤 자동 종료
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
     
@@ -688,16 +649,9 @@ class FFTApp(App):
     def _stop_recording(self, *_):
         if not self.rec_on:
             return
-    
-        # ▼▼▼ 〈추가〉 앞에서 건 타이머 제거
-        Clock.unschedule(self._record_poll)
-        # ▲▲▲
-    
         for f in self.rec_files.values():
-            try:
-                f.close()
-            except Exception:
-                pass
+            try: f.close()
+            except Exception: pass
         self.rec_files.clear()
         self.rec_on      = False
         self.btn_rec.disabled = False
@@ -777,7 +731,7 @@ class FFTApp(App):
         """
         try:
             while self.rt_on:
-                time.sleep(REFRESH)   # ★ 0.2 초마다 갱신
+                time.sleep(0.5)
 
                 # 버퍼 길이 부족 → skip
                 if any(len(self.rt_buf[ax]) < MIN_LEN for ax in ('x', 'y', 'z')):
@@ -806,11 +760,8 @@ class FFTApp(App):
                         f_hi = f_hi,
                         band_w = BAND_HZ)
 
-
-                    if not band_rms:            # ← 데이터가 없더라도
-                        datasets += [[], []]    #    빈 자리 두 칸 유지
+                    if not band_rms:
                         continue
-
 
                     # 공진수 추적
                     loF, hiF = FN_BAND
@@ -827,11 +778,10 @@ class FFTApp(App):
                     FMAX_global = max(FMAX_global, f_hi)
 
                 # ── 그래프 갱신 ─────────────────────────
-                # ▶▶▶ _rt_fft_loop() 의 “그래프 갱신” 부분 교체 ◀◀◀
-                # 그래프 갱신
                 if datasets:
                     Clock.schedule_once(
-                        lambda *_: self._show_rt(datasets, FMAX_global, ymax))
+                        lambda *_:
+                            self.graph.update_graph(datasets, [], FMAX_global, ymax))
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
@@ -839,7 +789,7 @@ class FFTApp(App):
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
 
-    '''
+    
     # ── UI 구성 ───────────────────────────────────────────────
     def build(self):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
@@ -900,99 +850,7 @@ class FFTApp(App):
         # ── 권한 확인 트리거 ──────────────────────────────
         Clock.schedule_once(self._ask_perm, 0)
         return root
-    '''
-    # ── UI 구성 ───────────────────────────────────────────────
-    def build(self):
-        root = BoxLayout(orientation="vertical",
-                         padding=10, spacing=10)
-    
-        # ── 안내 라벨 ────────────────────────────
-        self.label = Label(text="Pick 1 or 2 CSV files",
-                           size_hint=(1, .05))
-        root.add_widget(self.label)
-    
-        # ── 버튼 객체 생성 ───────────────────────
-        self.btn_sel = Button(text="Select CSV", disabled=True,
-                              on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",   disabled=True,
-                              on_press=self.run_fft)
-        self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
-                              disabled=True,   on_press=self.start_recording)
-        self.btn_rt  = Button(text="Realtime FFT (OFF)",
-                              on_press=self.toggle_realtime)
-    
-        # ① Select / RUN  (1행)
-        row1 = BoxLayout(size_hint=(1, .06), spacing=5)
-        for b in (self.btn_sel, self.btn_run):
-            b.size_hint_x = .5
-            row1.add_widget(b)
-        root.add_widget(row1)
-    
-        # ② Record / Realtime (2행)
-        row2 = BoxLayout(size_hint=(1, .06), spacing=5)
-        for b in (self.btn_rec, self.btn_rt):
-            b.size_hint_x = .5
-            row2.add_widget(b)
-        root.add_widget(row2)
-    
-        # ── 녹음 길이 스피너 ──────────────────────
-        self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
-                                values=('10 s', '30 s', '60 s', '120 s'),
-                                size_hint=(1, .05))
-        self.spin_dur.bind(text=self._set_rec_dur)
-        root.add_widget(self.spin_dur)
-    
-        # 모드 토글 / Set F₀  (3행)
-        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}",
-                                on_press=self._toggle_mode)
-        self.btn_setF0 = Button(text="Set F₀ (baseline)",
-                                on_press=self._save_baseline)
-    
-        row3 = BoxLayout(size_hint=(1, .06), spacing=5)
-        for b in (self.btn_mode, self.btn_setF0):
-            b.size_hint_x = .5
-            row3.add_widget(b)
-        root.add_widget(row3)
-    
-        # 스무딩 스피너
-        self.spin_sm = Spinner(text=str(SMOOTH_N),
-                               values=('1', '2', '3', '4', '5'),
-                               size_hint=(1, .05))
-        self.spin_sm.bind(text=self._set_smooth)
-        root.add_widget(self.spin_sm)
-    
 
-        # ── 그래프 3개 세로 배치 ─────────────────
-        self.graphs = []
-        gbox = BoxLayout(orientation='vertical',
-                         size_hint=(1, .60),  # 화면 높이의 60 %
-                         spacing=4)
-        
-        for i in range(3):                              # ← i = 0,1,2
-            gw = GraphWidget(size_hint=(1, 1/3))
-            gw.axis_index = i            # ★ 여기 한 줄 추가 (X=0, Y=1, Z=2)
-            self.graphs.append(gw)
-            gbox.add_widget(gw)
-        
-        root.add_widget(gbox)    # ← 이 줄이 빠지면 아무 것도 안 보임
-        # 권한 체크 트리거
-        Clock.schedule_once(self._ask_perm, 0)
-        return root
-
-
-    #  (2-B) 3-way 그리기 헬퍼 — **한 창만 갱신**
-
-    def _draw_to_graph(self, idx, datasets=None, diff=None,
-                       xmax=50, ymax_est=0, reset_others=True):
-         # ① 대상 창 갱신
-        self.graphs[idx].update_graph(datasets or [], diff or [], xmax, ymax_est)
- 
-         # ② 나머지 두 창은 빈 그래프로
-        if reset_others:
-            for i, g in enumerate(self.graphs):
-                if i != idx:
-                    g.update_graph([], [], xmax, 0)
-                           
     def _toggle_mode(self, *_):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
@@ -1074,128 +932,142 @@ class FFTApp(App):
                 
 
     def _goto_allfiles_permission(self):
-        try:
-            from jnius import autoclass
-            Intent  = autoclass("android.content.Intent")
-            Settings= autoclass("android.provider.Settings")
-            Uri     = autoclass("android.net.Uri")
-            act     = autoclass("org.kivy.android.PythonActivity").mActivity
-            uri = Uri.fromParts("package", act.getPackageName(), None)
-            act.startActivity(Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
-        except Exception as e:
-            self.log(f"권한 설정 화면 열기 실패: {e}")
+        from jnius import autoclass
+        Intent  = autoclass("android.content.Intent")
+        Settings= autoclass("android.provider.Settings")
+        Uri     = autoclass("android.net.Uri")
+        act     = autoclass("org.kivy.android.PythonActivity").mActivity
+        uri = Uri.fromParts("package", act.getPackageName(), None)
+        act.startActivity(Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
 
     # ↳ ❶  on_choose 시그니처 수정
-    def on_choose(self, sel, *args, **kwargs):
-        try:
-            if not sel:
-                return
-    
-            paths = []
-            for raw in sel[:3]:
-                real = uri_to_file(raw)
-                if real in (None, "NO_PERMISSION"):
-                    self.log("❌ CSV 파일을 읽을 수 없습니다")
-                    return
-                paths.append(real)
-    
-            self.paths = paths
-            self.label.text = " · ".join(os.path.basename(p) for p in paths)
-            self.btn_run.disabled = False
-        except Exception as e:
-            self.log(f"on_choose error: {e}")
+    def on_choose(self, sel, *_):
+        if not sel:
+            return
+
+        paths = []
+        for raw in sel[:3]:
+            real = uri_to_file(raw)
+            if real == "NO_PERMISSION":
+                self.log("❌ Downloads 접근 권한 없음 — SAF 로 열어 주세요"); return
+            if not real:
+                self.log("❌ 파일 복사 실패"); return
+            paths.append(real)           # ← 제대로 들여쓰기
+
+        self.paths = paths
+        self.label.text = " · ".join(os.path.basename(p) for p in paths)
+        self.btn_run.disabled = False
 
     def run_fft(self,*_):
         self.btn_run.disabled=True
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
-    # ──────────────────────────────────────────────────────────
-    #  CSV 1~2개 FFT → 밴드-RMS / Peak(dB) + ΔF, 3-분할 그래프 출력
-    # ──────────────────────────────────────────────────────────
+    ########################################################################
+    ### PATCH BEGIN ―  _diff 안전화 + 0.5 Hz bin 대응 #######################
+    ########################################################################
+    # FFTApp 클래스 안쪽, _fft_bg() 선언 **바로 위** 아무곳에 넣어 두면 됩니다.
+
+    ########################################################################
+    ### PATCH END ##########################################################
+    #   CSV 1 ~ 2개 FFT → 2 Hz 대역 RMS‧Peak + ΔF 계산
+    # ─────────────────────────────────────────────────────
+    #  CSV 1~3개 FFT → 2 Hz 대역 RMS·Peak + ΔF
+    #  ─ 파일마다 dt → Nyquist → FMAX 를 계산해 그래프 폭 자동 확대
+    # ─────────────────────────────────────────────────────
+    # ---------- 헬퍼 : 두 스펙트럼 밴드 비교 ---------- #
+
     def _fft_bg(self):
         try:
-            all_sets, ym = [], 0.0          # [[rms, pk] …], y-축 최대치
-            FMAX_global  = 0.0              # x-축 최댓값(모든 파일 중)
+            all_sets, ym = [], 0.0          # [[rms,pk] …], y축 최대
+            FMAX_global  = 0                # x-축 최댓값 (모든 파일 중)
 
-            # ── ① 파일별 FFT ──────────────────────────────────
             for path in self.paths:
                 t, a = self._load_csv(path)
                 if t is None:
                     raise ValueError(f"{os.path.basename(path)}: CSV parse fail")
 
-                # 샘플 주기/최대 주파수
-                dt   = np.median(np.diff(t))
-                if dt <= 0:
+                # ── ① dt · Nyquist · FMAX 계산 ──────────────────
+                dt  = np.median(np.diff(t))          # 센서 주기(중앙값)
+                if dt <= 0:                          # 파일 타임스탬프 이상
                     raise ValueError("non-positive dt")
-                nyq  = 0.5 / dt
-                FMAX = int(min(nyq, MAX_FMAX))
+                nyq   = 0.5 / dt
+                FMAX  = int(min(nyq, MAX_FMAX))
                 if FMAX < HPF_CUTOFF + BAND_HZ:
-                    raise ValueError("sample rate too low")
+                    raise ValueError("sample-rate too low")
 
-                # FFT (RMS 가속도)
+                # ── ② FFT ───────────────────────────────────────
                 sig   = (a - a.mean()) * np.hanning(len(a))
-                amp_a = 2*np.abs(np.fft.fft(sig)[:len(a)//2]) / (len(a)*np.sqrt(2))
+                raw   = np.fft.fft(sig)
+                amp_a = 2*np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
                 freq  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
 
                 sel   = (freq >= HPF_CUTOFF) & (freq <= FMAX)
                 freq, amp_a = freq[sel], amp_a[sel]
-                if not freq.size:
+                if freq.size == 0:
                     raise ValueError("no data in band")
 
                 amp_lin, REF0 = acc_to_spec(freq, amp_a)
 
-                # ② 밴드-RMS / Peak
+                # ── ③ 2 Hz 대역 RMS / Peak ─────────────────────
                 rms_line, pk_line = [], []
                 for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
                     hi  = lo + BAND_HZ
-                    m   = (freq >= lo) & (freq < hi)
-                    if not m.any():
+                    s   = (freq >= lo) & (freq < hi)
+                    if not s.any():
                         continue
-                    rms = np.sqrt(np.mean(amp_lin[m]**2))
-                    pk  = amp_lin[m].max()
-                    cen = (lo + hi) * 0.5
+                    rms = np.sqrt(np.mean(amp_lin[s]**2))
+                    pk  = amp_lin[s].max()
+                    cen = (lo + hi) / 2
                     rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
                     pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-                if len(rms_line) >= SMOOTH_N and SMOOTH_N > 1:
+                if len(rms_line) >= SMOOTH_N:
                     y_sm = smooth_y([y for _, y in rms_line])
                     rms_line = list(zip([x for x, _ in rms_line], y_sm))
 
-                # 공진수 추적
-                c = np.array([x for x, _ in rms_line])
-                m = np.array([y for _, y in rms_line])
-                selF = (c >= FN_BAND[0]) & (c <= FN_BAND[1])
-                if selF.any():
-                    self.last_fn = c[selF][m[selF].argmax()]
+                # 공진 주파수 저장
+                loF, hiF = FN_BAND
+                if rms_line:
+                    c = np.array([x for x, _ in rms_line])
+                    m = np.array([y for _, y in rms_line])
+                    s = (c >= loF) & (c <= hiF)
+                    if s.any():
+                        self.last_fn = c[s][m[s].argmax()]
 
+                # 누적
                 all_sets.append([rms_line, pk_line])
-                ym          = max(ym, max(y for _, y in rms_line), max(y for _, y in pk_line))
+                ym          = max(ym,
+                                  max(y for _, y in rms_line),
+                                  max(y for _, y in pk_line))
                 FMAX_global = max(FMAX_global, FMAX)
 
-            # ── ③ 그래프 분배 ─────────────────────────────────
-            if len(all_sets) == 1:              # CSV 1 개
+            # ── ④ 그래프 갱신 & ΔF ─────────────────────────────
+            if len(all_sets) == 1:
                 r, p = all_sets[0]
-                Clock.schedule_once(
-                    lambda *_: self._show_csv_one(r, p, FMAX_global, ym))
-
-
-
-            else:   # 두 파일 + 차이
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([r, p], [], FMAX_global, ym))
+            else:
                 (r1, p1), (r2, p2) = all_sets[:2]
-                diff_core = _merge_band_lines(r1, r2)
-                diff = [(x, y + self.OFFSET_DB) for x, y in diff_core] if diff_core else []
-
-                Clock.schedule_once(
-                    lambda *_: self._show_csv_two(
-                        r1, p1, r2, p2, diff, FMAX_global, ym))
-
-
-                if diff_core:
-                    fn1 = max(r1, key=lambda p: p[1])[0]
-                    fn2 = max(r2, key=lambda p: p[1])[0]
-                    Clock.schedule_once(lambda *_:
-                        self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz ({fn1:.2f}→{fn2:.2f})"))
+                ########################################################################
+                ### PATCH ② – diff 계산 안전화 #########################################
+                ########################################################################
+                # centre 값(Hz)이 반드시 1:1 순서 맞는다는 가정 대신, 매칭 함수 사용
+                diff_core = _merge_band_lines(r1, r2)      # ← crash 방지 핵심!
+                if not diff_core:
+                    raise ValueError("두 CSV 의 주파수 격자가 일치하지 않습니다.")
+                diff = [(x, y + self.OFFSET_DB) for x, y in diff_core]
+                ########################################################################
+                ### END PATCH ② #######################################################
+                ym = max(ym, max(y for _, y in diff))
+                Clock.schedule_once(lambda *_:
+                    self.graph.update_graph([r1, p1, r2, p2],
+                                            diff, FMAX_global, ym))
+                fn1 = max(r1, key=lambda p: p[1])[0]
+                fn2 = max(r2, key=lambda p: p[1])[0]
+                Clock.schedule_once(lambda *_:
+                    self.log(f"CSV ΔF = {abs(fn1-fn2):.2f} Hz "
+                             f"({fn1:.2f} → {fn2:.2f})"))
 
         except Exception as e:
             Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
@@ -1203,45 +1075,30 @@ class FFTApp(App):
         finally:
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_run, "disabled", False))
-            
     # CSV → 시계열 배열 읽기
-    # ★ (A) 기존 _load_csv 를 아래로 교체 ★
     def _load_csv(self, path: str):
-        """
-        CSV → (t,a) ndarray.
-        * 시계열이 2개 미만이면 ValueError 로 바로 올려보낸다.
-        * 숫자가 아닌 셀은 몽땅 건너뛴다.
-        """
-        num = re.compile(r"^-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?$")
+        num_re = re.compile(r"^-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?$")
+        try:
+            t, a = [], []
+            with open(path, encoding="utf-8", errors="replace") as f:
+                sample = f.read(1024); f.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
+                except csv.Error:
+                    dialect = csv.get_dialect("excel")
     
-        rows = []
-        with open(path, encoding="utf-8", errors="replace") as f:
-            # ── 구분자 추정(실패 시 , 로 고정) ──
-            sample = f.read(1024); f.seek(0)
-            try:
-                dialect = csv.Sniffer().sniff(sample, delimiters=";, \t")
-            except csv.Error:
-                dialect = csv.get_dialect("excel")
-    
-            for row in csv.reader(f, dialect):
-                if len(row) < 2:
-                    continue
-                if not (num.match(row[0].strip()) and num.match(row[1].strip())):
-                    continue           # 숫자 아니면 skip
-                rows.append((float(row[0].replace(",", ".")),
-                             float(row[1].replace(",", "."))))
-    
-        if len(rows) < 2:
-            raise ValueError(f"{os.path.basename(path)} : usable rows < 2")
-    
-        t, a = zip(*rows)
-        t, a = np.asarray(t, float), np.asarray(a, float)
-    
-        # ── 시간 중복/역순 보정 ──
-        if np.any(np.diff(t) <= 0):
-            t = np.arange(len(t)) * np.median(np.diff(t)[np.diff(t) > 0])
-    
-        return t, a
+                for row in csv.reader(f, dialect):
+                    if len(row) < 2: continue
+                    if not (num_re.match(row[0].strip()) and num_re.match(row[1].strip())):
+                        continue
+                    t.append(float(row[0].replace(",", ".")))
+                    a.append(float(row[1].replace(",", ".")))
+            if len(a) < 2:
+                return None, None
+            return np.asarray(t,float), np.asarray(a,float)
+        except Exception as e:
+            Logger.error(f"CSV read err ({os.path.basename(path)}): {e}")
+            return None, None
 
 
         
@@ -1326,8 +1183,4 @@ class FFTApp(App):
 
 # ── 실행 ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    try:
-        FFTApp().run()
-    except Exception:
-        _ex(*sys.exc_info())   # 어떤 이유로든 run() 밖에서 난 예외도 로깅
-        raise
+    FFTApp().run()
