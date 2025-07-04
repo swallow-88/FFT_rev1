@@ -74,8 +74,6 @@ if ANDROID:
             READ_MEDIA_IMAGES = READ_MEDIA_AUDIO = READ_MEDIA_VIDEO = ""
         Permission = _P
     try:
-        # 0. 경로 결정 (안드로이드는 Documents, 데스크톱은 홈)
-        # --- 경로 결정 (안드로이드는 Documents, 데스크톱은 홈) ---
         if ANDROID:
             from jnius import autoclass
             Environment = autoclass("android.os.Environment")
@@ -85,6 +83,9 @@ if ANDROID:
                 "fft_crash.log")
         else:
             CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
+    except Exception:
+        # 마지막 보루 – 경로 결정 실패 시 홈 디렉토리로 폴백
+        CRASH_PATH = os.path.join(os.path.expanduser("~"), "fft_crash.log")
 
 def _dump_crash(txt: str):
     try:
