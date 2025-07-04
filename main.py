@@ -511,20 +511,7 @@ class FFTApp(App):
         self.F0 = None      # ⊕ 기준 공진수
         self.last_fn = None #   실시간 Fₙ 임시보
         
-    def _draw_to_graph(self, index: int,
-                       datasets=None, diff=None,
-                       xmax=50, ymax_est=0):
-        """
-        index : 0 ~ 2  (그래프 번호)
-        datasets : [rms_line, pk_line] 혹은 []
-        diff : ΔF 선 (없으면 [])
-        """
-        for i, g in enumerate(self.graphs):
-            if i == index and (datasets or diff):
-                g.update_graph(datasets or [], diff or [], xmax, ymax_est)
-            else:
-                # 빈 창으로 초기화
-                g.update_graph([], [], 1, 0)
+
     # ───────────────────────────────────────────────────────────
     #  (FFTApp 안) 3-way 그래프 갱신 헬퍼
     # ───────────────────────────────────────────────────────────
@@ -989,6 +976,21 @@ class FFTApp(App):
         # 권한 체크 트리거
         Clock.schedule_once(self._ask_perm, 0)
         return root
+
+    def _draw_to_graph(self, index: int,
+                       datasets=None, diff=None,
+                       xmax=50, ymax_est=0):
+        """
+        index : 0 ~ 2  (그래프 번호)
+        datasets : [rms_line, pk_line] 혹은 []
+        diff : ΔF 선 (없으면 [])
+        """
+        for i, g in enumerate(self.graphs):
+            if i == index and (datasets or diff):
+                g.update_graph(datasets or [], diff or [], xmax, ymax_est)
+            else:
+                # 빈 창으로 초기화
+                g.update_graph([], [], 1, 0)
     
     
     def _toggle_mode(self, *_):
