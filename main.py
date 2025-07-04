@@ -286,7 +286,7 @@ class GraphWidget(Widget):
     #            빨강     노랑     파랑     시안     초록     자홍
     DIFF_CLR = (1,1,1)          # 두 CSV 차이선은 흰색
     LINE_W   = 2.5
-
+    Y_MIN = 0
     Y_TICKS = [0, 40, 80, 150]
     Y_MAX   = Y_TICKS[-1]
 
@@ -421,8 +421,8 @@ class GraphWidget(Widget):
         self._clear_labels()     # ← 새로 만든 함수로 한 번에 정리
 
         
-        #if not self.datasets:    # 데이터 없으면 끝
-        #    return
+        if not self.datasets:    # 데이터 없으면 끝
+            return
 
         # ② 그리드 + 라벨 다시 그리기
         with self.canvas:
