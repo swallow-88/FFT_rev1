@@ -1080,22 +1080,23 @@ class FFTApp(App):
             self.log(f"권한 설정 화면 열기 실패: {e}")
 
     # ↳ ❶  on_choose 시그니처 수정
-    def on_choose(self, sel, *_):
-        if not sel:
-            return
-
-        paths = []
-        for raw in sel[:3]:
-            real = uri_to_file(raw)
-            if real == "NO_PERMISSION":
-                self.log("❌ Downloads 접근 권한 없음 — SAF 로 열어 주세요"); return
-            if not real:
-                self.log("❌ 파일 복사 실패"); return
-            paths.append(real)           # ← 제대로 들여쓰기
-
-        self.paths = paths
-        self.label.text = " · ".join(os.path.basename(p) for p in paths)
-        self.btn_run.disabled = False
+    def on_choose(self, sel, *args, **kwargs):
+        try:
+            if not sel:
+                return
+    
+            paths = []
+            for raw in sel[:3]:
+                real = uri_to_file(raw)
+                if real in (None, "NO_PERMISSION"):
+                    self.log("❌ CSV 파일을 읽을 수 없습니다"); return
+                paths.append(real)
+    
+            self.paths = paths
+            self.label.text = " · ".join(os.path.basename(p) for p in paths)
+            self.btn_run.disabled = False
+        except Exception as e:
+            self.log(f"on_choose error: {e}")
 
     def run_fft(self,*_):
         self.btn_run.disabled=True
