@@ -563,7 +563,9 @@ class FFTApp(App):
 
     # ── 권한 체크 ───────────────────────────────────────────────
     def _ask_perm(self,*_):
-        if not ANDROID or SharedStorage:
+def _ask_perm(self, *_):
+
+        if (not ANDROID) or (SharedStorage is not None):   # ← 조건 명시적
             self.btn_sel.disabled = False
             self.btn_rec.disabled = False
             return
@@ -984,9 +986,14 @@ class FFTApp(App):
 
     #  (2-B) 3-way 그리기 헬퍼 — **한 창만 갱신**
     def _draw_to_graph(self, idx, datasets=None, diff=None, xmax=50, ymax_est=0):
+        # ① 대상 창 갱신
         self.graphs[idx].update_graph(datasets or [], diff or [], xmax, ymax_est)
-
-                       
+    
+        # ② 나머지 두 창은 “빈 그래프”로 리셋 → 이전 데이터 지우기
+        for i, g in enumerate(self.graphs):
+            if i != idx:
+                g.update_graph([], [], xmax, 0)   # ← 빈 선 & 축만 그대로
+                           
     def _toggle_mode(self, *_):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
