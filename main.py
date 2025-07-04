@@ -75,6 +75,7 @@ if ANDROID:
         Permission = _P
     try:
         # 0. 경로 결정 (안드로이드는 Documents, 데스크톱은 홈)
+        # --- 경로 결정 (안드로이드는 Documents, 데스크톱은 홈) ---
         if ANDROID:
             from jnius import autoclass
             Environment = autoclass("android.os.Environment")
