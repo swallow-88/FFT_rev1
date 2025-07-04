@@ -501,7 +501,7 @@ class FFTApp(App):
         self.rt_on = False
 
         self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in ('x','y','z')}
-
+        self.graphs = []
 
         # 60 초 기록
         self.rec_on = False
@@ -978,16 +978,10 @@ class FFTApp(App):
         Clock.schedule_once(self._ask_perm, 0)
         return root
 
-    def _draw_to_graph(self, index: int,
-                       datasets=None, diff=None,
-                       xmax=50, ymax_est=0):
-        """
-        index : 0 ~ 2  (그래프 번호)
-        datasets : [rms_line, pk_line] 혹은 []
-        diff : ΔF 선 (없으면 [])
-        """
-        g = self.graphs[index]
-        g.update_graph(datasets or [], diff or [], xmax, ymax_est)
+
+    #  (2-B) 3-way 그리기 헬퍼 — **한 창만 갱신**
+    def _draw_to_graph(self, idx, datasets=None, diff=None, xmax=50, ymax_est=0):
+        self.graphs[idx].update_graph(datasets or [], diff or [], xmax, ymax_est)
 
                        
     def _toggle_mode(self, *_):
