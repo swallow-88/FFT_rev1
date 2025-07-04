@@ -982,14 +982,10 @@ class FFTApp(App):
         datasets : [rms_line, pk_line] 혹은 []
         diff : ΔF 선 (없으면 [])
         """
-        for i, g in enumerate(self.graphs):
-            if i == index and (datasets or diff):
-                g.update_graph(datasets or [], diff or [], xmax, ymax_est)
-            else:
-                # 빈 창으로 초기화
-                g.update_graph([], [], 1, 0)
-    
-    
+        g = self.graphs[index]
+        g.update_graph(datasets or [], diff or [], xmax, ymax_est)
+
+                       
     def _toggle_mode(self, *_):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
