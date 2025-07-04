@@ -435,8 +435,10 @@ class GraphWidget(Widget):
             for idx, pts in enumerate(self.datasets):
                 if not pts:
                     continue
-                axis_idx = idx // 2
-                Color(*self.COLORS[axis_idx % len(self.COLORS)])
+                # ★ 색상 선택: 이 Widget 이 몇 번째 창(X·Y·Z) 인지 사용
+                axis_idx = getattr(self, "axis_index", 0)
+                Color(*self.COLORS[axis_idx])
+        
                 scaled = self._scale(pts)
 
                 # Peak(점선) / RMS(실선) 구분
@@ -961,15 +963,16 @@ class FFTApp(App):
         self.spin_sm.bind(text=self._set_smooth)
         root.add_widget(self.spin_sm)
     
-        # ── 그래프 3 개(세로) ─────────────────────
-        # ── 그래프 3개 세로 배치 ────────────────────
+
+        # ── 그래프 3개 세로 배치 ─────────────────
         self.graphs = []
         gbox = BoxLayout(orientation='vertical',
                          size_hint=(1, .60),  # 화면 높이의 60 %
                          spacing=4)
         
-        for _ in range(3):
-            gw = GraphWidget(size_hint=(1, 1/3))  # gbox 내부에서 동일 비율
+        for i in range(3):                              # ← i = 0,1,2
+            gw = GraphWidget(size_hint=(1, 1/3))
+            gw.axis_index = i            # ★ 여기 한 줄 추가 (X=0, Y=1, Z=2)
             self.graphs.append(gw)
             gbox.add_widget(gw)
         
