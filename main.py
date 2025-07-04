@@ -61,8 +61,10 @@ if ANDROID:
         toast = None
     try:
         from androidstorage4kivy import SharedStorage
+        DOWNLOAD_DIR = SharedStorage().get_primary_public_directory('Download')
     except Exception:
         SharedStorage = None
+        DOWNLOAD_DIR = os.path.expanduser("~/Download")
     try:
         from android.permissions import (
             check_permission, request_permissions, Permission)
@@ -119,9 +121,11 @@ def uri_to_file(u: str) -> str | None:
     # ② content:// (SAF)
     if u.startswith("content://") and ANDROID and SharedStorage:
         try:
-            # Downloads/fft_tmp_xxx.csv 로 임시 복사
             dst = SharedStorage().copy_from_shared(
                     u, uuid.uuid4().hex+".csv", to_downloads=True)
+            if not dst:
+                Logger.error("SAF copy returned empty path.")
+                return None
             return dst
         except Exception as e:
             Logger.error(f"SAF copy fail: {e}")
@@ -1089,7 +1093,8 @@ class FFTApp(App):
             for raw in sel[:3]:
                 real = uri_to_file(raw)
                 if real in (None, "NO_PERMISSION"):
-                    self.log("❌ CSV 파일을 읽을 수 없습니다"); return
+                    self.log("❌ CSV 파일을 읽을 수 없습니다")
+                    return
                 paths.append(real)
     
             self.paths = paths
