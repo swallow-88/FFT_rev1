@@ -189,11 +189,18 @@ class GraphWidget(Widget):
     def y_pos(self, v):
         h = self.height - 2 * self.PAD_Y
         return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
-    # ..............................................
+    # ..............................................    # ---------- 좌표 변환 ----------
     def _scale(self, pts):
-        w = self.width - 2 * self.PAD_X
-        return [self.PAD_X + x / self.max_x * w if i % 2 == 0 else
-                self.y_pos(y) for i, (x, y) in enumerate(pts * 1)]
+        """
+        (freq[Hz], dB) 리스트 → [x1,y1,x2,y2,…] 평탄화된 좌표 배열
+        """
+        w   = self.width  - 2 * self.PAD_X
+        out = []
+        for x, y in pts:
+            sx = self.PAD_X + (x / max(self.max_x, 1e-6)) * w
+            sy = self.y_pos(y)
+            out.extend((sx, sy))          # ★ 짝수 길이 보장
+        return out
     # ..............................................
     def _grid(self):
         n_tick = int(self.max_x // 10) + 1
@@ -540,8 +547,11 @@ class FFTApp(App):
                     rms = list(zip([x for x, _ in rms],
                                    smooth_y([y for _, y in rms])))
                 # ---------------- axis 결정 ----------------
-                idx = axis_map.get(re.search(r"_([xyz])_", path).group(1), 0) \
-                    if re.search(r"_([xyz])_", path) else 0
+                                # 축 결정: _x_/ _y_/ _z_ 없으면 파일 순서대로 0,1,2
+                m   = re.search(r"_([xyz])_", path.lower())
+                idx = {"x":0, "y":1, "z":2}.get(m.group(1), len(graph_data) % 3) \
+                      if m else len(graph_data) % 3
+                   
                 graph_data[idx] = (rms, pk)
                 xmax = max(xmax, FMAX)
             # ---------------- UI 스케줄 ----------------
