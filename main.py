@@ -189,18 +189,22 @@ class GraphWidget(Widget):
     def y_pos(self, v):
         h = self.height - 2 * self.PAD_Y
         return self.PAD_Y + (v - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
-    # ..............................................    # ---------- 좌표 변환 ----------
+    # .............................................. 
+ 
     def _scale(self, pts):
-        """
-        (freq[Hz], dB) 리스트 → [x1,y1,x2,y2,…] 평탄화된 좌표 배열
-        """
-        w   = self.width  - 2 * self.PAD_X
+        """(freq, dB) → [x1,y1,x2,y2,…]  (NaN 필터·짝수 길이 보장)"""
+        if not pts or self.width < 5:                               # ★
+            return []
+        w = max(self.width - 2 * self.PAD_X, 1)
         out = []
         for x, y in pts:
+            if not np.isfinite(x) or not np.isfinite(y):            # ★
+                continue
             sx = self.PAD_X + (x / max(self.max_x, 1e-6)) * w
             sy = self.y_pos(y)
-            out.extend((sx, sy))          # ★ 짝수 길이 보장
+            out.extend((sx, sy))
         return out
+
     # ..............................................
     def _grid(self):
         n_tick = int(self.max_x // 10) + 1
@@ -227,15 +231,19 @@ class GraphWidget(Widget):
             self._grid()
             peaks = []
             for idx, pts in enumerate(self.datasets):
-                if not pts:
+                if len(pts) < 2:                    # ★ 2점 미만이면 건너뜀
                     continue
                 Color(*self.COLORS[idx // 2 % len(self.COLORS)])
                 scaled = self._scale(pts)
-                if idx % 2:   # Peak
+                if len(scaled) < 4:                 # ★ 좌표쌍 1개 이하면 skip
+                    continue
+                if idx % 2:   # Peak (점선)
                     dash, gap = 10, 6
                     for i in range(0, len(scaled) - 2, 2):
                         x1, y1, x2, y2 = scaled[i:i + 4]
                         seg = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                        if seg == 0:                # ★ 0-length 보호
+                            continue
                         nx, ny, s, draw = (x2 - x1) / seg, (y2 - y1) / seg, 0.0, True
                         while s < seg:
                             l = min(dash if draw else gap, seg - s)
@@ -244,21 +252,23 @@ class GraphWidget(Widget):
                                              x1 + nx * (s + l), y1 + ny * (s + l)],
                                      width=self.LINE_W)
                             s, draw = s + l, not draw
-                else:         # RMS
+                else:         # RMS (실선)
                     Line(points=scaled, width=self.LINE_W)
                     fx, fy = max(pts, key=lambda p: p[1])
                     sx, sy = self._scale([(fx, fy)])[0:2]
                     peaks.append((fx, fy, sx, sy))
-            if self.diff:
+
+            if len(self.diff) >= 2:                 # ★ diff 최소 2점 확인
                 Color(*self.DIFF_CLR)
                 Line(points=self._scale(self.diff), width=self.LINE_W)
 
-        # 피크 라벨
         for fx, fy, sx, sy in peaks:
-            lbl = Label(text=f"▲ {fx:.1f} Hz", size_hint=(None, None),
-                        size=(90, 24), pos=(sx - 30, sy + 6))
+            lbl = Label(text=f"▲ {fx:.1f} Hz",
+                        size_hint=(None, None), size=(90, 24),
+                        pos=(sx - 30, sy + 6))
             lbl._peak = True
             self.add_widget(lbl)
+
 # ------------------------------------------------------------------
 #                    ★ ⑤ 메인 앱 클래스 ★
 # ------------------------------------------------------------------
