@@ -173,7 +173,32 @@ class GraphWidget(Widget):
         super().__init__(**kw)
         self.datasets, self.diff, self.max_x = [], [], 1
         self.Y_MIN, self.Y_MAX, self.Y_TICKS = 0, 100, [0, 20, 40, 60, 80, 100]
+        self._prev_ticks = (None, None)
         self.bind(size=self.redraw)
+
+ 
+    def _make_labels(self):
+        """X·Y 축 라벨을 새로 만듦 (tick 변경 시에만 호출)"""
+        for w in list(self.children):
+            if getattr(w, "_axis", False):
+                self.remove_widget(w)
+        # X 축
+        n_tick = int(self.max_x // 10) + 1
+        span   = max(n_tick - 1, 1)
+        for i in range(n_tick):
+            x = self.PAD_X + i * (self.width - 2*self.PAD_X) / span - 18
+            lbl = Label(text=f"{10*i} Hz", size_hint=(None,None), size=(60,20),
+                        pos=(x, self.PAD_Y-28)); lbl._axis = True
+            self.add_widget(lbl)
+        # Y 축
+        for v in self.Y_TICKS:
+            y = self.y_pos(v) - 8
+            for x in (self.PAD_X-68, self.width-self.PAD_X+8):
+                lbl = Label(text=f"{v}", size_hint=(None,None), size=(60,20),
+                            pos=(x, y)); lbl._axis = True
+                self.add_widget(lbl)
+
+
 
     # ..............................................
     def update_graph(self, ds, df, xm):
@@ -260,15 +285,15 @@ class GraphWidget(Widget):
 
     # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
-          self.canvas.clear()
-          # ① 축 Label 은 tick 변하면 한 번만
-          cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
-          if cur_ticks != self._prev_ticks:
-              self._make_labels()
-              self._prev_ticks = cur_tick
-          self._clear_labels()
-          if not self.datasets:
-              return
+
+        self.canvas.clear()
+        cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
+        if cur_ticks != self._prev_ticks:
+            self._make_labels()
+            self._prev_ticks = cur_ticks
+        self._clear_labels()
+        if not self.datasets:
+            return
 
         with self.canvas:
             self._grid()
@@ -313,7 +338,7 @@ class FFTApp(App):
         self.rec_start, self.rec_files = 0.0, {}
         self.REC_DURATION = REC_DURATION_DEFAULT
         self.last_fn, self.F0 = None, None
-        self._prev_ticks = (None, None)   # (max_x, (y_min, y_max))
+
 
     # ..............................................................
     def log(self, msg):
