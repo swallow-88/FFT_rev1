@@ -41,6 +41,8 @@ HPF_CUTOFF, MAX_FMAX = 5.0, 200
 REC_DURATION_DEFAULT = 60.0
 FN_BAND = (5, 50)       # 공진 탐색 범위
 BUF_LEN, MIN_LEN = 16384, 256
+USE_SPLIT = True
+
 # ------------------------------------------------------------------
 #                    ★ ② Android 전용 준비 ★
 # ------------------------------------------------------------------
@@ -353,6 +355,21 @@ class FFTApp(App):
         root.add_widget(gbox)
         Clock.schedule_once(self._ask_perm, 0)
         return root
+
+        # ── 그래프 영역 --------------------------------------------
+        if USE_SPLIT:
+            self.graphs = []
+            gbox = BoxLayout(orientation="vertical",
+                             size_hint=(1, .60), spacing=4)
+            for _ in range(3):                    # X / Y / Z
+                gw = GraphWidget(size_hint=(1, 1/3))
+                self.graphs.append(gw)
+                gbox.add_widget(gw)
+            root.add_widget(gbox)
+        else:                                     # 단일 그래프
+            self.graph = GraphWidget(size_hint=(1, .60))
+            root.add_widget(self.graph)
+         
     # ..............................................................
     def _set_rec_dur(self, sec):
         self.REC_DURATION = sec
@@ -513,10 +530,15 @@ class FFTApp(App):
                 # 3) 그래프 갱신 ---------------------------------------
                 if axis_sets:
                     def _update(*_):
-                        for idx, axis in enumerate("xyz"):
-                            rms, pk = axis_sets.get(axis, ([], []))
-                            self.graphs[idx].update_graph(
-                                [rms, pk], [], xmax)
+                        if USE_SPLIT:
+                            for idx, axis in enumerate("xyz"):
+                                rms, pk = axis_sets.get(axis, ([], []))
+                                self.graphs[idx].update_graph([rms, pk], [], xmax)
+                        else:
+                            ds = []
+                            for axis in "xyz":
+                                ds += list(axis_sets.get(axis, ([], [])))
+                            self.graph.update_graph(ds, [], xmax)
                     Clock.schedule_once(_update)
 
         except Exception:
@@ -637,9 +659,16 @@ class FFTApp(App):
 
             # ── UI 업데이트 (메인 스레드) ───────────────────────────
             def _update(*_):
-                for i in range(3):
-                    rms, pk = graph_data[i]
-                    self.graphs[i].update_graph([rms, pk], [], xmax)
+                if USE_SPLIT:
+                    for i in range(3):
+                        rms, pk = graph_data[i]
+                        self.graphs[i].update_graph([rms, pk], [], xmax)
+                else:
+                    ds = []
+                    for i in range(3):
+                        rms, pk = graph_data[i]
+                        ds += rms + pk
+                    self.graph.update_graph(ds, [], xmax)
             Clock.schedule_once(_update)
 
         except Exception as e:
