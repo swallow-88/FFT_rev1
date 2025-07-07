@@ -222,50 +222,70 @@ class GraphWidget(Widget):
             if getattr(w, "_axis", False) or getattr(w, "_peak", False):
                 self.remove_widget(w)
     # ..............................................
+    # ★ 1) 안전한 dashed_line – 0-length·NaN 방지 + 버텍스 분할
+    def _safe_line(self, points, dash=False):
+        """
+        points: 1-D [x1,y1,x2,y2,…]  (len >= 4, 짝수)
+        dash  : True ⇒ 점선 (고정 패턴)
+        """
+        MAX_VERT = 4094        # Mali 일부 칩셋에서 안전한 한계
+        if dash:
+            dash_len, gap_len = 10.0, 6.0
+            for i in range(0, len(points)-2, 2):
+                x1, y1, x2, y2 = points[i:i+4]
+                seg_len = ((x2-x1)**2 + (y2-y1)**2) ** 0.5
+                if seg_len < 1e-9:                          # ★ 0-길이 skip
+                    continue
+                nx, ny, s, draw = (x2-x1)/seg_len, (y2-y1)/seg_len, 0.0, True
+                while s < seg_len:
+                    l = min(dash_len if draw else gap_len, seg_len - s)
+                    if draw:
+                        self._safe_line([x1+nx*s, y1+ny*s,
+                                         x1+nx*(s+l), y1+ny*(s+l)], dash=False)
+                    s, draw = s + l, not draw
+            return
+
+        # ★ Line() 당 MAX_VERT 초과 시 블록 단위로 분할
+        for i in range(0, len(points), MAX_VERT):
+            seg = points[i:i+MAX_VERT]
+            if len(seg) >= 4:
+                Line(points=seg, width=self.LINE_W)
+
+    # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
         self.canvas.clear()
         self._clear_labels()
         if not self.datasets:
             return
+
         with self.canvas:
             self._grid()
             peaks = []
             for idx, pts in enumerate(self.datasets):
-                if len(pts) < 2:                    # ★ 2점 미만이면 건너뜀
+                if len(pts) < 2:
                     continue
                 Color(*self.COLORS[idx // 2 % len(self.COLORS)])
                 scaled = self._scale(pts)
-                if len(scaled) < 4:                 # ★ 좌표쌍 1개 이하면 skip
+                if len(scaled) < 4:
                     continue
-                if idx % 2:   # Peak (점선)
-                    dash, gap = 10, 6
-                    for i in range(0, len(scaled) - 2, 2):
-                        x1, y1, x2, y2 = scaled[i:i + 4]
-                        seg = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
-                        if seg == 0:                # ★ 0-length 보호
-                            continue
-                        nx, ny, s, draw = (x2 - x1) / seg, (y2 - y1) / seg, 0.0, True
-                        while s < seg:
-                            l = min(dash if draw else gap, seg - s)
-                            if draw:
-                                Line(points=[x1 + nx * s, y1 + ny * s,
-                                             x1 + nx * (s + l), y1 + ny * (s + l)],
-                                     width=self.LINE_W)
-                            s, draw = s + l, not draw
-                else:         # RMS (실선)
-                    Line(points=scaled, width=self.LINE_W)
+
+                if idx % 2:         # Peak(점선)
+                    self._safe_line(scaled, dash=True)
+                else:               # RMS(실선)
+                    self._safe_line(scaled, dash=False)
                     fx, fy = max(pts, key=lambda p: p[1])
                     sx, sy = self._scale([(fx, fy)])[0:2]
                     peaks.append((fx, fy, sx, sy))
 
-            if len(self.diff) >= 2:                 # ★ diff 최소 2점 확인
+            if len(self.diff) >= 2:
                 Color(*self.DIFF_CLR)
-                Line(points=self._scale(self.diff), width=self.LINE_W)
+                self._safe_line(self._scale(self.diff), dash=False)
 
+        # 피크 라벨
         for fx, fy, sx, sy in peaks:
             lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None, None), size=(90, 24),
-                        pos=(sx - 30, sy + 6))
+                        size_hint=(None, None), size=(90, 22),
+                        pos=(sx-30, sy+6))
             lbl._peak = True
             self.add_widget(lbl)
 
