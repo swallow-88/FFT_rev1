@@ -210,7 +210,12 @@ class GraphWidget(Widget):
     # ..............................................
     def _grid(self):
         n_tick = int(self.max_x // 10) + 1
-        gx = (self.width - 2 * self.PAD_X) / max(n_tick - 1, 1)
+        if n_tick > 80:                           # ★ 80개 이상이면 간격 늘리기
+            step_hz = 10 * ((n_tick // 80) + 1)
+            n_tick  = int(self.max_x // step_hz) + 1
+        gx = (self.width - 2*self.PAD_X) / max(n_tick - 1, 1)
+
+     
         Color(.6, .6, .6)
         for i in range(n_tick):
             Line(points=[self.PAD_X + i * gx, self.PAD_Y,
@@ -255,10 +260,15 @@ class GraphWidget(Widget):
 
     # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
-        self.canvas.clear()
-        self._clear_labels()
-        if not self.datasets:
-            return
+          self.canvas.clear()
+          # ① 축 Label 은 tick 변하면 한 번만
+          cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
+          if cur_ticks != self._prev_ticks:
+              self._make_labels()
+              self._prev_ticks = cur_tick
+          self._clear_labels()
+          if not self.datasets:
+              return
 
         with self.canvas:
             self._grid()
@@ -303,6 +313,7 @@ class FFTApp(App):
         self.rec_start, self.rec_files = 0.0, {}
         self.REC_DURATION = REC_DURATION_DEFAULT
         self.last_fn, self.F0 = None, None
+        self._prev_ticks = (None, None)   # (max_x, (y_min, y_max))
 
     # ..............................................................
     def log(self, msg):
@@ -371,6 +382,16 @@ class FFTApp(App):
 
         Clock.schedule_once(self._ask_perm, 0)
         return root          # ★ return 은 함수 맨 마지막 한 번만
+
+
+ 
+    def _make_labels(self):
+        """축 라벨을 새로 만들어 children 에 추가"""
+        # ─ 이전 라벨 제거
+        for w in list(self.children):
+            if getattr(w, "_axis", False):
+                self.remove_widget(w
+
 
     # ..............................................................
     def _set_rec_dur(self, sec):
@@ -541,7 +562,7 @@ class FFTApp(App):
                             for axis in "xyz":
                                 ds += list(axis_sets.get(axis, ([], [])))
                             self.graph.update_graph(ds, [], xmax)
-                    Clock.schedule_once(_update)
+                    Clock.schedule_once(_update, 0.05)
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
