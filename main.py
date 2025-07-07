@@ -438,44 +438,69 @@ class FFTApp(App):
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    #  실시간 FFT 루프  (0.5 s 주기, Welch + 0.5 Hz 밴드 RMS·Peak)
+    # ------------------------------------------------------------------
     def _rt_fft_loop(self):
         try:
             while self.rt_on:
                 time.sleep(0.5)
+
+                # 1) 버퍼 스냅샷 (쓰레드 lock)
                 with self._buf_lock:
                     if any(len(self.rt_buf[a]) < MIN_LEN for a in "xyz"):
-                        continue
+                        continue                                # 버퍼 부족
                     buf_copy = {a: list(self.rt_buf[a]) for a in "xyz"}
-                axis_sets, xmax = {}, 0
+
+                axis_sets, xmax = {}, 0.0
+
+                # 2) 축별 FFT ------------------------------------------
                 for axis in "xyz":
                     ts, val, dt_arr = zip(*buf_copy[axis])
-                    fs = 1.0 / np.median(dt_arr[-512:])
-                    f_hi = min(fs * 0.5, MAX_FMAX)
-                    if f_hi < HPF_CUTOFF + BAND_HZ:
+
+                    # ── 샘플링 주파수 실측 --------------------------
+                    dt_seg = np.array(dt_arr[-512:])
+                    dt_seg = dt_seg[dt_seg > 1e-5]             # 100 µs 이하·0 제거
+                    if dt_seg.size == 0:
                         continue
+                    fs = 1.0 / float(np.median(dt_seg))
+                    if fs < 2 * (HPF_CUTOFF + BAND_HZ):        # Nyquist < 분석 밴드
+                        continue
+                    f_hi = min(fs * 0.5, MAX_FMAX)
+
+                    # ── Welch 스펙트럼 → 0.5 Hz 밴드 RMS·Peak ----
                     band_rms, band_pk = welch_band_stats(
-                        np.asarray(val), fs, HPF_CUTOFF, f_hi, BAND_HZ)
+                        np.asarray(val, float),
+                        fs      = fs,
+                        f_lo    = HPF_CUTOFF,
+                        f_hi    = f_hi,
+                        band_w  = BAND_HZ)
+
                     if not band_rms:
                         continue
+
                     axis_sets[axis] = (band_rms, band_pk)
                     xmax = max(xmax, f_hi)
-                    # 공진수 추적
-                    lo, hi = FN_BAND
+
+                    # ── 공진수(Fₙ) 실시간 추적 ------------------
+                    loF, hiF = FN_BAND
                     freqs = np.array([x for x, _ in band_rms])
-                    mags = np.array([y for _, y in band_rms])
-                    s = (freqs >= lo) & (freqs <= hi)
+                    mags  = np.array([y for _, y in band_rms])
+                    s = (freqs >= loF) & (freqs <= hiF)
                     if s.any():
                         self.last_fn = freqs[s][mags[s].argmax()]
-                # 그래프 갱신
+
+                # 3) 그래프 갱신 ---------------------------------------
                 if axis_sets:
                     def _update(*_):
                         for idx, axis in enumerate("xyz"):
-                            data = axis_sets.get(axis, ([], []))
+                            rms, pk = axis_sets.get(axis, ([], []))
                             self.graphs[idx].update_graph(
-                                list(data), [], xmax)
+                                [rms, pk], [], xmax)
                     Clock.schedule_once(_update)
+
         except Exception:
-            Logger.exception("Realtime thread crashed")
+            Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
@@ -526,26 +551,32 @@ class FFTApp(App):
         # ------------------------------------------------------------------
         #  CSV 1 ~ 3 개 → X/Y/Z 그래프 갱신  (RMS·Peak, 공진수 추적 포함)
         # ------------------------------------------------------------------
+     # ------------------------------------------------------------------
+    #  CSV 1 ~ 3개 → X/Y/Z 그래프 갱신  (0.5 Hz 밴드 RMS·Peak + 공진수 추적)
+    # ------------------------------------------------------------------
     def _fft_bg(self):
         try:
-            # 축별 누적 결과 {0:(rms,pk), …}
             graph_data = {0: ([], []), 1: ([], []), 2: ([], [])}
             xmax = 0.0
 
-            # 파일마다 처리 ------------------------------------------------
+            # ── 파일마다 처리 ───────────────────────────────────────────
             for f_idx, path in enumerate(self.paths):
                 t, a = self._load_csv(path)
                 if t is None:
                     raise ValueError(f"{os.path.basename(path)}: CSV parse fail")
 
-                # 샘플링 파라미터
-                dt   = np.median(np.diff(t))
+                # ① 샘플링 파라미터 ------------------------------------
+                dt_arr = np.diff(t)
+                dt_arr = dt_arr[dt_arr > 0]          # 0·음수 제거★
+                if dt_arr.size == 0:
+                    raise ValueError("non-positive dt in CSV")
+                dt   = float(np.median(dt_arr))
                 nyq  = 0.5 / dt
-                FMAX = int(min(nyq, MAX_FMAX))
-                if FMAX < HPF_CUTOFF + BAND_HZ:
-                    raise ValueError("sample-rate too low")
+                FMAX = min(nyq, MAX_FMAX)
+                if FMAX < HPF_CUTOFF + BAND_HZ:      # 최소 한 밴드 확보★
+                    FMAX = HPF_CUTOFF + BAND_HZ
 
-                # FFT 스펙트럼
+                # ② FFT 스펙트럼 ---------------------------------------
                 sig   = (a - a.mean()) * np.hanning(len(a))
                 raw   = np.fft.fft(sig)
                 amp_a = 2 * np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
@@ -555,40 +586,40 @@ class FFTApp(App):
                 freq, amp_a = freq[sel], amp_a[sel]
                 amp_lin, REF0 = acc_to_spec(freq, amp_a)
 
-                # 0.5 Hz 밴드 RMS·Peak(dB)
+                # ③ 0.5 Hz 밴드 RMS·Peak(dB) --------------------------
                 rms_line, pk_line = [], []
                 for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
-                    hi  = lo + BAND_HZ
-                    m   = (freq >= lo) & (freq < hi)
+                    hi = lo + BAND_HZ
+                    m  = (freq >= lo) & (freq < hi)
                     if not m.any():
                         continue
                     cen = (lo + hi) / 2
                     rms = np.sqrt(np.mean(amp_lin[m]**2))
                     pk  = amp_lin[m].max()
-                    rms_line.append((cen,
-                        20*np.log10(max(rms, REF0*1e-4)/REF0)))
-                    pk_line .append((cen,
-                        20*np.log10(max(pk , REF0*1e-4)/REF0)))
+                    rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
+                    pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-                if len(rms_line) >= SMOOTH_N:
-                    rms_line = list(zip([x for x, _ in rms_line],smooth_y([y for _, y in rms_line])))
+                if len(rms_line) >= SMOOTH_N:        # 이동평균 스무딩
+                    rms_line = list(zip(
+                        [x for x, _ in rms_line],
+                        smooth_y([y for _, y in rms_line])))
 
-                    # 공진수(Fₙ) 추적
+                # ④ 공진수(Fₙ) 추적 -----------------------------------
                 loF, hiF = FN_BAND
                 if rms_line:
-                    c = np.array([x for x, _ in rms_line])
-                    m = np.array([y for _, y in rms_line])
-                    s = (c >= loF) & (c <= hiF)
+                    freq_cent = np.array([x for x, _ in rms_line])
+                    mag       = np.array([y for _, y in rms_line])
+                    s = (freq_cent >= loF) & (freq_cent <= hiF)
                     if s.any():
-                        self.last_fn = c[s][m[s].argmax()]
+                        self.last_fn = freq_cent[s][mag[s].argmax()]
 
-                # ---------- 그래프 축 결정 ----------
+                # ⑤ 그래프 축 결정 ------------------------------------
                 m   = re.search(r"_([xyz])_", os.path.basename(path).lower())
                 idx = {"x":0, "y":1, "z":2}.get(m.group(1)) if m else f_idx % 3
                 graph_data[idx] = (rms_line, pk_line)
                 xmax = max(xmax, FMAX)
 
-            # ---------------- UI 스케줄 ----------------
+            # ── UI 업데이트 (메인 스레드) ───────────────────────────
             def _update(*_):
                 for i in range(3):
                     rms, pk = graph_data[i]
@@ -599,8 +630,8 @@ class FFTApp(App):
             Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
 
         finally:
-            Clock.schedule_once(
-                lambda *_: setattr(self.btn_run, "disabled", False))
+            Clock.schedule_once(lambda *_:
+                setattr(self.btn_run, "disabled", False))
          
     # ..............................................................
     def _load_csv(self, path):
