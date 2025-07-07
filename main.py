@@ -43,6 +43,44 @@ FN_BAND = (5, 50)       # 공진 탐색 범위
 BUF_LEN, MIN_LEN = 16384, 256
 USE_SPLIT = True
 
+
+# ── 파일 맨 위 가까이에 추가 ───────────────────────────────
+import faulthandler, signal, threading
+
+# ① SIGSEGV·SIGABRT 발생 시 파이썬 스택을 남기기
+_crash_fp = open("/sdcard/fft_crash.log", "a", buffering=1)  # line buffered
+faulthandler.enable(file=_crash_fp, all_threads=True)
+# Android 12+ 에서는 SIGQUIT 을 더 쓰므로 추가
+for sig in (signal.SIGSEGV, signal.SIGABRT, signal.SIGQUIT):
+    faulthandler.register(sig, file=_crash_fp, all_threads=True)
+
+# ② Python 3.8+ : 스레드 예외 훅
+def _thread_excepthook(args):
+    _dump_crash("".join(traceback.format_exception(args.exc_type,
+                                                   args.exc_value,
+                                                   args.exc_traceback)))
+threading.excepthook = _thread_excepthook
+
+from kivy.config import Config
+Config.set('kivy', 'log_level', 'debug')
+Config.set('kivy', 'log_enable', '1')
+Config.set('kivy', 'log_dir',  '/sdcard')            # 폴더 바꿀 수 있음
+Config.set('kivy', 'log_name', 'fft_kivy_%y-%m-%d_%_.txt')
+Config.write()
+
+import subprocess, os, time
+
+def dump_logcat(tag="fft_logcat"):
+    """최근 200줄 logcat 을 /sdcard/tag_yyyyMMdd_HHmmss.txt 로 저장"""
+    try:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = f"/sdcard/{tag}_{ts}.txt"
+        with open(path, "w") as fp:
+            subprocess.run(["logcat", "-d", "-t", "200"], stdout=fp, check=False)
+    except Exception as e:
+        Logger.warning(f"logcat dump fail: {e}")
+
+
 # ------------------------------------------------------------------
 #                    ★ ② Android 전용 준비 ★
 # ------------------------------------------------------------------
@@ -89,6 +127,8 @@ def _dump_crash(txt: str):
     Logger.error(txt)
 
 def _ex(et, ev, tb):
+    dump_logcat("crash")                 # ★ logcat 스냅샷
+    txt = "".join(traceback.format_exception(et, ev, tb))
     _dump_crash("".join(traceback.format_exception(et, ev, tb)))
     if ANDROID:
         Clock.schedule_once(lambda *_:
@@ -287,17 +327,14 @@ class GraphWidget(Widget):
 
     # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
-
         self.canvas.clear()
+        self._clear_labels()                 # 화면에 그리기 전에 label 정리
 
-        self._clear_labels()                 # ★ ④ 먼저 기존 지우기
+		# ── 피크 라벨               # ★ ④ 먼저 기존 지우기
         cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
         if cur_ticks != self._prev_ticks:    # 새 tick이면 만들기
             self._make_labels()
             self._prev_ticks = cur_ticks
-		
-        if not self.datasets:
-            return
 
         with self.canvas:
             self._grid()
@@ -555,25 +592,22 @@ class FFTApp(App):
                     if s.any():
                         self.last_fn = freqs[s][mags[s].argmax()]
 
+
                 # 3) 그래프 갱신 ---------------------------------------
                 if axis_sets:
-                    def _update(*_):
-                        if USE_SPLIT:
-                            for idx, axis in enumerate("xyz"):
-                                rms, pk = axis_sets.get(axis, ([], []))
-                                self.graphs[idx].update_graph([rms, pk], [], xmax)
-                        else:
-                            ds = []
-                            for axis in "xyz":
-                                ds += list(axis_sets.get(axis, ([], [])))
-                            self.graph.update_graph(ds, [], xmax)
+                    def _update(dt):
+                        # 4-space 들여쓰기!  ⬇︎
+                        for idx, axis in enumerate("xyz"):
+                            rms, pk = axis_sets.get(axis, ([], []))
+                            self.graphs[idx].update_graph([rms, pk], [], xmax)
+
                     Clock.schedule_once(_update, 0.05)
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
             Clock.schedule_once(lambda *_:
-                setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
+                                setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
     # ------------------------------------------------------------------
     #                    ★ ⑤-2  CSV-FFT 루틴 ★
     # ------------------------------------------------------------------
