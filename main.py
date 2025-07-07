@@ -359,17 +359,19 @@ class FFTApp(App):
         # ── 그래프 영역 --------------------------------------------
         if USE_SPLIT:
             self.graphs = []
-            gbox = BoxLayout(orientation="vertical",
-                             size_hint=(1, .60), spacing=4)
-            for _ in range(3):                    # X / Y / Z
+            gbox = BoxLayout(orientation="vertical", size_hint=(1, .60), spacing=4)
+            for _ in range(3):                      # X / Y / Z
                 gw = GraphWidget(size_hint=(1, 1/3))
                 self.graphs.append(gw)
                 gbox.add_widget(gw)
             root.add_widget(gbox)
-        else:                                     # 단일 그래프
+        else:
             self.graph = GraphWidget(size_hint=(1, .60))
             root.add_widget(self.graph)
-         
+
+        Clock.schedule_once(self._ask_perm, 0)
+        return root          # ★ return 은 함수 맨 마지막 한 번만
+
     # ..............................................................
     def _set_rec_dur(self, sec):
         self.REC_DURATION = sec
@@ -637,12 +639,12 @@ class FFTApp(App):
                     rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
                     pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
 
-                if len(rms_line) >= SMOOTH_N:        # 이동평균 스무딩
+                if len(rms_line) >= SMOOTH_N:
                     rms_line = list(zip(
                         [x for x, _ in rms_line],
                         smooth_y([y for _, y in rms_line])))
 
-                # ④ 공진수(Fₙ) 추적 -----------------------------------
+                # 공진수(Fₙ) 추적 ------------------------------★ 들여쓰기 0
                 loF, hiF = FN_BAND
                 if rms_line:
                     freq_cent = np.array([x for x, _ in rms_line])
