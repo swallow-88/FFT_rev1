@@ -179,6 +179,8 @@ class GraphWidget(Widget):
  
     def _make_labels(self):
         """X·Y 축 라벨을 새로 만듦 (tick 변경 시에만 호출)"""
+        if self.width < 5:
+            return
         for w in list(self.children):
             if getattr(w, "_axis", False):
                 self.remove_widget(w)
@@ -287,11 +289,13 @@ class GraphWidget(Widget):
     def redraw(self, *_):
 
         self.canvas.clear()
+
+        self._clear_labels()                 # ★ ④ 먼저 기존 지우기
         cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
-        if cur_ticks != self._prev_ticks:
+        if cur_ticks != self._prev_ticks:    # 새 tick이면 만들기
             self._make_labels()
             self._prev_ticks = cur_ticks
-        self._clear_labels()
+		
         if not self.datasets:
             return
 
@@ -388,35 +392,11 @@ class FFTApp(App):
             gw = GraphWidget(size_hint=(1, 1 / 3))
             self.graphs.append(gw)
             gbox.add_widget(gw)
+
         root.add_widget(gbox)
         Clock.schedule_once(self._ask_perm, 0)
-        return root
-
-        # ── 그래프 영역 --------------------------------------------
-        if USE_SPLIT:
-            self.graphs = []
-            gbox = BoxLayout(orientation="vertical", size_hint=(1, .60), spacing=4)
-            for _ in range(3):                      # X / Y / Z
-                gw = GraphWidget(size_hint=(1, 1/3))
-                self.graphs.append(gw)
-                gbox.add_widget(gw)
-            root.add_widget(gbox)
-        else:
-            self.graph = GraphWidget(size_hint=(1, .60))
-            root.add_widget(self.graph)
-
-        Clock.schedule_once(self._ask_perm, 0)
-        return root          # ★ return 은 함수 맨 마지막 한 번만
-
-
+        return root          # ← build() 끝, 아래 중복 블록 삭제
  
-    def _make_labels(self):
-        """축 라벨을 새로 만들어 children 에 추가"""
-        # ─ 이전 라벨 제거
-        for w in list(self.children):
-            if getattr(w, "_axis", False):
-                self.remove_widget(w
-
 
     # ..............................................................
     def _set_rec_dur(self, sec):
