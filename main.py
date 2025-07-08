@@ -45,21 +45,30 @@ USE_SPLIT = True
 
 
 # ── 파일 맨 위 가까이에 추가 ───────────────────────────────
-import faulthandler, signal, threading
 
-# ① SIGSEGV·SIGABRT 발생 시 파이썬 스택을 남기기
-_crash_fp = open("/sdcard/fft_crash.log", "a", buffering=1)  # line buffered
-faulthandler.enable(file=_crash_fp, all_threads=True)
-# Android 12+ 에서는 SIGQUIT 을 더 쓰므로 추가
-for sig in (signal.SIGSEGV, signal.SIGABRT, signal.SIGQUIT):
-    faulthandler.register(sig, file=_crash_fp, all_threads=True)
+import io, faulthandler, signal, os, tempfile
 
-# ② Python 3.8+ : 스레드 예외 훅
-def _thread_excepthook(args):
-    _dump_crash("".join(traceback.format_exception(args.exc_type,
-                                                   args.exc_value,
-                                                   args.exc_traceback)))
-threading.excepthook = _thread_excepthook
+def _safe_faulthandler():
+    """
+    /sdcard 가 막혀 있으면 앱 전용 디렉터리로 자동 fallback.
+    파일 열기에 실패해도 StringIO 로 대체해 faulthandler 가
+    enable() 단계에서 죽지 않도록 한다.
+    """
+    paths = ["/sdcard/fft_crash.log",
+             os.path.join(tempfile.gettempdir(), "fft_crash.log")]
+    for p in paths:
+        try:
+            fp = open(p, "a", buffering=1)
+            break
+        except PermissionError:
+            fp = None
+    if fp is None:                       # 모두 실패 ⇒ 메모리 버퍼라도
+        fp = io.StringIO()
+    faulthandler.enable(file=fp, all_threads=True)
+    for sig in (signal.SIGSEGV, signal.SIGABRT, signal.SIGQUIT):
+        faulthandler.register(sig, file=fp, all_threads=True)
+
+_safe_faulthandler()
 
 from kivy.config import Config
 Config.set('kivy', 'log_level', 'debug')
@@ -328,9 +337,10 @@ class GraphWidget(Widget):
     # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
         self.canvas.clear()
-        self._clear_labels()                 # 화면에 그리기 전에 label 정리
+        self._clear_labels()                 
+	# 화면에 그리기 전에 label 정리
 
-		# ── 피크 라벨               # ★ ④ 먼저 기존 지우기
+	# ── 피크 라벨               # ★ ④ 먼저 기존 지우기
         cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
         if cur_ticks != self._prev_ticks:    # 새 tick이면 만들기
             self._make_labels()
@@ -596,7 +606,6 @@ class FFTApp(App):
                 # 3) 그래프 갱신 ---------------------------------------
                 if axis_sets:
                     def _update(dt):
-                        # 4-space 들여쓰기!  ⬇︎
                         for idx, axis in enumerate("xyz"):
                             rms, pk = axis_sets.get(axis, ([], []))
                             self.graphs[idx].update_graph([rms, pk], [], xmax)
