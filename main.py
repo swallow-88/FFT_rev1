@@ -679,12 +679,17 @@ class FFTApp(App):
 
             Clock.schedule_once(_update)
 
-        except Exception as e:
-            Clock.schedule_once(lambda *_: self.log(f"FFT 오류: {e}"))
-
-        finally:
-            Clock.schedule_once(lambda *_:
-                setattr(self.btn_run, "disabled", False))
+	except Exception as exc:
+	    # ── 방법 ② : 내부 콜백 함수 ----------------------------------
+	    err_msg = str(exc)
+	
+	    def _show_err(dt):
+	        self.log(f"FFT 오류: {err_msg}")
+	
+	    Clock.schedule_once(_show_err)
+	
+	finally:
+	    Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
          
     # ..............................................................
     def _load_csv(self, path):
