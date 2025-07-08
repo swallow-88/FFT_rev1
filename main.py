@@ -1,16 +1,40 @@
-"""
-FFT CSV Viewer – SAF + Android ‘모든-파일’ 권한 대응 - 통합 안정판
-+ 10/30/60/120 s 실시간 가속도 기록 (Downloads 폴더 저장)
-+ X/Y/Z 세로 3 분할 그래프  - 각 축 RMS(실선)·Peak(점선) 표시
-+ CSV 최대 3 개(x / y / z) 선택, ΔF 비교·실시간 공진수 추적
-─────────────────────────────────────────────────────────────
-변경 핵심
- 1) self.graph ➜ self.graphs[0|1|2]  - 축별 위젯 분리
- 2) _rt_fft_loop / _fft_bg  데이터→그래프 매핑 전면 수정
- 3) 버퍼 공유용 self._buf_lock 추가 (스레드 안정)
- 4) DOWNLOAD_DIR 빈 문자열 Fallback 보강
- 5) 미사용 _record_poll 제거 + 코드 전반 소규모 정리
-"""
+
+# 0. Config – 반드시 Kivy 임포트 전! -------------------------------
+import os, tempfile, io, csv, sys, traceback, threading, datetime, uuid, \
+       urllib.parse, time, re, numpy as np, faulthandler, signal, subprocess
+from collections import deque
+from numpy.fft import fft
+from kivy.config import Config
+
+
+_LOG_DIR = os.path.join(tempfile.gettempdir(), "fftlogs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+Config.set("kivy", "log_dir",  _LOG_DIR)
+Config.set("kivy", "log_level", "debug")
+
+###############################################################################
+# 2. 안전한 faulthandler
+###############################################################################
+def _enable_fh():
+    paths = [os.path.join(tempfile.gettempdir(), "fft_crash.log")]
+    for p in paths:
+        try:
+            fp = open(p, "a", buffering=1)
+            break
+        except PermissionError:
+            fp = None
+    if fp is None:
+        fp = io.StringIO()
+    faulthandler.enable(file=fp, all_threads=True)
+    for sig_name in ("SIGSEGV", "SIGABRT", "SIGQUIT"):
+        if hasattr(signal, sig_name):
+            faulthandler.register(getattr(signal, sig_name), file=fp,
+                                  all_threads=True)
+_enable_fh()
+
+###############################################################################
+# 3. Android / 
+
 
 import os, csv, sys, traceback, threading, datetime, uuid, urllib.parse, time, re
 import numpy as np
@@ -41,53 +65,6 @@ HPF_CUTOFF, MAX_FMAX = 5.0, 200
 REC_DURATION_DEFAULT = 60.0
 FN_BAND = (5, 50)       # 공진 탐색 범위
 BUF_LEN, MIN_LEN = 16384, 256
-USE_SPLIT = True
-
-
-# ── 파일 맨 위 가까이에 추가 ───────────────────────────────
-
-import io, faulthandler, signal, os, tempfile
-
-def _safe_faulthandler():
-    """
-    /sdcard 가 막혀 있으면 앱 전용 디렉터리로 자동 fallback.
-    파일 열기에 실패해도 StringIO 로 대체해 faulthandler 가
-    enable() 단계에서 죽지 않도록 한다.
-    """
-    paths = ["/sdcard/fft_crash.log",
-             os.path.join(tempfile.gettempdir(), "fft_crash.log")]
-    for p in paths:
-        try:
-            fp = open(p, "a", buffering=1)
-            break
-        except PermissionError:
-            fp = None
-    if fp is None:                       # 모두 실패 ⇒ 메모리 버퍼라도
-        fp = io.StringIO()
-    faulthandler.enable(file=fp, all_threads=True)
-    for sig in (signal.SIGSEGV, signal.SIGABRT, signal.SIGQUIT):
-        faulthandler.register(sig, file=fp, all_threads=True)
-
-_safe_faulthandler()
-
-from kivy.config import Config
-Config.set('kivy', 'log_level', 'debug')
-Config.set('kivy', 'log_enable', '1')
-Config.set('kivy', 'log_dir',  '/sdcard')            # 폴더 바꿀 수 있음
-Config.set('kivy', 'log_name', 'fft_kivy_%y-%m-%d_%_.txt')
-Config.write()
-
-import subprocess, os, time
-
-def dump_logcat(tag="fft_logcat"):
-    """최근 200줄 logcat 을 /sdcard/tag_yyyyMMdd_HHmmss.txt 로 저장"""
-    try:
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        path = f"/sdcard/{tag}_{ts}.txt"
-        with open(path, "w") as fp:
-            subprocess.run(["logcat", "-d", "-t", "200"], stdout=fp, check=False)
-    except Exception as e:
-        Logger.warning(f"logcat dump fail: {e}")
 
 
 # ------------------------------------------------------------------
@@ -223,7 +200,7 @@ class GraphWidget(Widget):
         self.datasets, self.diff, self.max_x = [], [], 1
         self.Y_MIN, self.Y_MAX, self.Y_TICKS = 0, 100, [0, 20, 40, 60, 80, 100]
         self._prev_ticks = (None, None)
-        self.bind(size=self.redraw)
+        self.bind(size=lambda *_: self.redraw())
 
  
     def _make_labels(self):
@@ -306,76 +283,63 @@ class GraphWidget(Widget):
                 self.remove_widget(w)
     # ..............................................
     # ★ 1) 안전한 dashed_line – 0-length·NaN 방지 + 버텍스 분할
-    def _safe_line(self, points, dash=False):
-        """
-        points: 1-D [x1,y1,x2,y2,…]  (len >= 4, 짝수)
-        dash  : True ⇒ 점선 (고정 패턴)
-        """
-        MAX_VERT = 4094        # Mali 일부 칩셋에서 안전한 한계
-        if dash:
-            dash_len, gap_len = 10.0, 6.0
-            for i in range(0, len(points)-2, 2):
-                x1, y1, x2, y2 = points[i:i+4]
-                seg_len = ((x2-x1)**2 + (y2-y1)**2) ** 0.5
-                if seg_len < 1e-9:                          # ★ 0-길이 skip
-                    continue
-                nx, ny, s, draw = (x2-x1)/seg_len, (y2-y1)/seg_len, 0.0, True
-                while s < seg_len:
-                    l = min(dash_len if draw else gap_len, seg_len - s)
-                    if draw:
-                        self._safe_line([x1+nx*s, y1+ny*s,
-                                         x1+nx*(s+l), y1+ny*(s+l)], dash=False)
-                    s, draw = s + l, not draw
+    def _safe_line(self, pts, dash=False):
+        if len(pts) < 4:
             return
+        MAX_V = 4094
+        if dash:
+            dash_len, gap_len = 10., 6.
+            for i in range(0, len(pts)-2, 2):
+                x1,y1,x2,y2 = pts[i:i+4]
+                seg = ((x2-x1)**2+(y2-y1)**2)**0.5
+                if seg < 1e-6:
+                    continue
+                nx,ny,ofs,draw = (x2-x1)/seg,(y2-y1)/seg,0.,True
+                while ofs < seg:
+                    ln = min(dash_len if draw else gap_len, seg-ofs)
+                    if draw:
+                        self._safe_line([x1+nx*ofs,y1+ny*ofs,
+                                         x1+nx*(ofs+ln),y1+ny*(ofs+ln)])
+                    ofs += ln; draw = not draw
+            return
+        for i in range(0,len(pts),MAX_V):
+            chunk = pts[i:i+MAX_V]
+            if len(chunk) >= 4:
+                Line(points=chunk, width=self.LINE_W)
 
-        # ★ Line() 당 MAX_VERT 초과 시 블록 단위로 분할
-        for i in range(0, len(points), MAX_VERT):
-            seg = points[i:i+MAX_VERT]
-            if len(seg) >= 4:
-                Line(points=seg, width=self.LINE_W)
-
-    # ★ 2) redraw() – _safe_line 호출로 교체
     def redraw(self, *_):
         self.canvas.clear()
-        self._clear_labels()                 
-	# 화면에 그리기 전에 label 정리
+        self._clear_labels()
 
-	# ── 피크 라벨               # ★ ④ 먼저 기존 지우기
-        cur_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
-        if cur_ticks != self._prev_ticks:    # 새 tick이면 만들기
+        if not self.datasets:
+            return
+
+        if (self.max_x,(self.Y_MIN,self.Y_MAX)) != self._prev_ticks:
             self._make_labels()
-            self._prev_ticks = cur_ticks
+            self._prev_ticks = (self.max_x,(self.Y_MIN,self.Y_MAX))
 
         with self.canvas:
             self._grid()
-            peaks = []
-            for idx, pts in enumerate(self.datasets):
-                if len(pts) < 2:
-                    continue
-                Color(*self.COLORS[idx // 2 % len(self.COLORS)])
-                scaled = self._scale(pts)
-                if len(scaled) < 4:
-                    continue
-
-                if idx % 2:         # Peak(점선)
-                    self._safe_line(scaled, dash=True)
-                else:               # RMS(실선)
-                    self._safe_line(scaled, dash=False)
-                    fx, fy = max(pts, key=lambda p: p[1])
-                    sx, sy = self._scale([(fx, fy)])[0:2]
-                    peaks.append((fx, fy, sx, sy))
-
+            peaks=[]
+            for i,pts in enumerate(self.datasets):
+                if len(pts) < 2: continue
+                Color(*self.COLORS[i//2 % len(self.COLORS)])
+                sc = self._scale(pts)
+                if not sc: continue
+                self._safe_line(sc, dash=bool(i%2))
+                if not i%2:
+                    fx,fy = max(pts,key=lambda p:p[1])
+                    sx,sy = self._scale([(fx,fy)])[0:2]
+                    peaks.append((fx,fy,sx,sy))
             if len(self.diff) >= 2:
                 Color(*self.DIFF_CLR)
-                self._safe_line(self._scale(self.diff), dash=False)
+                self._safe_line(self._scale(self.diff))
+        # 라벨
+        for fx,fy,sx,sy in peaks:
+            self.add_widget(Label(text=f"▲ {fx:.1f} Hz",
+                                  size_hint=(None,None),size=(90,22),
+                                  pos=(sx-30,sy+6), _peak=True))
 
-        # 피크 라벨
-        for fx, fy, sx, sy in peaks:
-            lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None, None), size=(90, 22),
-                        pos=(sx-30, sy+6))
-            lbl._peak = True
-            self.add_widget(lbl)
 
 # ------------------------------------------------------------------
 #                    ★ ⑤ 메인 앱 클래스 ★
@@ -553,70 +517,49 @@ class FFTApp(App):
     # ------------------------------------------------------------------
     #  실시간 FFT 루프  (0.5 s 주기, Welch + 0.5 Hz 밴드 RMS·Peak)
     # ------------------------------------------------------------------
+
+    # ---- realtime FFT 루프: schedule_once 콜백 서명 수정 ----
     def _rt_fft_loop(self):
         try:
             while self.rt_on:
                 time.sleep(0.5)
-
-                # 1) 버퍼 스냅샷 (쓰레드 lock)
                 with self._buf_lock:
                     if any(len(self.rt_buf[a]) < MIN_LEN for a in "xyz"):
-                        continue                                # 버퍼 부족
-                    buf_copy = {a: list(self.rt_buf[a]) for a in "xyz"}
-
-                axis_sets, xmax = {}, 0.0
-
-                # 2) 축별 FFT ------------------------------------------
-                for axis in "xyz":
-                    ts, val, dt_arr = zip(*buf_copy[axis])
-
-                    # ── 샘플링 주파수 실측 --------------------------
-                    dt_seg = np.array(dt_arr[-512:])
-                    dt_seg = dt_seg[dt_seg > 1e-5]             # 100 µs 이하·0 제거
-                    if dt_seg.size == 0:
                         continue
-                    fs = 1.0 / float(np.median(dt_seg))
-                    if fs < 2 * (HPF_CUTOFF + BAND_HZ):        # Nyquist < 분석 밴드
-                        continue
-                    f_hi = min(fs * 0.5, MAX_FMAX)
+                    buf = {a:list(self.rt_buf[a]) for a in "xyz"}
 
-                    # ── Welch 스펙트럼 → 0.5 Hz 밴드 RMS·Peak ----
-                    band_rms, band_pk = welch_band_stats(
-                        np.asarray(val, float),
-                        fs      = fs,
-                        f_lo    = HPF_CUTOFF,
-                        f_hi    = f_hi,
-                        band_w  = BAND_HZ)
+                axis_sets, xmax = {}, 0.
+                for a in "xyz":
+                    ts,val,dt = zip(*buf[a])
+                    dt_seg=np.array(dt[-512:]); dt_seg=dt_seg[dt_seg>1e-5]
+                    if not dt_seg.size: continue
+                    fs = 1./float(np.median(dt_seg))
+                    if fs < 2*(HPF_CUTOFF+BAND_HZ): continue
+                    f_hi = min(fs*0.5, MAX_FMAX)
+                    rms,pk = welch_band_stats(np.asarray(val,float), fs,
+                                              HPF_CUTOFF, f_hi, BAND_HZ)
+                    if not rms: continue
+                    axis_sets[a]=(rms,pk); xmax=max(xmax,f_hi)
 
-                    if not band_rms:
-                        continue
+                    # Fₙ 추적
+                    lo,hi = FN_BAND
+                    f_arr = np.array([x for x,_ in rms])
+                    m_arr = np.array([y for _,y in rms])
+                    sel = (f_arr>=lo)&(f_arr<=hi)
+                    if sel.any():
+                        self.last_fn = f_arr[sel][m_arr[sel].argmax()]
 
-                    axis_sets[axis] = (band_rms, band_pk)
-                    xmax = max(xmax, f_hi)
-
-                    # ── 공진수(Fₙ) 실시간 추적 ------------------
-                    loF, hiF = FN_BAND
-                    freqs = np.array([x for x, _ in band_rms])
-                    mags  = np.array([y for _, y in band_rms])
-                    s = (freqs >= loF) & (freqs <= hiF)
-                    if s.any():
-                        self.last_fn = freqs[s][mags[s].argmax()]
-
-
-                # 3) 그래프 갱신 ---------------------------------------
                 if axis_sets:
-                    def _update(dt):
-                        for idx, axis in enumerate("xyz"):
-                            rms, pk = axis_sets.get(axis, ([], []))
-                            self.graphs[idx].update_graph([rms, pk], [], xmax)
-
-                    Clock.schedule_once(_update, 0.05)
-
+                    def _update(_dt):
+                        for i,a in enumerate("xyz"):
+                            self.graphs[i].update_graph(
+                                list(axis_sets.get(a,([],[]))), [], xmax)
+                    Clock.schedule_once(_update)
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
-            self.rt_on = False
-            Clock.schedule_once(lambda *_:
-                                setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
+            self.rt_on=False
+            Clock.schedule_once(lambda *_: setattr(self.btn_rt,"text",
+                                                   "Realtime FFT (OFF)"))
     # ------------------------------------------------------------------
     #                    ★ ⑤-2  CSV-FFT 루틴 ★
     # ------------------------------------------------------------------
@@ -729,17 +672,11 @@ class FFTApp(App):
                 xmax = max(xmax, FMAX)
 
             # ── UI 업데이트 (메인 스레드) ───────────────────────────
-            def _update(*_):
-                if USE_SPLIT:
-                    for i in range(3):
-                        rms, pk = graph_data[i]
-                        self.graphs[i].update_graph([rms, pk], [], xmax)
-                else:
-                    ds = []
-                    for i in range(3):
-                        rms, pk = graph_data[i]
-                        ds += rms + pk
-                    self.graph.update_graph(ds, [], xmax)
+	    def _update(_dt):
+                for i in range(3):
+                    rms, pk = graph_data[i]
+                    self.graphs[i].update_graph([rms, pk], [], xmax)
+
             Clock.schedule_once(_update)
 
         except Exception as e:
