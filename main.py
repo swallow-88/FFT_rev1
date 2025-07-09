@@ -110,7 +110,7 @@ HPF_CUTOFF         = 5.0
 MAX_FMAX           = 50
 REC_DURATION_DEF   = 60.0
 FN_BAND            = (5, 50)
-BUF_LEN, MIN_LEN   = 4096, 4096      # 실시간 버퍼
+BUF_LEN, MIN_LEN   = 4096, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
