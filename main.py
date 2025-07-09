@@ -1,4 +1,3 @@
- 
 ###############################################################################
 # 0. Config ― 반드시 Kivy import *이전*에!
 ###############################################################################
@@ -113,7 +112,6 @@ FN_BAND            = (5, 50)
 BUF_LEN, MIN_LEN   = 4096, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
-
 
 
 
@@ -466,7 +464,7 @@ class FFTApp(App):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
         # 안내
-        self.label = Label(text="Pick up to 3 CSV (x/y/z)", size_hint=(1,.05))
+        self.label = Label(text="Pick up to 2 CSV)", size_hint=(1,.05))
         root.add_widget(self.label)
 
         # 버튼
@@ -528,7 +526,7 @@ class FFTApp(App):
     def _set_smooth(self, n):
         global SMOOTH_N
         SMOOTH_N = n
-        self.log(f"▶ 스무딩 창 = {SMOOTH_N}")
+        self.log(f"▶ SMOOTHING WINDOW = {SMOOTH_N}")
 
     # ───────────────────────────── 권한
     def _ask_perm(self, *_):
@@ -553,11 +551,11 @@ class FFTApp(App):
     # ───────────────────────────── 레코딩
     def start_recording(self, *_):
         if self.rec_on:
-            self.log("이미 기록 중입니다"); return
+            self.log("RECORDING..."); return
         try:
             accelerometer.enable()
         except Exception as e:
-            self.log(f"센서 사용 불가: {e}"); return
+            self.log(f"DO NOT USE THE SENSOR: {e}"); return
         if not self.rt_on:     # 실시간 FFT 동시 시작
             self.toggle_realtime()
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -570,7 +568,7 @@ class FFTApp(App):
                 csv.writer(fp).writerow(("time","acc"))
                 self.rec_files[ax] = fp
         except Exception as e:
-            self.log(f"파일 열기 실패: {e}")
+            self.log(f"FAILED OPEN FILE: {e}")
             return
         self.rec_on = True
         self.rec_start = time.time()
@@ -587,7 +585,7 @@ class FFTApp(App):
         self.rec_files.clear()
         self.rec_on = False
         self.btn_rec.disabled = False
-        self.log("✅ Recording complete!")
+        self.log("Recording complete!")
 
     # ───────────────────────────── Realtime poll
     def toggle_realtime(self, *_):
@@ -597,7 +595,7 @@ class FFTApp(App):
             try:
                 accelerometer.enable()
             except Exception as e:
-                self.log(f"센서 사용 불가: {e}")
+                self.log(f"DO NOT USE THE SENSOR: {e}")
                 self.rt_on=False
                 self.btn_rt.text="Realtime FFT (OFF)"; return
             Clock.schedule_interval(self._poll_accel, 0)
@@ -722,13 +720,13 @@ class FFTApp(App):
     def _fft_bg(self):
         try:
             if len(self.paths) < 2:
-                raise ValueError("CSV 파일을 최소 2개 선택하세요.")
+                raise ValueError("SELECT 2 CSV FILE")
 
             data, xmax = [], 0.0                         # ← 결과 보관
             for path in self.paths[:2]:                  # 첫 두 파일만
                 t, a = self._load_csv(path)
                 if t is None:
-                    raise ValueError(f"{os.path.basename(path)}: CSV parse 실패")
+                    raise ValueError(f"{os.path.basename(path)}: CSV parse Failed")
 
                 # ── FFT 스펙트럼 ───────────────────────────────────
                 dt_arr = np.diff(t);     dt_arr = dt_arr[dt_arr > 0]
@@ -820,14 +818,14 @@ class FFTApp(App):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
         self.btn_mode.text = f"Mode: {MEAS_MODE}"
-        self.log(f"▶ 측정 모드 → {MEAS_MODE}")
+        self.log(f"MEASERING MODE → {MEAS_MODE}")
 
     def _save_baseline(self, *_):
         if self.last_fn is None:
-            self.log("Fₙ 값 없음")
+            self.log("Fₙ NO DATA")
         else:
             self.F0 = self.last_fn
-            self.log(f"F₀ = {self.F0:.2f} Hz 저장")
+            self.log(f"F₀ = {self.F0:.2f} Hz SAVED")
 
     # ───────────────────────────── SAF & 권한
     def _has_allfiles_perm(self):
@@ -885,9 +883,9 @@ class FFTApp(App):
         for raw in sel[:2]:  # ★ 최대 2개까지만 허용
             real = uri_to_file(raw)
             if real == "NO_PERMISSION":
-                self.log("❌ 권한 없음 – SAF Picker 로 시도해 주세요"); return
+                self.log("NO PERMISSION – TRY SAF Picke"); return
             if not real:
-                self.log("❌ 파일 복사 실패"); return
+                self.log("FAILED COPY"); return
             self.paths.append(real)
         self.label.text = " · ".join(os.path.basename(p) for p in self.paths)
         self.btn_run.disabled = False
