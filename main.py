@@ -109,9 +109,12 @@ SMOOTH_N           = 1
 HPF_CUTOFF         = 5.0
 MAX_FMAX           = 200
 REC_DURATION_DEF   = 60.0
-FN_BAND            = (5, 50)
+FN_BAND            = (0, 50)
 BUF_LEN, MIN_LEN   = 16384, 256      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
+
+RT_REFRESH_SEC = 0.25
+FFT_LEN_SEC = 2.0
 
 ###############################################################################
 # 5. 로깅/크래시 헬퍼
@@ -274,9 +277,13 @@ class GraphWidget(Widget):
                           self.y + (self.height - txt_w) / 2)  # txt_w ↔︎ txt_h 주의!
    
    
-    def _add_axis_label(self, txt, pos):
-        lbl = Label(text=txt, size_hint=(None,None), size=(60,20),
-                    pos=(float(pos[0]), float(pos[1])))
+    def _add_axis_label(self, txt: str, loc_xy):
+        """loc_xy는 위젯 로컬 좌표;  부모(BoxLayout) 좌표계로 보정해서 Label 추가"""
+        lx, ly = loc_xy           # <- local x,y   (위젯 좌하단 기준)
+        lbl = Label(text=txt,
+                    size_hint=(None, None), size=(60, 20),
+                    # 부모 기준 절대 좌표 = 위젯 원점(self.x, self.y) + 로컬좌표
+                    pos=(self.x + float(lx), self.y + float(ly)))
         lbl._axis = True
         self.add_widget(lbl)
    
@@ -618,55 +625,58 @@ class FFTApp(App):
     def _rt_fft_loop(self):
         try:
             while self.rt_on:
-                time.sleep(0.5)
+                time.sleep(RT_REFRESH_SEC)        # ① 더 짧게 쉬기
+   
+                # ----- 센서 버퍼 스냅샷 -----
                 with self._buf_lock:
-                    if any(len(self.rt_buf[a]) < MIN_LEN for a in "xyz"):
-                        continue
                     buf = {a:list(self.rt_buf[a]) for a in "xyz"}
-
-                axis_sets, xmax = {}, 0.
+   
+                axis_sets, xmax = {}, 0.0
                 for a in "xyz":
-                    ts,val,dt = zip(*buf[a])
-                    dt_seg = np.array(dt[-512:])
-                    dt_seg = dt_seg[dt_seg>1e-5]
-                    if not dt_seg.size:
+                    if len(buf[a]) < 128:         # 샘플이 너무 적으면 skip
                         continue
-                    fs = 1./float(np.median(dt_seg))
-                    if fs < 2*(HPF_CUTOFF+BAND_HZ):
+                    ts, val, dt = zip(*buf[a])
+                    fs = 1.0 / np.median(dt[-512:])         # 실시간 추정 Fs
+                    fft_len = int(fs * FFT_LEN_SEC)
+                    if fft_len < 256:
                         continue
-                    f_hi = min(fs*0.5, MAX_FMAX)
-                    rms,pk = welch_band_stats(np.asarray(val,float), fs,
-                                              HPF_CUTOFF, f_hi, BAND_HZ)
-                    if not rms:
-                        continue
-                    axis_sets[a]=(rms,pk,a)
-                    xmax = max(xmax, f_hi)
-
-                    lo,hi = FN_BAND
-                    f_arr = np.array([x for x,_ in rms])
-                    m_arr = np.array([y for _,y in rms])
-                    sel = (f_arr>=lo)&(f_arr<=hi)
-                    if sel.any():
-                        self.last_fn = f_arr[sel][m_arr[sel].argmax()]
-
+                    sig = np.asarray(val[-fft_len:], float)
+                    sig = (sig - sig.mean()) * np.hanning(fft_len)
+   
+                    raw   = np.fft.rfft(sig)
+                    freq  = np.fft.rfftfreq(fft_len, d=1/fs)
+                    amp_a = 2 * np.abs(raw) / (fft_len * np.sqrt(2))
+   
+                    # 0.5 Hz 밴드 RMS/Peak 계산 (기존 로직 재사용)
+                    amp_lin, ref0 = acc_to_spec(freq, amp_a)
+                    rms, pk = [], []
+                    for lo in np.arange(HPF_CUTOFF, min(fs*0.5,MAX_FMAX), BAND_HZ):
+                        hi  = lo + BAND_HZ
+                        sel = (freq >= lo) & (freq < hi)
+                        if not sel.any():
+                            continue
+                        cen = (lo + hi) / 2
+                        r   = np.sqrt(np.mean(amp_lin[sel]**2))
+                        p   = amp_lin[sel].max()
+                        rms.append((cen, 20*np.log10(max(r, ref0*1e-4)/ref0)))
+                        pk .append((cen, 20*np.log10(max(p, ref0*1e-4)/ref0)))
+   
+                    axis_sets[a] = (rms, pk, a)
+                    xmax = max(xmax, freq[-1])
+   
+                # ----- UI 갱신 -----
                 if axis_sets:
-                    def _update(_dt, axis_sets=axis_sets, xmax=xmax):
-                        # X·Y·Z 중 계산된 축만 갱신
-                        for axis,(rms,pk,_) in axis_sets.items():
-                            idx = {'x':0,'y':1,'z':2}[axis]
-                            self.graphs[idx].update_graph([(rms,pk,axis)], [], xmax)
-                        # 데이터가 없었던 축은 화면을 지워 줌
-                        for axis in "xyz":
-                            if axis not in axis_sets:
-                                idx = {'x':0,'y':1,'z':2}[axis]
+                    def _update(_dt):
+                        for idx, ax in enumerate("xyz"):
+                            if ax in axis_sets:
+                                self.graphs[idx].update_graph([axis_sets[ax]], [], xmax)
+                            else:
                                 self.graphs[idx].update_graph([], [], xmax)
                     Clock.schedule_once(_update)
-                   
-                   
-                   
+   
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
-            self.rt_on=False
+            self.rt_on = False
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_rt,"text","Realtime FFT (OFF)"))
 
@@ -857,3 +867,4 @@ class FFTApp(App):
 ###############################################################################
 if __name__ == "__main__":
     FFTApp().run()
+ 
