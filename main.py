@@ -110,9 +110,10 @@ HPF_CUTOFF         = 5.0
 MAX_FMAX           = 50
 REC_DURATION_DEF   = 60.0
 FN_BAND            = (5, 50)
-BUF_LEN, MIN_LEN   = 1200, 4096      # 실시간 버퍼
+BUF_LEN, MIN_LEN   = 4096, 4096      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
+
 
 
 
@@ -633,7 +634,7 @@ class FFTApp(App):
         try:
             FFT_LEN_SEC     = 8          # ① 한 번에 8 s 창으로 --> 주파수 해상도 ↑
             RT_REFRESH_SEC  = 0.5        # ② 0.5 s 마다 화면 갱신
-            MIN_FS          = 120        # ③ 120 Hz 미만이면 고주파(50 Hz) 불충분
+            MIN_FS          = 90        # ③ 120 Hz 미만이면 고주파(50 Hz) 불충분
             MIN_BUF_POINTS  = int(MIN_FS * FFT_LEN_SEC * 1.2)  # 약간 여유
    
             while self.rt_on:
@@ -653,7 +654,7 @@ class FFTApp(App):
                     ts, val, dt = zip(*buf[ax])
    
                     # 최근 1 000 개 정도로 샘플링 주파수 추정
-                    recent_dt = np.array(dt[-1000:])
+                    recent_dt = np.array(dt[-512:])
                     recent_dt = recent_dt[recent_dt > 1e-5]
                     if not recent_dt.size:
                         continue
