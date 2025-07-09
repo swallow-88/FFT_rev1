@@ -632,8 +632,8 @@ class FFTApp(App):
         try:
             FFT_LEN_SEC     = 8          # ① 한 번에 8 s 창으로 --> 주파수 해상도 ↑
             RT_REFRESH_SEC  = 0.5        # ② 0.5 s 마다 화면 갱신
-            MIN_FS          = 90        # ③ 120 Hz 미만이면 고주파(50 Hz) 불충분
-            MIN_BUF_POINTS  = int(MIN_FS * FFT_LEN_SEC * 1.2)  # 약간 여유
+            MIN_FS          = 50        # ③ 120 Hz 미만이면 고주파(50 Hz) 불충분
+            MIN_BUF_POINTS  = int(FFT_LEN_SEC * MIN_FS)  # 약간 여유
    
             while self.rt_on:
                 time.sleep(RT_REFRESH_SEC)
