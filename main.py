@@ -1,4 +1,4 @@
-
+ 
 ###############################################################################
 # 0. Config ― 반드시 Kivy import *이전*에!
 ###############################################################################
@@ -109,9 +109,10 @@ SMOOTH_N           = 1
 HPF_CUTOFF         = 5.0
 MAX_FMAX           = 200
 REC_DURATION_DEF   = 60.0
-FN_BAND            = (0, 50)
+FN_BAND            = (5, 50)
 BUF_LEN, MIN_LEN   = 16384, 256      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
+F_MIN = 5
 
 RT_REFRESH_SEC = 0.25
 FFT_LEN_SEC = 2.0
@@ -231,6 +232,7 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
 ###############################################################################
 class GraphWidget(Widget):
     PAD_X, PAD_Y, LINE_W = 80, 50, 2.5
+    X_TICKS = [5,10,20,30,40,50]
  
     # 축 고유 색상:  X=Red, Y=Green, Z=Blue
     AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,0,1)}
@@ -240,7 +242,10 @@ class GraphWidget(Widget):
     def __init__(self, **kw):
         super().__init__(**kw)
 
-        self.datasets, self.diff, self.max_x = [], [], 1
+       
+        self.datasets, self.diff = [],[]
+        self.min_x = F_MIN
+        self.max_x = 50.0
         self.Y_MIN, self.Y_MAX = 0, 100
         self.Y_TICKS = [0,20,40,60,80,100]
         self._prev_ticks = (None, None)
@@ -297,9 +302,12 @@ class GraphWidget(Widget):
                 self.remove_widget(ch)
 
         # ② X-축 (0~50 Hz, 10 Hz 간격) ― 모든 그래프에서 표시
-        for i in range(6):                         # 0,10,…,50
-            x = self.PAD_X + i * (self.width - 2*self.PAD_X) / 5 - 18
-            self._add_axis_label(f"{10*i} Hz", (x, self.PAD_Y - 28))
+        for f in self.X_TICKS:
+            if f < self.min_x or f > self.max_x:
+                continue
+            rel = (f - self.min_x)/(self.max_x-self.min_x)
+            x   = self.PAD_X + rel*(self.width-2*self.PAD_X) - 18
+            self._add_axis_label(f"{f} Hz", (x, self.PAD_Y-28))
 
         # ③ Y-축
         for v in self.Y_TICKS:
@@ -345,21 +353,20 @@ class GraphWidget(Widget):
         for x,y in pts:
             if not np.isfinite(x) or not np.isfinite(y):
                 continue
-            sx = float(self.PAD_X + (x/max(self.max_x,1e-6))*w)
+            sx = float(self.PAD_X + (x-self.min_x)/(self.max_x-self.min_x)*w)
             sy = float(self.y_pos(y))
             out.extend((sx,sy))
         return out
 
     def _grid(self):
-        n_tick = int(self.max_x//10)+1
-        if n_tick > 80:
-            step_hz = 10*((n_tick//80)+1)
-            n_tick  = int(self.max_x//step_hz)+1
-        gx = (self.width-2*self.PAD_X)/max(n_tick-1,1)
-        Color(.6,.6,.6)
-        for i in range(n_tick):
-            Line(points=[self.PAD_X+i*gx, self.PAD_Y,
-                         self.PAD_X+i*gx, self.height-self.PAD_Y])
+        for f in self.X_TICKS:
+            if f < self.min_x or f > self.max_x:
+                continue
+            rel = (f - self.min_x)/(self.max_x-self.min_x)
+            gx  = self.PAD_X + rel*(self.width-2*self.PAD_X)
+            Line(points=[gx, self.PAD_Y,
+                         gx, self.height-self.PAD_Y])
+
         for v in self.Y_TICKS:
             Line(points=[self.PAD_X, self.y_pos(v),
                          self.width-self.PAD_X, self.y_pos(v)])
@@ -609,7 +616,7 @@ class FFTApp(App):
                 return
             now = time.time()
             with self._buf_lock:
-                for axis,val in zip("xyz",(abs(ax),abs(ay),abs(az))):
+                for axis,val in zip("xyz",(ax,ay,az)):
                     prev = self.rt_buf[axis][-1][0] if self.rt_buf[axis] else now-dt
                     self.rt_buf[axis].append((now,val,now-prev))
             if self.rec_on:
@@ -625,60 +632,67 @@ class FFTApp(App):
     def _rt_fft_loop(self):
         try:
             while self.rt_on:
-                time.sleep(RT_REFRESH_SEC)        # ① 더 짧게 쉬기
+                time.sleep(RT_REFRESH_SEC)           # 0.25 s 권장
    
-                # ----- 센서 버퍼 스냅샷 -----
+                # ── ① 센서 버퍼 스냅샷 ──────────────────────
                 with self._buf_lock:
-                    buf = {a:list(self.rt_buf[a]) for a in "xyz"}
+                    buf = {a: list(self.rt_buf[a]) for a in "xyz"}
    
                 axis_sets, xmax = {}, 0.0
-                for a in "xyz":
-                    if len(buf[a]) < 128:         # 샘플이 너무 적으면 skip
-                        continue
-                    ts, val, dt = zip(*buf[a])
-                    fs = 1.0 / np.median(dt[-512:])         # 실시간 추정 Fs
-                    fft_len = int(fs * FFT_LEN_SEC)
-                    if fft_len < 256:
-                        continue
-                    sig = np.asarray(val[-fft_len:], float)
-                    sig = (sig - sig.mean()) * np.hanning(fft_len)
    
-                    raw   = np.fft.rfft(sig)
-                    freq  = np.fft.rfftfreq(fft_len, d=1/fs)
-                    amp_a = 2 * np.abs(raw) / (fft_len * np.sqrt(2))
+                # ── ② 축별 FFT 계산  ───────────────────────
+                for ax in "xyz":
+                    if len(buf[ax]) < 128:
+                        continue
+                    ts, val, dt = zip(*buf[ax])
    
-                    # 0.5 Hz 밴드 RMS/Peak 계산 (기존 로직 재사용)
+                    fs = 1.0 / np.median(dt[-512:])       # 실시간 샘플링 주파수
+                    if fs < 2*(HPF_CUTOFF+BAND_HZ):
+                        continue
+   
+                    fft_len = int(fs * FFT_LEN_SEC)       # 2 s 창
+                    if fft_len > len(val):
+                        fft_len = len(val)
+                    sig  = np.asarray(val[-fft_len:], float)
+                    sig  = (sig - sig.mean()) * np.hanning(fft_len)
+   
+                    spec = np.fft.rfft(sig)
+                    freq = np.fft.rfftfreq(fft_len, d=1/fs)
+                    amp_a= 2*np.abs(spec)/(fft_len*np.sqrt(2))
+   
                     amp_lin, ref0 = acc_to_spec(freq, amp_a)
-                    rms, pk = [], []
-                    for lo in np.arange(HPF_CUTOFF, min(fs*0.5,MAX_FMAX), BAND_HZ):
-                        hi  = lo + BAND_HZ
-                        sel = (freq >= lo) & (freq < hi)
+                    rms_line, pk_line = [], []
+                    f_hi = min(fs*0.5, MAX_FMAX)
+                    for lo in np.arange(HPF_CUTOFF, f_hi, BAND_HZ):
+                        hi = lo+BAND_HZ
+                        sel=(freq>=lo)&(freq<hi)
                         if not sel.any():
                             continue
-                        cen = (lo + hi) / 2
-                        r   = np.sqrt(np.mean(amp_lin[sel]**2))
-                        p   = amp_lin[sel].max()
-                        rms.append((cen, 20*np.log10(max(r, ref0*1e-4)/ref0)))
-                        pk .append((cen, 20*np.log10(max(p, ref0*1e-4)/ref0)))
+                        cen = (lo+hi)/2
+                        rms = np.sqrt(np.mean(amp_lin[sel]**2))
+                        pk  = amp_lin[sel].max()
+                        rms_line.append((cen, 20*np.log10(max(rms,ref0*1e-4)/ref0)))
+                        pk_line .append((cen, 20*np.log10(max(pk ,ref0*1e-4)/ref0)))
+                    if rms_line:                     # 데이터가 있어야 저장
+                        axis_sets[ax] = (rms_line, pk_line, ax)
+                        xmax = max(xmax, f_hi)
    
-                    axis_sets[a] = (rms, pk, a)
-                    xmax = max(xmax, freq[-1])
-   
-                # ----- UI 갱신 -----
+                # ── ③ UI 갱신 (while 내부 들여쓰기!!) ─────────
                 if axis_sets:
-                    def _update(_dt):
-                        for idx, ax in enumerate("xyz"):
-                            if ax in axis_sets:
-                                self.graphs[idx].update_graph([axis_sets[ax]], [], xmax)
+                    def _update(_dt, sets=axis_sets, xm=xmax):
+                        for ax,i in zip("xyz", (0,1,2)):
+                            if ax in sets:
+                                self.graphs[i].update_graph([sets[ax]], [], xm)
                             else:
-                                self.graphs[idx].update_graph([], [], xmax)
+                                self.graphs[i].update_graph([], [], xm)
                     Clock.schedule_once(_update)
    
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
-            self.rt_on = False
+            self.rt_on=False
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_rt,"text","Realtime FFT (OFF)"))
+
 
     # ───────────────────────────── CSV FFT (백그라운드)
     def run_fft(self, *_):
@@ -867,4 +881,3 @@ class FFTApp(App):
 ###############################################################################
 if __name__ == "__main__":
     FFTApp().run()
- 
