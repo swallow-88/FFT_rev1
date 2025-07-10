@@ -522,7 +522,7 @@ class FFTApp(App):
         # 모드/Realtime
         self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1,.05),
                                on_press=self._toggle_mode)
-        self.btn_setF0 = Button(text="Set F₀ (baseline)", size_hint=(1,.05),
+        self.btn_setF0 = Button(text="Set F0 (baseline)", size_hint=(1,.05),
                                 on_press=self._save_baseline)
         self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1,.05),
                              on_press=self.toggle_realtime)
@@ -857,14 +857,14 @@ class FFTApp(App):
         global MEAS_MODE
         MEAS_MODE = "ACC" if MEAS_MODE == "VEL" else "VEL"
         self.btn_mode.text = f"Mode: {MEAS_MODE}"
-        self.log(f"MEASERING MODE → {MEAS_MODE}")
+        self.log(f"MEASURING MODE : {MEAS_MODE}")
 
     def _save_baseline(self, *_):
         if self.last_fn is None:
             self.log("Fₙ NO DATA")
         else:
             self.F0 = self.last_fn
-            self.log(f"F₀ = {self.F0:.2f} Hz SAVED")
+            self.log(f"F0 = {self.F0:.2f} Hz SAVED")
 
     # ───────────────────────────── SAF & 권한
     def _has_allfiles_perm(self):
@@ -904,7 +904,7 @@ class FFTApp(App):
             from tkinter import filedialog
             root = tk.Tk(); root.withdraw()        # 창 감춤
             paths = filedialog.askopenfilenames(
-                title="Select up to 3 CSV",
+                title="Select up to 2 CSV",
                 filetypes=[("CSV files", "*.csv")])
             # Tk 객체 해제
             root.update(); root.destroy()
