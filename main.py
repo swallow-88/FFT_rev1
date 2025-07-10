@@ -232,6 +232,7 @@ class GraphWidget(Widget):
     PAD_X, PAD_Y, LINE_W = 80, 50, 2.5
     X_TICKS = [5,10,20,30,40,50]
     PEAK_N = 3
+    PEAK_MIN_SEP = 2.0
  
     # 축 고유 색상:  X=Red, Y=Green, Z=Blue
     AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,0,1)}
@@ -277,6 +278,21 @@ class GraphWidget(Widget):
         x = self.width - self.PAD_X + 10          # PAD 영역 밖으로 살짝
         y = self.height - self.PAD_Y - 18 - order*18
         return self.x + x, self.y + y             # 부모(BoxLayout) 절대좌표
+
+
+    def _select_peaks(self, rms_line):
+        """
+        rms_line : [(freq, level_dB), ...]  — 이미 큰→작 순 정렬되어 있어야 함
+        return    : 선택된 (freq, level_dB) 목록
+        """
+        chosen = []
+        for f, lv in rms_line:
+            if all(abs(f - cf) >= self.PEAK_MIN_SEP for cf, _ in chosen):
+                chosen.append((f, lv))
+                if len(chosen) >= self.PEAK_N:
+                    break
+        return chosen
+    
         
    
     def _reposition_titles(self, *_):
@@ -436,9 +452,10 @@ class GraphWidget(Widget):
                     self._safe_line(self._scale(pts), dash=bool(j))
 
                 # ② 이 축에서 큰 순으로 PEAK_N 개 좌표 수집 ---------------
-                top = sorted(rms, key=lambda p: p[1], reverse=True)[:self.PEAK_N]
-                for k, (fx, fy) in enumerate(top):        # k = 0,1,2…
-                    sx, sy = self._scale([(fx, fy)])[:2]  # 화면 좌표
+                # ① 기존 for-루프 안에서 rms 최대값을 찾는 부분을 ↓처럼 바꿉니다
+                sorted_rms = sorted(rms, key=lambda p: p[1], reverse=True)
+                for k, (fx, fy) in enumerate(self._select_peaks(sorted_rms)):
+                    sx, sy = self._scale([(fx, fy)])[:2]
                     peaks.append((sx, sy, fx, axis, k))
 
             # diff 그래프 (흰색) --------------------------------------------
