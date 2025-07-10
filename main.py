@@ -458,6 +458,7 @@ class FFTApp(App):
         self.rec_files = {}
         self.REC_DURATION = REC_DURATION_DEF
         self.last_fn = self.F0 = None
+        self._buf_lock = threading.Lock()
 
     # ───────────────────────────── UI
     def build(self):
@@ -629,54 +630,51 @@ class FFTApp(App):
 
     # ───────────────────────────── Realtime FFT 루프
     def _rt_fft_loop(self):
-        """
-        실시간 버퍼 → 0.5 s 주기로 0.5 Hz 밴드 FFT
-        X·Y·Z 세 축을 개별 그래프(3-way)로 갱신
-        """
-        FFT_LEN_SEC    = 8          # 한 번에 분석할 시계열 길이
-        RT_REFRESH_SEC = 0.5        # 그래프 갱신 주기
-        MIN_FS         = 50         # 최소 유효 샘플링 주파수[Hz]
+    FFT_SEC  = 8.0       # FFT 분석 창 길이
+    REFRESH  = 0.5       # 그래프 갱신 주기
+    MIN_FS   = 50        # 샘플링 하한
 
-        try:                                    # ← ❶ try 블록 추가
-            while self.rt_on:
-                time.sleep(RT_REFRESH_SEC)
+    try:
+        while self.rt_on:
+            time.sleep(REFRESH)
 
-                # ---------- ① 버퍼 스냅샷 ----------
-                with self._buf_lock:
-                    buf = {a: list(self.rt_buf[a]) for a in "xyz"}
+            # ---------- 버퍼 스냅샷 ----------
+            with self._buf_lock:
+                snap = {a: list(self.rt_buf[a]) for a in "xyz"}
 
-                axis_sets, xmax, ymax = {}, 0.0, 0.0
+            axis_sets, xmax, ymax = {}, 0.0, 0.0
 
-                # ---------- ② 세 축 처리 ----------
-                for ax in "xyz":
-
-                    # (a) 충분한 길이?
-                    if len(buf[ax]) < MIN_FS * FFT_LEN_SEC:
+            # ---------- 세 축 루프 ----------
+            for ax in "xyz":
+                try:
+                    # (1) 샘플 충분?
+                    if len(snap[ax]) < MIN_FS * FFT_SEC:
                         continue
 
-                    *_, dt_arr = zip(*buf[ax])
-                    recent_dt  = np.array(dt_arr[-512:])
-                    recent_dt  = recent_dt[recent_dt > 1e-5]
-                    if not recent_dt.size:
+                    *_, dt_arr = zip(*snap[ax])
+                    recent_dt = np.array(dt_arr[-512:])
+                    recent_dt = recent_dt[recent_dt > 1e-5]
+                    if recent_dt.size == 0:
                         continue
+
                     fs = 1.0 / np.median(recent_dt)
-                    if fs < MIN_FS:
+                    if np.isnan(fs) or fs < MIN_FS:
                         continue
 
-                    # (b) fft_len 산정 & 추출
-                    fft_len = int(fs * FFT_LEN_SEC)
-                    if len(buf[ax]) < fft_len:
+                    # (2) 추출·윈도우링
+                    fft_len = int(fs * FFT_SEC)
+                    if len(snap[ax]) < fft_len:
                         continue
-                    _, val, _ = zip(*buf[ax][-fft_len:])
+                    _, vals, _ = zip(*snap[ax][-fft_len:])
+                    sig = (np.asarray(vals) - np.mean(vals)) * np.hanning(fft_len)
 
-                    # (c) FFT
-                    sig    = (np.asarray(val) - np.mean(val)) * np.hanning(fft_len)
+                    # (3) FFT → 선형스펙트럼
                     spec   = np.fft.rfft(sig)
                     freq   = np.fft.rfftfreq(fft_len, 1/fs)
-                    amp_a  = 2*np.abs(spec) / (fft_len*np.sqrt(2))
+                    amp_a  = 2*np.abs(spec)/(fft_len*np.sqrt(2))
                     amp_lin, ref0 = acc_to_spec(freq, amp_a)
 
-                    # (d) 0.5 Hz 밴드 합산
+                    # (4) 0.5 Hz 밴드화
                     rms_line, pk_line = [], []
                     FMAX = 50
                     for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
@@ -687,14 +685,18 @@ class FFTApp(App):
                         cen = (lo + hi) * 0.5
                         rms = np.sqrt(np.mean(amp_lin[sel]**2))
                         pk  = amp_lin[sel].max()
-                        rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-4)/ref0)))
-                        pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-4)/ref0)))
+
+                        # --------- ❶ ε 클램프 ---------
+                        rms = max(rms, ref0 * 1e-12)
+                        pk  = max(pk , ref0 * 1e-12)
+
+                        rms_line.append((cen, 20*np.log10(rms/ref0)))
+                        pk_line .append((cen, 20*np.log10(pk /ref0)))
 
                     if not rms_line:
                         continue
 
-                    # (e) 저장
-                    axis_sets[ax] = (rms_line, pk_line)   # ← ❷ 축 ID 제외
+                    axis_sets[ax] = (rms_line, pk_line)
                     xmax = FMAX
                     ymax = max(
                         ymax,
@@ -702,28 +704,34 @@ class FFTApp(App):
                         max(y for _, y in pk_line)
                     )
 
-                # ---------- ③ 그래프 갱신 ----------
-                if axis_sets:
-                    def _update(_dt,
-                                sets=axis_sets,
-                                xm=xmax,
-                                ym=ymax):
-                        for ax, idx in zip("xyz", (0, 1, 2)):
-                            if ax in sets:
-                                ds = list(sets[ax])       # (rms, pk)
-                                self.graphs[idx].update_graph(ds, [], xm, ym)
-                            else:
-                                # 빈 그래프라도 축/눈금은 유지
-                                self.graphs[idx].update_graph([], [], xm, ym)
-                    Clock.schedule_once(_update)
+                    # 공진 추적
+                    c  = np.array([x for x,_ in rms_line])
+                    lv = np.array([y for _,y in rms_line])
+                    band = (c >= FN_BAND[0]) & (c <= FN_BAND[1])
+                    if band.any():
+                        self.last_fn = c[band][lv[band].argmax()]
 
-        except Exception:
-            Logger.exception("Realtime FFT thread crashed")
-            self.rt_on = False
-            Clock.schedule_once(
-                lambda *_: setattr(self.btn_rt, "text", "Realtime FFT (OFF)")
-            )
+                except Exception as e:
+                    Logger.warning(f"[RT-FFT] axis {ax}: {e}")
 
+            # ---------- 그래프 갱신 ----------
+            if axis_sets:
+                def _upd(_dt, s=axis_sets, xm=xmax, ym=ymax):
+                    for ax, idx in zip("xyz",(0,1,2)):
+                        if ax in s:
+                            ds = list(s[ax])
+                            self.graphs[idx].update_graph(ds, [], xm, ym)
+                        else:
+                            self.graphs[idx].update_graph([], [], xm, ym)
+                Clock.schedule_once(_upd)
+
+    except Exception:
+        Logger.exception("Realtime FFT thread crashed (outer)")
+        # 메인스레드 토글-백
+        Clock.schedule_once(lambda *_:
+            (setattr(self.btn_rt, "text", "Realtime FFT (OFF)"), setattr(self, "rt_on", False)))
+
+    
     # ───────────────────────────── CSV FFT (백그라운드)
     def run_fft(self, *_):
         self.btn_run.disabled = True
