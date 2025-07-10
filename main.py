@@ -238,13 +238,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
 
     def __init__(self, **kw):
-        super().__init__(**kw)
-
-        # ── 버퍼(축 3개) -------------------------------------------------
-        self.rt_buf   = {ax: deque(maxlen=BUF_LEN) for ax in ('x', 'y', 'z')}
-        self._buf_lock = threading.Lock()        #  ←★ 추가 ★
-
-           
+        super().__init__(**kw)          
         self.datasets, self.diff = [],[]
         self.min_x = F_MIN
         self.max_x = 50.0
@@ -461,6 +455,7 @@ class FFTApp(App):
         self.rec_files = {}
         self.REC_DURATION = REC_DURATION_DEF
         self.last_fn = self.F0 = None
+        self._buf_lock = threading.Lock()
 
 
     # ───────────────────────────── UI
