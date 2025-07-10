@@ -629,49 +629,48 @@ class FFTApp(App):
 
     # ───────────────────────────── Realtime FFT 루프
     def _rt_fft_loop(self):
-        try:
-            FFT_LEN_SEC     = 8          # ① 한 번에 8 s 창으로 --> 주파수 해상도 ↑
-            RT_REFRESH_SEC  = 0.5        # ② 0.5 s 마다 화면 갱신
-            MIN_FS          = 50        # ③ 120 Hz 미만이면 고주파(50 Hz) 불충분
-            MIN_BUF_POINTS  = int(FFT_LEN_SEC * MIN_FS)  # 약간 여유
-   
-            while self.rt_on:
-                time.sleep(RT_REFRESH_SEC)
-   
-                # ── ① 센서 버퍼 스냅샷 ─────────────────────────
-                with self._buf_lock:
-                    buf = {a: list(self.rt_buf[a]) for a in "xyz"}
-   
-                axis_sets, xmax = {}, 0.0
-   
-                # ── ② 축별 FFT 계산 ────────────────────────────
-                for ax in "xyz":
-                    if len(buf[ax]) < MIN_BUF_POINTS:
-                        continue
-   
-                    ts, val, dt = zip(*buf[ax])
-   
-                    # 최근 1 000 개 정도로 샘플링 주파수 추정
-                    recent_dt = np.array(dt[-512:])
-                    recent_dt = recent_dt[recent_dt > 1e-5]
-                    if not recent_dt.size:
-                        continue
-                    fs = 1.0 / np.median(recent_dt)
-                    if fs < MIN_FS:
-                        continue           # 샘플링이 느리면 스킵
-   
-                    # 8 초 분량만 발췌
-                    fft_len = int(fs * FFT_LEN_SEC)
-                    sig_raw = np.asarray(val[-fft_len:], float)
-                    sig     = (sig_raw - sig_raw.mean()) * np.hanning(fft_len)
-   
-                    # FFT
-                    spec  = np.fft.rfft(sig)
-                    freq  = np.fft.rfftfreq(fft_len, d=1/fs)
-                    amp_a = 2 * np.abs(spec) / (fft_len * np.sqrt(2))
-   
-                    amp_lin, ref0 = acc_to_spec(freq, amp_a)
-   
+        FFT_LEN_SEC    = 8
+        RT_REFRESH_SEC = 0.5
+        MIN_FS         = 50
+    
+        while self.rt_on:
+            time.sleep(RT_REFRESH_SEC)
+    
+            with self._buf_lock:
+                buf = {a: list(self.rt_buf[a]) for a in "xyz"}
+    
+            axis_sets, xmax = {}, 0.0
+            for ax in "xyz":
+    
+                # ① 샘플링 속도 추정 ------------------------------------------
+                if len(buf[ax]) < MIN_FS * FFT_LEN_SEC:     # 최소 길이 체크는 여기서!
+                    continue
+    
+                *_, dt_arr = zip(*buf[ax])                  # 마지막 열만 필요
+                recent_dt  = np.array(dt_arr[-512:])
+                recent_dt  = recent_dt[recent_dt > 1e-5]
+                if not recent_dt.size:
+                    continue
+                fs = 1.0 / np.median(recent_dt)
+                if fs < MIN_FS:
+                    continue
+    
+                # ② FFT 길이 결정 & 버퍼 길이 확인 -----------------------------
+                fft_len = int(fs * FFT_LEN_SEC)
+                if len(buf[ax]) < fft_len:                  # ← **중요!**
+                    continue                                # 샘플 부족하면 다음 축
+    
+                # ③ FFT 계산 --------------------------------------------------
+                _, val, _ = zip(*buf[ax][-fft_len:])        # 정확히 fft_len 개
+                sig = (np.asarray(val, float) - np.mean(val)) * np.hanning(fft_len)
+    
+                spec  = np.fft.rfft(sig)
+                freq  = np.fft.rfftfreq(fft_len, d=1/fs)
+                amp_a = 2 * np.abs(spec) / (fft_len*np.sqrt(2))
+    
+                amp_lin, ref0 = acc_to_spec(freq, amp_a)
+                
+       
                     # 0.5 Hz 밴드 → RMS / Peak
                     rms_line, pk_line = [], []
                     FMAX = 50                           # 그래프 상한 고정
