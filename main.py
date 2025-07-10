@@ -457,12 +457,11 @@ class FFTApp(App):
         super().__init__(**kw)
         self.rt_on = self.rec_on = False
         self.rt_buf = {ax: deque(maxlen=BUF_LEN) for ax in "xyz"}
-        self._buf_lock = threading.Lock()
         self.rec_start = 0.0
         self.rec_files = {}
         self.REC_DURATION = REC_DURATION_DEF
         self.last_fn = self.F0 = None
-        self._buf_lock = threading.Lock()
+
 
     # ───────────────────────────── UI
     def build(self):
