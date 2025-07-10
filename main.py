@@ -231,6 +231,7 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
 class GraphWidget(Widget):
     PAD_X, PAD_Y, LINE_W = 80, 50, 2.5
     X_TICKS = [5,10,20,30,40,50]
+    PEAK_N = 3
  
     # 축 고유 색상:  X=Red, Y=Green, Z=Blue
     AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,0,1)}
@@ -412,18 +413,25 @@ class GraphWidget(Widget):
             Translate(self.x, self.y)   # 이후 좌표는 위젯 로컬 기준
            
             self._grid()
-            peaks = []
+
+            peaks = []            # (fx, fy, sx, sy, axis, order)
+            
             for rms, pk, axis in self.datasets:
+                # ① 선 그리기 (기존 그대로)
                 for j, pts in enumerate((rms, pk)):
-                    if len(pts) < 2:
+                    if len(pts) < 2:           # 그대로 유지
                         continue
                     Color(*self.AXIS_CLR[axis])
                     sc = self._scale(pts)
-                    if not sc: continue
-                    self._safe_line(sc, dash=bool(j))
-                fx, fy = max(rms, key=lambda p: p[1])
-                sx, sy = self._scale([(fx, fy)])[0:2]
-                peaks.append((fx, fy, sx, sy))
+                    if sc:
+                        self._safe_line(sc, dash=bool(j))
+            
+                # ② -- top-N 피크 잡기 --------------------------
+                top = sorted(rms, key=lambda p: p[1], reverse=True)[:self.PEAK_N]
+                for order, (fx, fy) in enumerate(top):
+                    sx, sy = self._scale([(fx, fy)])[0:2]
+                    peaks.append((fx, fy, sx, sy, axis, order))
+            
             if len(self.diff) >= 2:
                 Color(1,1,1);  self._safe_line(self._scale(self.diff))
    
@@ -435,10 +443,12 @@ class GraphWidget(Widget):
             PopMatrix()
    
         # 피크 라벨
-        for fx, fy, sx, sy in peaks:
+        for fx, fy, sx, sy, axis, order in peaks:
+            off_y = 6 + order*14         # 1 등·2 등·3 등 라벨을 위로 조금씩
             lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None, None), size=(90, 22),
-                        pos=(float(sx)-30, float(sy)+6))
+                        size_hint=(None, None), size=(90, 20),
+                        color=self.AXIS_CLR[axis] + (1,),   # 글자색 = 선색
+                        pos=(float(sx)-30, float(sy)+off_y))
             lbl._peak = True
             self.add_widget(lbl)
 
