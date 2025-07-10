@@ -418,62 +418,102 @@ class GraphWidget(Widget):
         if (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks:
             self._make_labels()
             self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
-   
-        with self.canvas:
-           
-            PushMatrix()
-            Translate(self.x, self.y)   # 이후 좌표는 위젯 로컬 기준
-           
-            self._grid()
 
-            peaks = []            # (fx, fy, sx, sy, axis, order)
-            
+
+        with self.canvas:
+            PushMatrix()
+            Translate(self.x, self.y)
+
+            self._grid()
+            peaks = []                         # (sx, sy, fx, axis, order)
+
             for rms, pk, axis in self.datasets:
-                # ① 선 그리기 (기존 그대로)
+                # ① 스펙트럼 선 그리기 ------------------------------------
                 for j, pts in enumerate((rms, pk)):
-                    if len(pts) < 2:           # 그대로 유지
+                    if len(pts) < 2:
                         continue
                     Color(*self.AXIS_CLR[axis])
-                    sc = self._scale(pts)
-                    if sc:
-                        self._safe_line(sc, dash=bool(j))
-            
-                # ② -- top-N 피크 잡기 --------------------------
+                    self._safe_line(self._scale(pts), dash=bool(j))
+
+                # ② 이 축에서 큰 순으로 PEAK_N 개 좌표 수집 ---------------
                 top = sorted(rms, key=lambda p: p[1], reverse=True)[:self.PEAK_N]
-                for order, (fx, fy) in enumerate(top):
-                    sx, sy = self._scale([(fx, fy)])[0:2]
-                    peaks.append((fx, fy, sx, sy, axis, order))
-            
-            if len(self.diff) >= 2:
-                Color(1,1,1);  self._safe_line(self._scale(self.diff))
-   
-            # diff 그래프 (흰색)
+                for k, (fx, fy) in enumerate(top):        # k = 0,1,2…
+                    sx, sy = self._scale([(fx, fy)])[:2]  # 화면 좌표
+                    peaks.append((sx, sy, fx, axis, k))
+
+            # diff 그래프 (흰색) --------------------------------------------
             if len(self.diff) >= 2:
                 Color(1, 1, 1)
                 self._safe_line(self._scale(self.diff))
-               
+
             PopMatrix()
-   
-        # 피크 라벨
-         # 기존: 데이터 좌표(sx,sy)를 써서 그래프 안에 라벨
-        # -------------------------------------------------
-        # fx, fy, sx, sy, axis, order … 으로 peaks 리스트 모은 뒤
-        # for fx, fy, sx, sy, axis, order in peaks:
-        #     lbl = Label(text=f"▲ {fx:.1f} Hz", pos=(sx-30, sy+6 + order*14), ...)
-        #     self.add_widget(lbl)
-        # -------------------------------------------------
-        
-        # → 아래처럼 바꿔주세요
-        # -------------------------------------------------
-        for _, _, _, _, axis, order in sorted(peaks, key=lambda p: -p[1])[:self.PEAK_N]:
-            fx = peaks[order][0]                 # 주파수 값
-            px, py = self._peak_label_pos(order) # ↑ 새로 만든 위치 함수
+
+        # ── ③ 피크 라벨 배치 -----------------------------------------------
+        for sx, sy, fx, axis, order in peaks:
             lbl = Label(text=f"{fx:.1f} Hz",
                         color=self.AXIS_CLR[axis] + (1,),
-                        size_hint=(None,None), size=(80,18),
-                        pos=(px, py))
+                        size_hint=(None, None))
+            lbl.texture_update()
+            w, h = lbl.texture_size
+
+            # — 꼭짓점 위 조금 띄워서, 그래프 영역 안에 들어오도록 조정 —
+            px = self.x + sx - w / 2
+            py = self.y + min(sy + 8 + order * 14,   # 겹치면 위로 조금씩 밀기
+                              self.height - h - 4)
+
+            lbl.pos = (px, py)
             lbl._peak = True
             self.add_widget(lbl)
+
+        
+   
+        #with self.canvas:
+           
+        #    PushMatrix()
+        #    Translate(self.x, self.y)   # 이후 좌표는 위젯 로컬 기준
+           
+        #    self._grid()
+
+        #    peaks = []            # (fx, fy, sx, sy, axis, order)
+            
+        #    for rms, pk, axis in self.datasets:
+                # ① 선 그리기 (기존 그대로)
+        #        for j, pts in enumerate((rms, pk)):
+        #            if len(pts) < 2:           # 그대로 유지
+        #                continue
+        #            Color(*self.AXIS_CLR[axis])
+        #            sc = self._scale(pts)
+        #            if sc:
+        #                self._safe_line(sc, dash=bool(j))
+            
+                # ② -- top-N 피크 잡기 --------------------------
+        #        top = sorted(rms, key=lambda p: p[1], reverse=True)[:self.PEAK_N]
+        #        for order, (fx, fy) in enumerate(top):
+        #            sx, sy = self._scale([(fx, fy)])[0:2]
+        #            peaks.append((fx, fy, sx, sy, axis, order))
+            
+        #    if len(self.diff) >= 2:
+        #        Color(1,1,1);  self._safe_line(self._scale(self.diff))
+   
+            # diff 그래프 (흰색)
+        #    if len(self.diff) >= 2:
+        #        Color(1, 1, 1)
+        #        self._safe_line(self._scale(self.diff))
+               
+        #    PopMatrix()
+   
+
+        # → 아래처럼 바꿔주세요
+        # -------------------------------------------------
+        #for _, _, _, _, axis, order in sorted(peaks, key=lambda p: -p[1])[:self.PEAK_N]:
+        #    fx = peaks[order][0]                 # 주파수 값
+        #    px, py = self._peak_label_pos(order) # ↑ 새로 만든 위치 함수
+        #    lbl = Label(text=f"{fx:.1f} Hz",
+        #                color=self.AXIS_CLR[axis] + (1,),
+        #                size_hint=(None,None), size=(80,18),
+        #                pos=(px, py))
+        #    lbl._peak = True
+        #    self.add_widget(lbl)
             
 ###############################################################################
 # 8. 메인 앱
@@ -495,7 +535,7 @@ class FFTApp(App):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
         # 안내
-        self.label = Label(text="Pick up to 2 CSV)", size_hint=(1,.05))
+        self.label = Label(text="Pick up to 2 CSV", size_hint=(1,.05))
         root.add_widget(self.label)
 
         # 버튼
