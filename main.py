@@ -266,6 +266,18 @@ class GraphWidget(Widget):
         self.add_widget(self.lbl_y)
         # --------------------------------------------------
         self.bind(size=self._reposition_titles, pos=self._reposition_titles)
+
+
+
+    def _peak_label_pos(self, order):
+        """
+        그래프 오른쪽 위부터 차례로 아래로 내려가며 label 배치.
+        order : 0,1,2…  (피크 순서)
+        """
+        x = self.width - self.PAD_X + 10          # PAD 영역 밖으로 살짝
+        y = self.height - self.PAD_Y - 18 - order*18
+        return self.x + x, self.y + y             # 부모(BoxLayout) 절대좌표
+        
    
     def _reposition_titles(self, *_):
         # X축 : 위젯 아래쪽 중앙
@@ -443,16 +455,26 @@ class GraphWidget(Widget):
             PopMatrix()
    
         # 피크 라벨
-        for fx, fy, sx, sy, axis, order in peaks:
-            off_y = 6 + order*14         # 1 등·2 등·3 등 라벨을 위로 조금씩
-            lbl = Label(text=f"▲ {fx:.1f} Hz",
-                        size_hint=(None, None), size=(90, 20),
-                        color=self.AXIS_CLR[axis] + (1,),   # 글자색 = 선색
-                        pos=(float(sx)-30, float(sy)+off_y))
+         # 기존: 데이터 좌표(sx,sy)를 써서 그래프 안에 라벨
+        # -------------------------------------------------
+        # fx, fy, sx, sy, axis, order … 으로 peaks 리스트 모은 뒤
+        # for fx, fy, sx, sy, axis, order in peaks:
+        #     lbl = Label(text=f"▲ {fx:.1f} Hz", pos=(sx-30, sy+6 + order*14), ...)
+        #     self.add_widget(lbl)
+        # -------------------------------------------------
+        
+        # → 아래처럼 바꿔주세요
+        # -------------------------------------------------
+        for _, _, _, _, axis, order in sorted(peaks, key=lambda p: -p[1])[:self.PEAK_N]:
+            fx = peaks[order][0]                 # 주파수 값
+            px, py = self._peak_label_pos(order) # ↑ 새로 만든 위치 함수
+            lbl = Label(text=f"{fx:.1f} Hz",
+                        color=self.AXIS_CLR[axis] + (1,),
+                        size_hint=(None,None), size=(80,18),
+                        pos=(px, py))
             lbl._peak = True
             self.add_widget(lbl)
-
-
+            
 ###############################################################################
 # 8. 메인 앱
 ###############################################################################
