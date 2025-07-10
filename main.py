@@ -712,7 +712,8 @@ class FFTApp(App):
             if any(axis_sets):           # 하나라도 데이터가 있을 때
                 Clock.schedule_once(
                     lambda _dt, ds=axis_sets, xm=xmax, ym=ymax:
-                        self.graph.update_graph(ds, [], xm, ym)
+                        for i, g in enumerate(self.graphs):
+                            g.update_graph(ds[i*2:(i+1)*2], [], xm)
                 )
 
     except Exception:
