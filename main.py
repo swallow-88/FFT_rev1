@@ -635,91 +635,90 @@ class FFTApp(App):
 
     # ───────────────────────────── Realtime FFT 루프
     def _rt_fft_loop(self):
-    """백그라운드 스레드 – 0.5 s마다 버퍼 스냅샷 → Welch 분석 → 그래프 갱신"""
-    FFT_LEN_SEC    = 8          # 분석 구간 길이 (초)
-    RT_REFRESH_SEC = 0.5        # 갱신 주기  (초)
-    MIN_FS         = 50         # 최소 허용 샘플링 주파수
+        """백그라운드 스레드 – 0.5 s마다 버퍼 스냅샷 → Welch 분석 → 그래프 갱신"""
+        FFT_LEN_SEC    = 8
+        RT_REFRESH_SEC = 0.5
+        MIN_FS         = 50
 
-    try:
-        while self.rt_on:
-            time.sleep(RT_REFRESH_SEC)
+        try:
+            while self.rt_on:
+                time.sleep(RT_REFRESH_SEC)
 
-            # ---------- ① 버퍼 스냅샷 (락) -----------------------------
-            with self._buf_lock:
-                snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
+                # ① 버퍼 스냅샷 -------------------------------------------------
+                with self._buf_lock:
+                    snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
 
-            axis_sets, ymax, xmax = [], 0.0, 0.0        # 그래프용 누적
 
-            # ---------- ② 축별 FFT ------------------------------------
-            for ax in "xyz":
-                if len(snap[ax]) < MIN_FS * FFT_LEN_SEC:
-                    axis_sets += [[], []]               # 자리 채우기
-                    continue
+                axis_sets, xmax = {}, 0.0                     # ★ 변경 ①
 
-                *_, dt_arr = zip(*snap[ax])
-                dt_arr = np.array(dt_arr[-512:])
-                dt_arr = dt_arr[dt_arr > 1e-5]
-                if not dt_arr.size:
-                    axis_sets += [[], []];  continue
-
-                fs = 1.0 / np.median(dt_arr)
-                if fs < MIN_FS:
-                    axis_sets += [[], []];  continue
-
-                fft_len = int(fs * FFT_LEN_SEC)
-                if len(snap[ax]) < fft_len:
-                    axis_sets += [[], []];  continue
-
-                _, val, _ = zip(*snap[ax][-fft_len:])
-                sig  = (np.asarray(val, float) - np.mean(val)) * np.hanning(fft_len)
-
-                spec  = np.fft.rfft(sig)
-                freq  = np.fft.rfftfreq(fft_len, d=1/fs)
-                amp_a = 2*np.abs(spec)/(fft_len*np.sqrt(2))
-
-                amp_lin, ref0 = acc_to_spec(freq, amp_a)
-
-                # 0.5 Hz 밴드 RMS/Peak
-                rms_line, pk_line = [], []
-                FMAX = min(50, fs*0.5)
-                for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
-                    hi  = lo + BAND_HZ
-                    sel = (freq >= lo) & (freq < hi)
-                    if not sel.any():
+                # ② 축별 FFT ----------------------------------------------------
+                for ax in "xyz":
+                    if len(snap[ax]) < MIN_FS * FFT_LEN_SEC:
                         continue
-                    cen = (lo+hi)*0.5
-                    rms = np.sqrt(np.mean(amp_lin[sel]**2))
-                    pk  = amp_lin[sel].max()
-                    rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-4)/ref0)))
-                    pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-4)/ref0)))
+                    *_, dt_arr = zip(*snap[ax])
+                    dt_arr = np.array(dt_arr[-512:])
+                    dt_arr = dt_arr[dt_arr > 1e-5]
+                    if not dt_arr.size:
+                        continue
+                    fs = 1.0 / np.median(dt_arr)
+                    if fs < MIN_FS:
+                        continue
 
-                if not rms_line:                       # 데이터 없으면 skip
-                    axis_sets += [[], []];  continue
+                    fft_len = int(fs * FFT_LEN_SEC)
+                    if len(snap[ax]) < fft_len:
+                        continue
 
-                # 공진 추적
-                f_centres = np.array([x for x,_ in rms_line])
-                f_vals    = np.array([y for _,y in rms_line])
-                band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
-                if band_sel.any():
-                    self.last_fn = f_centres[band_sel][f_vals[band_sel].argmax()]
+                    _, val, _ = zip(*snap[ax][-fft_len:])
+                    sig  = (np.asarray(val) - np.mean(val)) * np.hanning(fft_len)
 
-                axis_sets += [rms_line, pk_line]
-                ymax  = max(ymax, max(y for _,y in rms_line), max(y for _,y in pk_line))
-                xmax  = max(xmax, FMAX)
+                    spec  = np.fft.rfft(sig)
+                    freq  = np.fft.rfftfreq(fft_len, d=1/fs)
+                    amp_a = 2 * np.abs(spec) / (fft_len*np.sqrt(2))
+                    amp_lin, ref0 = acc_to_spec(freq, amp_a)
 
-            # ---------- ③ 메인스레드에 그리기 요청 ---------------------
-            if any(axis_sets):           # 하나라도 데이터가 있을 때
-                Clock.schedule_once(
-                    lambda _dt, ds=axis_sets, xm=xmax, ym=ymax:
-                        for i, g in enumerate(self.graphs):
-                            g.update_graph(ds[i*2:(i+1)*2], [], xm)
-                )
+                    rms_line, pk_line = [], []
+                    FMAX = min(50, fs*0.5)
+                    for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
+                        hi  = lo + BAND_HZ
+                        sel = (freq >= lo) & (freq < hi)
+                        if not sel.any():
+                            continue
+                        cen = (lo + hi) * 0.5
+                        rms = np.sqrt(np.mean(amp_lin[sel]**2))
+                        pk  = amp_lin[sel].max()
+                        rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-4)/ref0)))
+                        pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-4)/ref0)))
 
-    except Exception:
-        Logger.exception("Realtime FFT thread crashed")
-        self.rt_on = False
-        Clock.schedule_once(lambda *_:
-            setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
+                    if not rms_line:
+                        continue
+
+                    # 공진 추적
+                    f_centres = np.array([x for x, _ in rms_line])
+                    f_vals    = np.array([y for _, y in rms_line])
+                    band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
+                    if band_sel.any():
+                        self.last_fn = f_centres[band_sel][f_vals[band_sel].argmax()]
+
+
+                    axis_sets[ax] = (rms_line, pk_line, ax)    # ★ 변경 ②
+                    xmax = max(xmax, FMAX)
+
+                # ③ 메인스레드에 그래프 업데이트 ---------------------------------
+
+                if axis_sets:                                   # ★ 변경 ③
+                    def _update(_dt, sets=axis_sets, xm=xmax):
+                        for ax, g in zip("xyz", self.graphs):
+                            if ax in sets:
+                                g.update_graph([sets[ax]], [], xm)
+                            else:
+                                g.update_graph([], [], xm)
+                    Clock.schedule_once(_update)               # ★ 변경 ④
+
+        except Exception:
+            Logger.exception("Realtime FFT thread crashed")
+            self.rt_on = False
+            Clock.schedule_once(lambda *_:
+                setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
     
     # ───────────────────────────── CSV FFT (백그라운드)
     def run_fft(self, *_):
