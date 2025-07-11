@@ -345,7 +345,7 @@ class GraphWidget(Widget):
                
 
     # ───────────────────────────── 외부 API
-    def update_graph(self, ds, df, xm):
+    def update_graph(self, ds, df, xm, status = None):
         # ── 3-튜플(rms, pk, axis) 만 저장
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
