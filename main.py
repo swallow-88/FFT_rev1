@@ -235,7 +235,7 @@ class GraphWidget(Widget):
     PEAK_MIN_SEP = 2.0
  
     # 축 고유 색상:  X=Red, Y=Green, Z=Blue
-    AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,0,1)}
+    AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,1,1)}
     #   (기존 COLORS 배열은 더 이상 쓰지 않으므로 삭제)
     DIFF_CLR = (1,1,1)
 
@@ -402,7 +402,7 @@ class GraphWidget(Widget):
             return
         MAX_V = 4094
         if dash:
-            dash_len, gap_len = 10., 6.
+            dash_len, gap_len = 1.5, 4.
             for i in range(0,len(pts)-2,2):
                 x1,y1,x2,y2 = pts[i:i+4]
                 seg = ((x2-x1)**2+(y2-y1)**2)**0.5
@@ -866,6 +866,11 @@ class FFTApp(App):
             f1 = dict(data[0][0]);  f2 = dict(data[1][0])
             diff_line = [(f, f1[f] - f2[f]) for f in sorted(set(f1) & set(f2))]
 
+           
+            # ── NEW : 15 dB 이상 차이가 있나?  --------------------
+            LIMIT_DB = 15
+            alert_msg = "PLZ CHECK" if any(abs(d) >= LIMIT_DB for _, d in diff_line) else "GOOD"
+
             # ── ③ 그래프 갱신 – 메인 스레드 ──────────────────────
             def _update(_dt):
                 rms0, pk0 = data[0]          # 첫 번째 CSV
@@ -874,6 +879,9 @@ class FFTApp(App):
                 self.graphs[0].update_graph([(rms0, pk0, 'x')], [],        xmax)
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [],        xmax)
                 self.graphs[2].update_graph([],               diff_line,   xmax)
+
+                self.log(state)
+            
             Clock.schedule_once(_update)
 
         except Exception as exc:
