@@ -249,6 +249,7 @@ class GraphWidget(Widget):
         self.Y_TICKS = [0,20,40,60,80,100]
         self._prev_ticks = (None, None)
         self.bind(size=lambda *_: self.redraw())
+        self.status_text = None
 
         # ───────────────────────────── 축 라벨
         # ── 축 제목(Label) ────────────────────────────────
@@ -349,6 +350,8 @@ class GraphWidget(Widget):
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
+        self.status_text = status
+        self.redraw()
    
         # ── y 값 모으기 : rms·pk 에서만
         ys = []
@@ -465,6 +468,29 @@ class GraphWidget(Widget):
 
             PopMatrix()
 
+            # ── ★ 배지 그리기 -------------------------------
+            if self.status_text:
+                badge_w, badge_h = 90, 32
+                x0 = self.width - badge_w - 10
+                y0 = self.height - badge_h - 10
+                # 색상 : GOOD→초록 , PLZ CHECK→빨강
+                if self.status_text == "GOOD":
+                    Color(0, .7, 0, .8)
+                else:                    # "PLZ CHECK"
+                    Color(.9, 0, 0, .8)
+                # 배경 사각형
+                Line(points=[x0, y0, x0+badge_w, y0,
+                             x0+badge_w, y0+badge_h, x0, y0+badge_h,
+                             x0, y0], width=0)  # 닫힌 폴리라인
+                # 텍스트
+                lbl = Label(text=self.status_text,
+                            size_hint=(None, None),
+                            size=(badge_w, badge_h),
+                            pos=(self.x + x0, self.y + y0))
+                lbl._badge = True
+                self.add_widget(lbl)
+
+
         # ── ③ 피크 라벨 배치 -----------------------------------------------
         for sx, sy, fx, axis, order in peaks:
             lbl = Label(text=f"{fx:.1f} Hz",
@@ -482,56 +508,12 @@ class GraphWidget(Widget):
             lbl._peak = True
             self.add_widget(lbl)
 
+        # 기존 피크 라벨 처리 아래에 ↓ (배지 Label 제거용)
+        for ch in list(self.children):
+            if getattr(ch, "_badge", False) and ch.text != self.status_text:
+                self.remove_widget(ch)
+
         
-   
-        #with self.canvas:
-           
-        #    PushMatrix()
-        #    Translate(self.x, self.y)   # 이후 좌표는 위젯 로컬 기준
-           
-        #    self._grid()
-
-        #    peaks = []            # (fx, fy, sx, sy, axis, order)
-            
-        #    for rms, pk, axis in self.datasets:
-                # ① 선 그리기 (기존 그대로)
-        #        for j, pts in enumerate((rms, pk)):
-        #            if len(pts) < 2:           # 그대로 유지
-        #                continue
-        #            Color(*self.AXIS_CLR[axis])
-        #            sc = self._scale(pts)
-        #            if sc:
-        #                self._safe_line(sc, dash=bool(j))
-            
-                # ② -- top-N 피크 잡기 --------------------------
-        #        top = sorted(rms, key=lambda p: p[1], reverse=True)[:self.PEAK_N]
-        #        for order, (fx, fy) in enumerate(top):
-        #            sx, sy = self._scale([(fx, fy)])[0:2]
-        #            peaks.append((fx, fy, sx, sy, axis, order))
-            
-        #    if len(self.diff) >= 2:
-        #        Color(1,1,1);  self._safe_line(self._scale(self.diff))
-   
-            # diff 그래프 (흰색)
-        #    if len(self.diff) >= 2:
-        #        Color(1, 1, 1)
-        #        self._safe_line(self._scale(self.diff))
-               
-        #    PopMatrix()
-   
-
-        # → 아래처럼 바꿔주세요
-        # -------------------------------------------------
-        #for _, _, _, _, axis, order in sorted(peaks, key=lambda p: -p[1])[:self.PEAK_N]:
-        #    fx = peaks[order][0]                 # 주파수 값
-        #    px, py = self._peak_label_pos(order) # ↑ 새로 만든 위치 함수
-        #    lbl = Label(text=f"{fx:.1f} Hz",
-        #                color=self.AXIS_CLR[axis] + (1,),
-        #                size_hint=(None,None), size=(80,18),
-        #                pos=(px, py))
-        #    lbl._peak = True
-        #    self.add_widget(lbl)
-            
 ###############################################################################
 # 8. 메인 앱
 ###############################################################################
@@ -870,18 +852,17 @@ class FFTApp(App):
             # ── NEW : 15 dB 이상 차이가 있나?  --------------------
             LIMIT_DB = 15
             alert_msg = "PLZ CHECK" if any(abs(d) >= LIMIT_DB for _, d in diff_line) else "GOOD"
-
-            # ── ③ 그래프 갱신 – 메인 스레드 ──────────────────────
-            def _update(_dt):
-                rms0, pk0 = data[0]          # 첫 번째 CSV
-                rms1, pk1 = data[1]          # 두 번째 CSV
-           
-                self.graphs[0].update_graph([(rms0, pk0, 'x')], [],        xmax)
-                self.graphs[1].update_graph([(rms1, pk1, 'y')], [],        xmax)
-                self.graphs[2].update_graph([],               diff_line,   xmax)
-
-                self.log(state)
             
+            def _update(_dt, state=alert_msg):
+                rms0, pk0 = data[0]
+                rms1, pk1 = data[1]
+            
+                self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax)
+                self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
+                #                 ↓ status 파라미터 추가
+                self.graphs[2].update_graph([], diff_line, xmax, status=state)
+            
+                self.log(state)         # 상단 텍스트/토스트도 유지
             Clock.schedule_once(_update)
 
         except Exception as exc:
