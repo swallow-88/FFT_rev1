@@ -397,7 +397,7 @@ class GraphWidget(Widget):
             self.status_lbl.text = ""
 
         # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
-        self.redraw(
+        self.redraw()
 
 
     # ───────────────────────────── 내부 헬퍼
