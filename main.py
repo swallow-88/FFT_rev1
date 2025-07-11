@@ -436,7 +436,7 @@ class GraphWidget(Widget):
             return
         MAX_V = 4094
         if dash:
-            dash_len, gap_len = 1.5, 4.
+            dash_len, gap_len = 1.5, 6.
             for i in range(0,len(pts)-2,2):
                 x1,y1,x2,y2 = pts[i:i+4]
                 seg = ((x2-x1)**2+(y2-y1)**2)**0.5
