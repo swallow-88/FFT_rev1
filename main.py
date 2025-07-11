@@ -458,14 +458,21 @@ class GraphWidget(Widget):
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
         self.canvas.clear()
+    
+        # ── ① 축 라벨 삭제는 *꼭* 새로 그릴 때만 ──
+        need_new_axis = (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
+        if need_new_axis:
+            for ch in list(self.children):
+                if getattr(ch, "_axis", False):
+                    self.remove_widget(ch)
+    
+        # (피크 라벨·배지 제거 코드는 그대로 두세요)
         for ch in list(self.children):
-            if getattr(ch, "_axis", False) or getattr(ch, "_peak", False):
+            if getattr(ch, "_peak", False):
                 self.remove_widget(ch)
-   
-        if not self.datasets and len(self.diff)< 2:
-            return
-   
-        if (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks:
+    
+        # ── ② 축 라벨이 바뀌었을 때만 다시 생성 ──
+        if need_new_axis:
             self._make_labels()
             self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
 
@@ -498,28 +505,6 @@ class GraphWidget(Widget):
                 self._safe_line(self._scale(self.diff))
 
             PopMatrix()
-
-            # ── ★ 배지 그리기 -------------------------------
-            if self.status_text:
-                badge_w, badge_h = 90, 32
-                x0 = self.width - badge_w - 10
-                y0 = self.height - badge_h - 10
-                # 색상 : GOOD→초록 , PLZ CHECK→빨강
-                if self.status_text == "GOOD":
-                    Color(0, .7, 0, .8)
-                else:                    # "PLZ CHECK"
-                    Color(.9, 0, 0, .8)
-                # 배경 사각형
-                Line(points=[x0, y0, x0+badge_w, y0,
-                             x0+badge_w, y0+badge_h, x0, y0+badge_h,
-                             x0, y0], width=0)  # 닫힌 폴리라인
-                # 텍스트
-                lbl = Label(text=self.status_text,
-                            size_hint=(None, None),
-                            size=(badge_w, badge_h),
-                            pos=(self.x + x0, self.y + y0))
-                lbl._badge = True
-                self.add_widget(lbl)
 
 
         # ── ③ 피크 라벨 배치 -----------------------------------------------
@@ -565,7 +550,7 @@ class FFTApp(App):
         root = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
         # 안내
-        self.label = Label(text="Pick up to 2 CSV", size_hint=(1,.05))
+        self.label = Label(text="Pick up to 2 CSV", size_hint=(1,.05), color=(1,1,1,1))
         root.add_widget(self.label)
 
         # 버튼
@@ -611,9 +596,18 @@ class FFTApp(App):
         return root
 
     # ───────────────────────────── 헬퍼
-    def log(self, msg):
+    def log(self, msg: str):
         Logger.info(msg)
         self.label.text = msg
+    
+        # ── 메시지 색상 구분 ──────────────────────
+        if msg.startswith("PLZ"):             # 예: "PLZ CHECK"
+            self.label.color = (1, 0, 0, 1)   # 빨간색
+        elif msg.startswith("GOOD"):
+            self.label.color = (0, 1, 0, 1)   # 초록색
+        else:
+            self.label.color = (1, 1, 1, 1)   # 기본 흰색
+    
         if ANDROID and toast:
             try:
                 toast.toast(msg)
