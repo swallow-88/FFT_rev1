@@ -250,10 +250,9 @@ class GraphWidget(Widget):
         self._prev_ticks = (None, None)
         self.bind(size=lambda *_: self.redraw())
         self.status_text = None
-        class GraphWidget(Widget):
-        # ── 상태 배지(Label) ─────────────────────────────
+
         #   - markup=True 로 [color] 태그 사용
-        self.status_lbl = Label(markup=True,           # ←✔
+        self.status_lbl = Label(markup=True,           
                                 font_size='16sp',
                                 size_hint=(None, None))
         self.add_widget(self.status_lbl)
