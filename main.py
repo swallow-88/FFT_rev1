@@ -376,11 +376,15 @@ class GraphWidget(Widget):
             ys.extend([y for _, y in pk])
         ys.extend([y for _, y in self.diff])
    
+        # ① y-범위를 20 dB 단위로 '스냅'      (top, low 계산 부분만 바꾸면 끝!)
         if ys:
-            top = ((int(max(ys)) // 20) + 1) * 20
-            low = ((int(min(ys)) // 20) - 1) * 20
-            self.Y_MIN, self.Y_MAX = low, top
-            self.Y_TICKS = list(range(low, top + 1, 20))
+            raw_top = max(ys)
+            raw_low = min(ys)
+            top = ((int(raw_top)+19)//20)*20      # 0,20,40,… 로 올림
+            low = ((int(raw_low)-19)//20)*20      # 0,-20,-40,… 로 내림
+            if (top, low) != (self.Y_MAX, self.Y_MIN):   # '진짜' 바뀔 때만
+                self.Y_MIN, self.Y_MAX = low, top
+                self.Y_TICKS = list(range(low, top+1, 20))
 
 
         # ── 상태 배지 텍스트/색상 ───────────────────────
