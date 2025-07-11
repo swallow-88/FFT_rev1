@@ -250,6 +250,14 @@ class GraphWidget(Widget):
         self._prev_ticks = (None, None)
         self.bind(size=lambda *_: self.redraw())
         self.status_text = None
+        class GraphWidget(Widget):
+        # ── 상태 배지(Label) ─────────────────────────────
+        #   - markup=True 로 [color] 태그 사용
+        self.status_lbl = Label(markup=True,           # ←✔
+                                font_size='16sp',
+                                size_hint=(None, None))
+        self.add_widget(self.status_lbl)
+       
 
         # ───────────────────────────── 축 라벨
         # ── 축 제목(Label) ────────────────────────────────
@@ -307,6 +315,14 @@ class GraphWidget(Widget):
         txt_w, txt_h = self.lbl_y.texture_size
         self.lbl_y.pos = (self.x + 2,                       # 살짝 안쪽
                           self.y + (self.height - txt_w) / 2)  # txt_w ↔︎ txt_h 주의!
+
+        # ── 중앙 상단에 상태 배지 ──────────────────────
+        self.status_lbl.texture_update()
+        bw, bh = self.status_lbl.texture_size
+        self.status_lbl.pos = (                      # 그래프 가운데 위
+            self.x + (self.width - bw) / 2,
+            self.y + self.height - self.PAD_Y + 6)
+        
    
    
     def _add_axis_label(self, txt: str, loc_xy):
@@ -365,8 +381,18 @@ class GraphWidget(Widget):
             low = ((int(min(ys)) // 20) - 1) * 20
             self.Y_MIN, self.Y_MAX = low, top
             self.Y_TICKS = list(range(low, top + 1, 20))
-   
-        self.redraw()
+
+
+        # ── 상태 배지 텍스트/색상 ───────────────────────
+        if status:                       # "GOOD" / "PLZ CHECK" / 기타
+            if status.upper().startswith("P"):     # PLZ CHECK
+                tag = "[color=ff0000]{}[/color]".format(status)
+            else:                                   # GOOD
+                tag = "[color=00ff00]{}[/color]".format(status)
+            self.status_lbl.text = tag
+        else:
+            self.status_lbl.text = ""     # 아무 것도 안 보이게
+
 
 
     # ───────────────────────────── 내부 헬퍼
