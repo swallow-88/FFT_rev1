@@ -251,14 +251,7 @@ class GraphWidget(Widget):
         self.bind(size=lambda *_: self.redraw())
         self.status_text = None
 
-        #   - markup=True 로 [color] 태그 사용
-        self.status_lbl = Label(markup=True,           
-                                font_size='16sp',
-                                size_hint=(None, None))
-        self.add_widget(self.status_lbl)
-       
-
-        # ───────────────────────────── 축 라벨
+       # ───────────────────────────── 축 라벨
         # ── 축 제목(Label) ────────────────────────────────
         self.lbl_x = Label(text="Frequency (Hz)",
                            size_hint=(None, None))
@@ -274,6 +267,14 @@ class GraphWidget(Widget):
         self.add_widget(self.lbl_x)
         self.add_widget(self.lbl_y)
         # --------------------------------------------------
+
+        self.status_lbl = Label(bold=True,
+                                font_size='16sp',
+                                color=(0, 1, 0, 1),   # default green
+                                size_hint=(None, None))
+        self.add_widget(self.status_lbl)
+
+        # 크기 바뀔 때마다 배지·축제목 위치 갱신
         self.bind(size=self._reposition_titles, pos=self._reposition_titles)
 
 
@@ -316,11 +317,11 @@ class GraphWidget(Widget):
                           self.y + (self.height - txt_w) / 2)  # txt_w ↔︎ txt_h 주의!
 
         # ── 중앙 상단에 상태 배지 ──────────────────────
+ 
         self.status_lbl.texture_update()
-        bw, bh = self.status_lbl.texture_size
-        self.status_lbl.pos = (                      # 그래프 가운데 위
-            self.x + (self.width - bw) / 2,
-            self.y + self.height - self.PAD_Y + 6)
+        bx = self.x + (self.width - self.status_lbl.texture_size[0]) * 0.5
+        by = self.y + self.height - self.PAD_Y + 6
+        self.status_lbl.pos = (bx, by)
         
    
    
@@ -360,7 +361,7 @@ class GraphWidget(Widget):
                
 
     # ───────────────────────────── 외부 API
-    def update_graph(self, ds, df, xm, status = None):
+    def update_graph(self, ds, df, xm, status: str | None = None):
         # ── 3-튜플(rms, pk, axis) 만 저장
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
@@ -387,15 +388,12 @@ class GraphWidget(Widget):
 
 
         # ── 상태 배지 텍스트/색상 ───────────────────────
-        if status:                       # "GOOD" / "PLZ CHECK" / 기타
-            if status.upper().startswith("P"):     # PLZ CHECK
-                tag = "[color=ff0000]{}[/color]".format(status)
-            else:                                   # GOOD
-                tag = "[color=00ff00]{}[/color]".format(status)
-            self.status_lbl.text = tag
-        else:
-            self.status_lbl.text = ""     # 아무 것도 안 보이게
-
+    
+        if status is not None:
+            self.status_lbl.text  = status
+            self.status_lbl.color = (1,0,0,1) if status.startswith("PLZ") else (0,1,0,1)
+        else:  
+            pass # ← realtime 호출 시 '' 넘기면 사라짐
 
 
     # ───────────────────────────── 내부 헬퍼
@@ -800,14 +798,15 @@ class FFTApp(App):
 
                 # ③ 메인스레드에 그래프 업데이트 ---------------------------------
 
-                if axis_sets:                                   # ★ 변경 ③
+                # ── ③ 메인스레드에 그래프 업데이트 ─────────────────────
+                if axis_sets:
                     def _update(_dt, sets=axis_sets, xm=xmax):
                         for ax, g in zip("xyz", self.graphs):
-                            if ax in sets:
-                                g.update_graph([sets[ax]], [], xm)
-                            else:
-                                g.update_graph([], [], xm)
-                    Clock.schedule_once(_update)               # ★ 변경 ④
+                            if ax in sets:                           # 데이터 있는 축
+                                g.update_graph([sets[ax]], [], xm, "")   # ← status=""
+                            else:                                    # 샘플 부족한 축
+                                g.update_graph([],        [], xm, "")    # ← status=""
+                    Clock.schedule_once(_update)        # ★ 변경 ④
 
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
@@ -882,27 +881,28 @@ class FFTApp(App):
             LIMIT_DB = 15
             alert_msg = "PLZ CHECK" if any(abs(d) >= LIMIT_DB for _, d in diff_line) else "GOOD"
             
-            def _update(_dt, state=alert_msg):
+            # ── 메인-스레드 업데이트 ──────────────────────────────
+            def _update(_dt):
                 rms0, pk0 = data[0]
                 rms1, pk1 = data[1]
-            
+    
+                # 그래프 0,1 : 원본 스펙 (status 기본값 "")
                 self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax)
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
-                #                 ↓ status 파라미터 추가
-                self.graphs[2].update_graph([], diff_line, xmax, status=state)
-            
-                self.log(state)         # 상단 텍스트/토스트도 유지
+    
+                # 그래프 2 : diff  +  상태 배지
+                self.graphs[2].update_graph([], diff_line, xmax, status)
+    
+                # 화면 하단/토스트 메시지도 동일하게
+                self.log(status)
+    
             Clock.schedule_once(_update)
-
+    
         except Exception as exc:
-            err_msg = str(exc)
-            def _show_err(dt):
-                self.log(f"FFT 오류: {err_msg}")
-            Clock.schedule_once(_show_err)
-
+            Clock.schedule_once(lambda _dt: self.log(f"FFT 오류: {exc}"))
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
-           
+
            
 
     # ───────────────────────────── CSV 로드
