@@ -367,7 +367,7 @@ class GraphWidget(Widget):
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
         self.status_text = status
-        self.redraw()
+    
    
         # ── y 값 모으기 : rms·pk 에서만
         ys = []
@@ -392,8 +392,12 @@ class GraphWidget(Widget):
         if status is not None:
             self.status_lbl.text  = status
             self.status_lbl.color = (1,0,0,1) if status.startswith("PLZ") else (0,1,0,1)
-        else:  
-            pass # ← realtime 호출 시 '' 넘기면 사라짐
+        else:
+            # 실시간 호출 등으로 배지를 지우고 싶을 때는 None/""를 넘겨서 빈 문자열 처리
+            self.status_lbl.text = ""
+
+        # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
+        self.redraw(
 
 
     # ───────────────────────────── 내부 헬퍼
@@ -880,6 +884,8 @@ class FFTApp(App):
             # ── NEW : 15 dB 이상 차이가 있나?  --------------------
             LIMIT_DB = 15
             alert_msg = "PLZ CHECK" if any(abs(d) >= LIMIT_DB for _, d in diff_line) else "GOOD"
+
+ 
             
             # ── 메인-스레드 업데이트 ──────────────────────────────
             def _update(_dt):
@@ -891,10 +897,10 @@ class FFTApp(App):
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
     
                 # 그래프 2 : diff  +  상태 배지
-                self.graphs[2].update_graph([], diff_line, xmax, status)
+                self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
     
                 # 화면 하단/토스트 메시지도 동일하게
-                self.log(status)
+                self.log(alert_msg)
     
             Clock.schedule_once(_update)
     
