@@ -61,8 +61,42 @@ from kivy.uix.widget import Widget
 from kivy.uix.spinner import Spinner
 from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
-from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate
+from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
 from plyer import filechooser, accelerometer
+
+
+class FlatRoundButton(Button):
+    """
+    - 단색(또는 투명) 배경
+    - 모서리 둥글기 radius = 12 px
+    - 눌릴 때 색상만 살짝 어둡게
+    """
+    # 평상시·pressed 색상
+    bgcolor = (.15, .5, .9, 1)
+    bgcolor_down = (.10, .4, .8, 1)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('background_normal', '')   # 기본 텍스처 제거
+        kwargs.setdefault('background_down', '')     #   (꼭 필요)
+        kwargs.setdefault('font_size', '16sp')
+        kwargs.setdefault('color', (1, 1, 1, 1))     # 글자색 – 흰색
+        super().__init__(**kwargs)
+
+        with self.canvas.before:
+            Color(*self.bgcolor)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size,
+                                         radius=[12])
+        # 위젯 위치·크기 바뀔 때 사각형도 갱신
+        self.bind(pos=self._update_rect, size=self._update_rect,
+                  state=self._on_state)
+
+    def _update_rect(self, *a):
+        self.rect.pos  = self.pos
+        self.rect.size = self.size
+
+    def _on_state(self, *a):
+        c = self.bgcolor_down if self.state == 'down' else self.bgcolor
+        self.canvas.before.children[-1].rgba = c
 
 # ──────────────────────────────────────────────────────────────────
 # Android 전용 준비
@@ -554,11 +588,11 @@ class FFTApp(App):
         root.add_widget(self.label)
 
         # 버튼
-        self.btn_sel = Button(text="Select CSV", size_hint=(1,.05),
+        self.btn_sel = FlatRoundButton(text="Select CSV", size_hint=(1,.05),
                               disabled=True, on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",  size_hint=(1,.05),
+        self.btn_run = FlatRoundButton(text="FFT RUN",  size_hint=(1,.05),
                               disabled=True, on_press=self.run_fft)
-        self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
+        self.btn_rec = FlatRoundButton(text=f"Record {int(self.REC_DURATION)} s",
                               size_hint=(1,.05), disabled=True,
                               on_press=self.start_recording)
         root.add_widget(self.btn_sel), root.add_widget(self.btn_run), root.add_widget(self.btn_rec)
@@ -575,11 +609,11 @@ class FFTApp(App):
         root.add_widget(self.spin_dur), root.add_widget(self.spin_sm)
 
         # 모드/Realtime
-        self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1,.05),
+        self.btn_mode = FlatRoundButton(text=f"Mode: {MEAS_MODE}", size_hint=(1,.05),
                                on_press=self._toggle_mode)
-        self.btn_setF0 = Button(text="Set F0 (baseline)", size_hint=(1,.05),
+        self.btn_setF0 = FlatRoundButton(text="Set F0 (baseline)", size_hint=(1,.05),
                                 on_press=self._save_baseline)
-        self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1,.05),
+        self.btn_rt = FlatRoundButton(text="Realtime FFT (OFF)", size_hint=(1,.05),
                              on_press=self.toggle_realtime)
         root.add_widget(self.btn_mode), root.add_widget(self.btn_setF0), root.add_widget(self.btn_rt)
 
