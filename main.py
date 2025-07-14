@@ -142,12 +142,14 @@ else:
 # 4. 사용자 조정 상수
 ###############################################################################
 # ── 파일 맨 위 ‘사용자 조정 상수’ 자리 근처 ──────────────
-CFG = {
-    "BAND_HZ":      0.5,
-    "HPF_CUTOFF":   5.0,
-    "MAX_FMAX":     50.0,
-    "SMOOTH_N":     1,
-}
+# ── 4. 사용자 조정 상수 ───────────────────────────
+CFG = dict(BAND_HZ=0.5, HPF_CUTOFF=5.0, MAX_FMAX=50.0, SMOOTH_N=1)
+
+# ↓ 옛 변수명 유지 (호환용)
+BAND_HZ  = CFG["BAND_HZ"]
+SMOOTH_N = CFG["SMOOTH_N"]
+MAX_FMAX = CFG["MAX_FMAX"]
+# --------------------------------------------------
 
 #BAND_HZ            = 0.5
 REF_MM_S, REF_ACC  = 0.01, 0.981
@@ -942,9 +944,9 @@ class FFTApp(App):
     
                     # ── 스무딩
                     if len(rms_line) >= CFG["SMOOTH_N"]:
-                        sm = smooth_y([...], n=CFG["SMOOTH_N"])
-                        rms_line  = [(x, y) for (x, _), y in zip(rms_line, sm)]
-    
+                        ys = smooth_y([y for _, y in rms_line])
+                        rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
+                        
                     # ── 공진 주파수(Fₙ) 추적 ---------------------------
                     f_centres = np.array([x for x, _ in rms_line])
                     f_vals    = np.array([y for _, y in rms_line])
@@ -1038,10 +1040,11 @@ class FFTApp(App):
                     pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
     
                 # ── ⑤ 스무딩 ──────────────────────────────────────────────
-                if len(rms_line) >= SMOOTH_N:
+                # ── 스무딩 블록 (두 곳 모두) ────────────────
+                if len(rms_line) >= CFG["SMOOTH_N"]:
                     ys = smooth_y([y for _, y in rms_line])
                     rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
-    
+                    
                 data.append((rms_line, pk_line))
                 xmax = max(xmax, FMAX)
     
