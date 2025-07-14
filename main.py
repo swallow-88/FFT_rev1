@@ -64,6 +64,24 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
 from plyer import filechooser, accelerometer
 
+from utils_fft import robust_fs, next_pow2
+
+
+def robust_fs(dt_arr, n_keep=2048, min_fs=1.):
+    """
+    dt_arr : 최근 dt (sec) 배열
+    return : 추정 fs (Hz)
+    """
+    dt = np.median(dt_arr[-n_keep:])     # 러닝 미디언
+    if dt <= 0:
+        return min_fs
+    return max(1./dt, min_fs)
+
+def next_pow2(n: int) -> int:
+    ">= n 인 가장 가까운 2의 거듭제곱"
+    return 1 << (n-1).bit_length()
+
+
 # ──────────────────────────────────────────────────────────────────
 # Android 전용 준비
 # ──────────────────────────────────────────────────────────────────
@@ -109,7 +127,7 @@ HPF_CUTOFF         = 5.0
 MAX_FMAX           = 50
 REC_DURATION_DEF   = 60.0
 FN_BAND            = (5, 50)
-BUF_LEN, MIN_LEN   = 4096, 1024      # 실시간 버퍼
+BUF_LEN, MIN_LEN   = 8192, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
@@ -751,11 +769,13 @@ class FFTApp(App):
                     dt_arr = dt_arr[dt_arr > 1e-5]
                     if not dt_arr.size:
                         continue
-                    fs = 1.0 / np.median(dt_arr)
+                    #fs = 1.0 / np.median(dt_arr)
+                    fs = robust_fs(dt_arr, n_keep=2048)
                     if fs < MIN_FS:
                         continue
 
-                    fft_len = int(fs * FFT_LEN_SEC)
+                    #fft_len = int(fs * FFT_LEN_SEC)
+                    fft_len = next_pow2(int(fs * FFT_LEN_WEC))
                     if len(snap[ax]) < fft_len:
                         continue
 
@@ -836,14 +856,27 @@ class FFTApp(App):
                 dt_arr = np.diff(t);     dt_arr = dt_arr[dt_arr > 0]
                 if not dt_arr.size:
                     raise ValueError("non-positive dt in CSV")
-                dt   = float(np.median(dt_arr))
-                nyq  = 0.5 / dt
+                    
+                #dt   = float(np.median(dt_arr))
+                #nyq  = 0.5 / dt
+                fs = robust_fs(dt_arr)
+                nyp = fs * 0.5
+                
                 FMAX = max(HPF_CUTOFF + BAND_HZ, min(nyq, MAX_FMAX))
 
-                win  = np.hanning(len(a))
-                raw  = np.fft.fft((a - a.mean()) * win)
-                amp_a = 2 * np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
-                freq  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
+                #win  = np.hanning(len(a))
+                #raw  = np.fft.fft((a - a.mean()) * win)
+                #amp_a = 2 * np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
+                #freq  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
+
+
+                fft_len = next_pow2(len(a))
+                win     = np.hanning(fft_len)
+                pad_sig = np.zeros(fft_len, float); pad_sig[:len(a)] = a - a.mean()
+                raw     = np.fft.fft(pad_sig * win)
+                amp_a   = 2 * np.abs(raw[:fft_len//2]) / (fft_len*np.sqrt(2))
+                freq    = np.fft.fftfreq(fft_len, d=1/fs)[:fft_len//2]
+                                
 
                 sel   = (freq >= HPF_CUTOFF) & (freq <= FMAX)
                 freq, amp_a = freq[sel], amp_a[sel]
