@@ -394,7 +394,12 @@ class GraphWidget(Widget):
                
 
     # ───────────────────────────── 외부 API
-    def update_graph(self, ds, df, xm, status: str | None = None):
+    # (기존)  ─ Python 3.10+ 전용 --------------------
+    from typing import Optional          # 파일 상단에 한 번만!
+    
+    def update_graph(self, ds, df, xm, status: Optional[str] = None):
+    
+    #def update_graph(self, ds, df, xm, status: str | None = None):
         # ── 3-튜플(rms, pk, axis) 만 저장
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
