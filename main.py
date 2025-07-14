@@ -64,22 +64,37 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
 from plyer import filechooser, accelerometer
 
-from utils_fft import robust_fs, next_pow2
+#from utils_fft import robust_fs, next_pow2
 
 
-def robust_fs(dt_arr, n_keep=2048, min_fs=1.):
+# ------------------------------------------------------------------
+# FFT 보조 함수 – utils_fft.py 내용을 그대로 가져옴
+# ------------------------------------------------------------------
+
+def robust_fs(t_arr, min_fs=10.0):
     """
-    dt_arr : 최근 dt (sec) 배열
-    return : 추정 fs (Hz)
+    타임스탬프 배열(t_arr)로부터 **robust** 샘플링 주파수[Hz] 추정.
+    - 0 또는 음수 dt 제거 후, 중앙값 절사(중위수) 사용
+    - min_fs 보다 작으면 None 반환
     """
-    dt = np.median(dt_arr[-n_keep:])     # 러닝 미디언
-    if dt <= 0:
-        return min_fs
-    return max(1./dt, min_fs)
+    if len(t_arr) < 3:
+        return None
+    dt = np.diff(t_arr)
+    dt = dt[dt > 1e-6]            # 0·음수·이상치 제외
+    if not dt.size:
+        return None
+    fs = 1.0 / np.median(dt)
+    return fs if fs >= min_fs else None
 
-def next_pow2(n: int) -> int:
-    ">= n 인 가장 가까운 2의 거듭제곱"
-    return 1 << (n-1).bit_length()
+
+def next_pow2(n):
+    """
+    n 이상 가장 작은 2의 거듭제곱 정수 반환.
+    예)  500 → 512 , 1024 → 1024
+    """
+    if n < 1:
+        return 1
+    return 1 << (n - 1).bit_length()
 
 
 # ──────────────────────────────────────────────────────────────────
