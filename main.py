@@ -141,12 +141,20 @@ else:
 ###############################################################################
 # 4. 사용자 조정 상수
 ###############################################################################
-BAND_HZ            = 0.5
+# ── 파일 맨 위 ‘사용자 조정 상수’ 자리 근처 ──────────────
+CFG = {
+    "BAND_HZ":      0.5,
+    "HPF_CUTOFF":   5.0,
+    "MAX_FMAX":     50.0,
+    "SMOOTH_N":     1,
+}
+
+#BAND_HZ            = 0.5
 REF_MM_S, REF_ACC  = 0.01, 0.981
 MEAS_MODE          = "VEL"          # "VEL" 또는 "ACC"
-SMOOTH_N           = 1
-HPF_CUTOFF         = 5.0
-MAX_FMAX           = 50
+#SMOOTH_N           = 1
+#HPF_CUTOFF         = 5.0
+#MAX_FMAX           = 50
 REC_DURATION_DEF   = 60.0
 FN_BAND            = (5, 50)
 BUF_LEN, MIN_LEN   = 8192, 1024      # 실시간 버퍼
@@ -230,10 +238,11 @@ def acc_to_spec(freq, amp_a):
         amp, ref = amp_a, REF_ACC
     return amp, ref
 
-def smooth_y(vals, n=SMOOTH_N):
+def smooth_y(vals, n=None):
+    n = n or CFG["SMOOTH_N"]
     if n <= 1 or len(vals) < n:
         return vals[:]
-    return np.convolve(vals, np.ones(n) / n, mode="same")
+    return np.convolve(vals, np.ones(n)/n, mode="same")
 
 def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
                      band_w=BAND_HZ, seg_n=None, overlap=0.5):
@@ -269,6 +278,63 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
         ys = smooth_y([y for _, y in band_rms])
         band_rms = list(zip([x for x, _ in band_rms], ys))
     return band_rms, band_pk
+
+
+from kivy.uix.modalview import ModalView
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.slider import Slider
+from kivy.uix.textinput import TextInput
+
+class ParamPopup(ModalView):
+    """실시간 조정 가능한 FFT 파라미터 팝업"""
+    def __init__(self, app, **kw):
+        super().__init__(size_hint=(.9, .7), **kw)
+        self.app = app
+
+        gl = GridLayout(cols=3, spacing=10, padding=15)
+        self.add_widget(gl)
+
+        # ── 항목 정의: (label, key, widget-factory) ──
+        items = [
+            ("Band Width (Hz)", "BAND_HZ",  lambda: Slider(min=0.1, max=2.0, step=.1)),
+            ("HPF Cutoff (Hz)", "HPF_CUTOFF", lambda: Slider(min=1, max=20, step=1)),
+            ("Fmax (Hz)",      "MAX_FMAX",   lambda: Slider(min=20, max=200, step=5)),
+            ("Smooth-N",       "SMOOTH_N",   lambda: Slider(min=1, max=5,  step=1)),
+        ]
+
+        self.widgets = {}             # key → widget 매핑
+        for lab, key, w_fn in items:
+            gl.add_widget(Label(text=lab, halign='left'))
+            w = w_fn();  self.widgets[key] = w
+            gl.add_widget(w)
+
+            # 현재값 표시용 TextInput (읽기전용)
+            val = TextInput(text=str(CFG[key]), readonly=True,
+                            background_color=(.1,.1,.1,.8),
+                            size_hint_x=.3)
+            gl.add_widget(val)
+
+            # 슬라이더 값이 바뀌면 TextInput·CFG 업데이트
+            def _on_val(widget, v, k=key, txt=val):
+                CFG[k] = type(CFG[k])(v)           # 형 변환 유지
+                txt.text = f"{CFG[k]:g}"
+            w.bind(value=_on_val)
+
+            # 슬라이더 초기 위치
+            w.value = CFG[key]
+
+        # 닫기 버튼
+        btn = Button(text="APPLY / CLOSE", size_hint=(1,.2))
+        btn.bind(on_release=self._apply_and_close)
+        gl.add_widget(Label())      # 빈 칸 맞춤
+        gl.add_widget(btn)
+        gl.add_widget(Label())
+
+    def _apply_and_close(self, *_):
+        # 파라미터가 바뀌었으니 모든 그래프 y-축·스케일 재계산
+        for g in self.app.graphs:
+            g.update_graph(g.datasets, g.diff, g.max_x)  # status 그대로
+        self.dismiss()
 
 ###############################################################################
 # 7. 그래프 위젯
@@ -640,8 +706,11 @@ class FFTApp(App):
         root.add_widget(self.btn_mode), root.add_widget(self.btn_setF0), root.add_widget(self.btn_rt)
 
 
-
-        
+        # 기존 버튼들 아래에 옵션 버튼 삽입
+        self.btn_param = Button(text="⚙︎ PARAM", size_hint=(1,.05),
+                                on_press=lambda *_: ParamPopup(self).open())
+        root.add_widget(self.btn_param)
+                
         # 그래프 3-way
         self.graphs=[]
         gbox = BoxLayout(orientation="vertical", size_hint=(1,.60), spacing=4)
@@ -855,7 +924,9 @@ class FFTApp(App):
                     # ── 0.5 Hz 밴드 RMS / Peak -------------------------
                     rms_line, pk_line = [], []
                     FMAX = min(MAX_FMAX, fs * 0.5)
-                    for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
+                   # ① Welch 루프 대역폭
+                    for lo in np.arange(CFG["HPF_CUTOFF"], FMAX, CFG["BAND_HZ"]):
+
                         hi  = lo + BAND_HZ
                         sel = (freq >= lo) & (freq < hi)
                         if not sel.any():
@@ -870,8 +941,8 @@ class FFTApp(App):
                         continue
     
                     # ── 스무딩
-                    if len(rms_line) >= SMOOTH_N:
-                        sm        = smooth_y([y for _, y in rms_line])
+                    if len(rms_line) >= CFG["SMOOTH_N"]:
+                        sm = smooth_y([...], n=CFG["SMOOTH_N"])
                         rms_line  = [(x, y) for (x, _), y in zip(rms_line, sm)]
     
                     # ── 공진 주파수(Fₙ) 추적 ---------------------------
