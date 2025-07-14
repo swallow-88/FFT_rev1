@@ -147,7 +147,10 @@ BUF_LEN, MIN_LEN   = 8192, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
-
+# 4. 사용자 조정 상수
+HIRES = False          # ← 토글용
+N_TAPER = 4            # 멀티테이퍼 개수
+HIRES_LEN_SEC = 8      # 실시간 FFT 길이
 
 ###############################################################################
 # 5. 로깅/크래시 헬퍼
@@ -613,6 +616,8 @@ class FFTApp(App):
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
         root.add_widget(self.spin_dur), root.add_widget(self.spin_sm)
 
+        
+
         # 모드/Realtime
         self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1,.05),
                                on_press=self._toggle_mode)
@@ -622,6 +627,17 @@ class FFTApp(App):
                              on_press=self.toggle_realtime)
         root.add_widget(self.btn_mode), root.add_widget(self.btn_setF0), root.add_widget(self.btn_rt)
 
+
+        self.btn_hires = Button(text="Hi-Res: OFF", size_hint=(1, .05),
+                        on_press=self._toggle_hires)
+        root.add_widget(self.btn_hires)
+        
+        def _toggle_hires(self, *_):
+            global HIRES
+            HIRES = not HIRES
+            self.btn_hires.text = f"Hi-Res: {'ON' if HIRES else 'OFF'}"
+
+        
         # 그래프 3-way
         self.graphs=[]
         gbox = BoxLayout(orientation="vertical", size_hint=(1,.60), spacing=4)
@@ -778,6 +794,20 @@ class FFTApp(App):
         RT_REFRESH_SEC  = 0.5        # UI 갱신 주기
         MIN_FS          = 50         # 최소 유효 샘플링 주파수
         N_KEEP_FS_EST   = 2048       # fs 계산 시 최근 N개 타임스탬프만 사용
+
+        import scipy.signal as ss
+
+        if HIRES:
+            tapers = ss.windows.dpss(fft_len, NW=2.5, Kmax=N_TAPER, sym=False)
+            spec = 0.
+            for tap in tapers:
+                sig_win = (sig - sig.mean()) * tap
+                spec += np.abs(np.fft.rfft(sig_win))**2
+            spec = (spec / N_TAPER)**0.5        # amplitude
+        else:
+            win = np.hanning(fft_len)
+            spec = np.abs(np.fft.rfft((sig - sig.mean()) * win))
+        
     
         try:
             while self.rt_on:
