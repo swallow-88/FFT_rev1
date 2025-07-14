@@ -18,6 +18,12 @@ import numpy as np
 from numpy.fft import fft
 import faulthandler, signal, subprocess
 
+try:
+    import scipy.signal as ss        # DPSS, Welch 창
+except ImportError:
+    ss = None
+    USE_MULTITAPER = False           # SciPy 없으면 Welch 로만
+
 ###############################################################################
 # 2. faulthandler – 디바이스·퍼미션 관계없이 안전하게
 ###############################################################################
@@ -148,9 +154,11 @@ USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
 # 4. 사용자 조정 상수
-HIRES = False          # ← 토글용
+# ────────────────── Hi-Res (고정 정밀) ──────────────────
+HIRES = False          # 토글 버튼으로 바뀜
+HIRES_LEN_SEC = 8      # 실시간 FFT 길이 (기존 4 → 8 s)
 N_TAPER = 4            # 멀티테이퍼 개수
-HIRES_LEN_SEC = 8      # 실시간 FFT 길이
+USE_MULTITAPER = True  # False 면 Welch 다중 평균으로 대체
 
 ###############################################################################
 # 5. 로깅/크래시 헬퍼
@@ -616,6 +624,10 @@ class FFTApp(App):
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
         root.add_widget(self.spin_dur), root.add_widget(self.spin_sm)
 
+                # Hi-Res 토글 버튼
+        self.btn_hires = Button(text="Hi-Res: OFF", size_hint=(1,.05),
+                                on_press=self._toggle_hires)
+        root.add_widget(self.btn_hires)
         
 
         # 모드/Realtime
@@ -628,14 +640,6 @@ class FFTApp(App):
         root.add_widget(self.btn_mode), root.add_widget(self.btn_setF0), root.add_widget(self.btn_rt)
 
 
-        self.btn_hires = Button(text="Hi-Res: OFF", size_hint=(1, .05),
-                        on_press=self._toggle_hires)
-        root.add_widget(self.btn_hires)
-        
-        def _toggle_hires(self, *_):
-            global HIRES
-            HIRES = not HIRES
-            self.btn_hires.text = f"Hi-Res: {'ON' if HIRES else 'OFF'}"
 
         
         # 그래프 3-way
@@ -779,73 +783,76 @@ class FFTApp(App):
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
 
-    # ───────────────────────────── Realtime FFT 루프
-    # ────────────────────────────────────────────────────────────────
-    #  실시간 FFT 백그라운드 루프
-    # ────────────────────────────────────────────────────────────────
+
+    def _toggle_hires(self, *_):
+        global HIRES
+        HIRES = not HIRES
+        self.btn_hires.text = f"Hi-Res: {'ON' if HIRES else 'OFF'}"
+        self.log(f"Hi-Res mode → {'ON' if HIRES else 'OFF'}")
+
+    
+    # ──────────────────────────────────────────────────────────────
+    #  FFT 실시간 분석 루프 – 최종 수정본
+    # ──────────────────────────────────────────────────────────────
     def _rt_fft_loop(self):
         """
-        0.5 초마다 버퍼 스냅샷을 떠서
-        - 각 축별 Welch-like 대역 RMS/Peak 계산
-        - 공진 주파수 추적(self.last_fn)
-        - UI 스레드로 그래프 갱신
+        0.5 초마다 가속도 버퍼 스냅샷 → Welch-like 대역 RMS/Peak 계산 → 그래프 갱신
+        Hi-Res 모드가 ON이면
+          · 분석 길이 = HIRES_LEN_SEC
+          · 다중 DPSS 테이퍼(N_TAPER) 평균 사용
         """
-        FFT_LEN_SEC     = 4          # 분석 구간(초)
-        RT_REFRESH_SEC  = 0.5        # UI 갱신 주기
-        MIN_FS          = 50         # 최소 유효 샘플링 주파수
-        N_KEEP_FS_EST   = 2048       # fs 계산 시 최근 N개 타임스탬프만 사용
-
-        import scipy.signal as ss
-
-        if HIRES:
-            tapers = ss.windows.dpss(fft_len, NW=2.5, Kmax=N_TAPER, sym=False)
-            spec = 0.
-            for tap in tapers:
-                sig_win = (sig - sig.mean()) * tap
-                spec += np.abs(np.fft.rfft(sig_win))**2
-            spec = (spec / N_TAPER)**0.5        # amplitude
-        else:
-            win = np.hanning(fft_len)
-            spec = np.abs(np.fft.rfft((sig - sig.mean()) * win))
-        
+        RT_REFRESH_SEC  = 0.5          # UI 갱신 속도
+        MIN_FS          = 50           # 최소 유효 샘플링 주파수
+        N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
     
         try:
             while self.rt_on:
                 time.sleep(RT_REFRESH_SEC)
     
-                # ── ① 버퍼 스냅샷 (락 보호) ───────────────────────────
+                # ① 버퍼 스냅샷 (락 보호) ---------------------------------
                 with self._buf_lock:
                     snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
     
                 axis_sets: dict[str, tuple] = {}
                 xmax = 0.0
     
-                # ── ② 축별 FFT 분석 ─────────────────────────────────
+                # ② 축별 FFT 분석 ----------------------------------------
                 for ax in "xyz":
-                    if len(snap[ax]) < MIN_FS * FFT_LEN_SEC:
+                    if len(snap[ax]) < MIN_FS * (HIRES_LEN_SEC if HIRES else 4):
                         continue
     
-                    # ▷ 타임스탬프만 추출하여 robust fs 추정
+                    # ── robust fs 추정
                     t_arr, val_arr, _ = zip(*snap[ax])
                     fs = robust_fs(t_arr[-N_KEEP_FS_EST:])
                     if fs is None or fs < MIN_FS:
                         continue
     
-                    # ▷ FFT 길이 : 2^n 로 패딩
-                    fft_len = next_pow2(int(fs * FFT_LEN_SEC))
+                    # ── FFT 길이 : 2^n 로 패딩
+                    seg_len_sec = HIRES_LEN_SEC if HIRES else 4
+                    fft_len     = next_pow2(int(fs * seg_len_sec))
                     if len(val_arr) < fft_len:
-                        continue
+                        continue      # 샘플 부족
     
-                    # ▷ 윈도우 및 FFT
-                    sig     = np.asarray(val_arr[-fft_len:], float)
-                    sig     = (sig - sig.mean()) * np.hanning(fft_len)
+                    # 최근 fft_len 구간 추출
+                    sig = np.asarray(val_arr[-fft_len:], float)
+                    sig = sig - sig.mean()        # DC 제거
     
-                    spec    = np.fft.rfft(sig)
+                    # ── 창 & 스펙트럼 ---------------------------------
+                    if HIRES and USE_MULTITAPER and ss is not None:
+                        tapers  = ss.windows.dpss(fft_len, NW=2.5,
+                                                  Kmax=N_TAPER, sym=False)
+                        spec_sq = 0.0
+                        for tap in tapers:
+                            spec_sq += np.abs(np.fft.rfft(sig * tap))**2
+                        amp_a = (spec_sq / N_TAPER)**0.5 * 2 / (fft_len*np.sqrt(2))
+                    else:
+                        win   = np.hanning(fft_len)
+                        amp_a = 2 * np.abs(np.fft.rfft(sig * win)) / (fft_len*np.sqrt(2))
+    
                     freq    = np.fft.rfftfreq(fft_len, d=1/fs)
-                    amp_a   = 2 * np.abs(spec) / (fft_len * np.sqrt(2))
                     amp_lin, ref0 = acc_to_spec(freq, amp_a)
     
-                    # ▷ 0.5 Hz 밴드 RMS / Peak
+                    # ── 0.5 Hz 밴드 RMS / Peak -------------------------
                     rms_line, pk_line = [], []
                     FMAX = min(MAX_FMAX, fs * 0.5)
                     for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
@@ -862,23 +869,23 @@ class FFTApp(App):
                     if not rms_line:
                         continue
     
-                    # ▷ 스무딩
+                    # ── 스무딩
                     if len(rms_line) >= SMOOTH_N:
-                        sm = smooth_y([y for _, y in rms_line])
-                        rms_line = [(x, y) for (x, _), y in zip(rms_line, sm)]
+                        sm        = smooth_y([y for _, y in rms_line])
+                        rms_line  = [(x, y) for (x, _), y in zip(rms_line, sm)]
     
-                    # ▷ 공진(Fₙ) 추적
+                    # ── 공진 주파수(Fₙ) 추적 ---------------------------
                     f_centres = np.array([x for x, _ in rms_line])
                     f_vals    = np.array([y for _, y in rms_line])
                     band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
                     if band_sel.any():
                         self.last_fn = f_centres[band_sel][f_vals[band_sel].argmax()]
     
-                    # ▷ 결과 보관
+                    # ── 결과 저장
                     axis_sets[ax] = (rms_line, pk_line, ax)
                     xmax = max(xmax, FMAX)
     
-                # ── ③ UI 스레드에 그래프 갱신 스케줄 ─────────────────
+                # ③ UI 스레드로 그래프 업데이트 ---------------------------
                 if axis_sets:
                     def _update(_dt, sets=axis_sets, xm=xmax):
                         for ax, g in zip("xyz", self.graphs):
@@ -899,106 +906,102 @@ class FFTApp(App):
         threading.Thread(target=self._fft_bg, daemon=True).start()
 
 
-  # ────────────────────────────────────────────
-    #  CSV 2 개 FFT → ①RMS/Peak 2 세트 ②차이(dB)
+
+    # ────────────────────────────────────────────
+    #  CSV 2-개 FFT  → ①RMS/Peak 2 세트 ②RMS 차이(dB)
     # ────────────────────────────────────────────
     def _fft_bg(self):
+    
+        # ===== 1) 설정 =========================================================
+        HIRES_CSV       = True          # ← 고정밀 모드 ON/OFF
+        PAD_FACTOR_HI   = 4             # ← 4 × 패딩 (Δf ≈ 1/4 로 줄어듦)
+        BAND_W          = BAND_HZ       # 대역폭(0.5 Hz) – 전역 상수 그대로 사용
+        # ======================================================================
+    
         try:
             if len(self.paths) < 2:
                 raise ValueError("SELECT 2 CSV FILE")
-
-            data, xmax = [], 0.0                         # ← 결과 보관
-            for path in self.paths[:2]:                  # 첫 두 파일만
+    
+            data, xmax = [], 0.0
+    
+            # ── 각 CSV 파일 개별 처리 ───────────────────────────────────────
+            for path in self.paths[:2]:
                 t, a = self._load_csv(path)
                 if t is None:
-                    raise ValueError(f"{os.path.basename(path)}: CSV parse Failed")
-
-                # ── FFT 스펙트럼 ───────────────────────────────────
-                dt_arr = np.diff(t);     dt_arr = dt_arr[dt_arr > 0]
-                if not dt_arr.size:
-                    raise ValueError("non-positive dt in CSV")
-                    
-                #dt   = float(np.median(dt_arr))
-                #nyq  = 0.5 / dt
-                fs = robust_fs(dt_arr)
-                nyp = fs * 0.5
-                
-                FMAX = max(HPF_CUTOFF + BAND_HZ, min(nyp, MAX_FMAX))
-
-                #win  = np.hanning(len(a))
-                #raw  = np.fft.fft((a - a.mean()) * win)
-                #amp_a = 2 * np.abs(raw[:len(a)//2]) / (len(a)*np.sqrt(2))
-                #freq  = np.fft.fftfreq(len(a), d=dt)[:len(a)//2]
-
-
-                fft_len = next_pow2(len(a))
-                win     = np.hanning(fft_len)
-                pad_sig = np.zeros(fft_len, float); pad_sig[:len(a)] = a - a.mean()
-                raw     = np.fft.fft(pad_sig * win)
-                amp_a   = 2 * np.abs(raw[:fft_len//2]) / (fft_len*np.sqrt(2))
-                freq    = np.fft.fftfreq(fft_len, d=1/fs)[:fft_len//2]
-                                
-
-                sel   = (freq >= HPF_CUTOFF) & (freq <= FMAX)
+                    raise ValueError(f"{os.path.basename(path)} : CSV PARSE FAIL")
+    
+                # ── ① 샘플링 주파수 추정 및 최대 분석 주파수 설정 ───────────
+                fs = robust_fs(t)                # ← 타임스탬프 배열 그대로!
+                if fs is None:
+                    raise ValueError("UNSTABLE SAMPLING RATE")
+    
+                nyq  = fs * 0.5
+                FMAX = max(HPF_CUTOFF + BAND_W, min(nyq, MAX_FMAX))
+    
+                # ── ② FFT 신호 준비 (윈도우 + 제로패딩) ────────────────────
+                pad_len = next_pow2(len(a)) * (PAD_FACTOR_HI if HIRES_CSV else 1)
+                win     = np.hanning(pad_len)
+                sig_pad = np.zeros(pad_len, float)
+                sig_pad[:len(a)] = a - a.mean()         # DC 제거
+    
+                spec  = np.fft.fft(sig_pad * win)
+                amp_a = 2 * np.abs(spec[:pad_len//2]) / (pad_len*np.sqrt(2))
+                freq  = np.fft.fftfreq(pad_len, d=1/fs)[:pad_len//2]
+    
+                # ── ③ 사용 대역 잘라내기 ───────────────────────────────────
+                sel = (freq >= HPF_CUTOFF) & (freq <= FMAX)
                 freq, amp_a = freq[sel], amp_a[sel]
                 amp_lin, REF0 = acc_to_spec(freq, amp_a)
-
-                # ── 0.5 Hz 밴드 RMS·Peak(dB) ─────────────────────
+    
+                # ── ④ 0.5 Hz 밴드 RMS / PEAK(dB) 계산 ────────────────────
                 rms_line, pk_line = [], []
-                for lo in np.arange(HPF_CUTOFF, FMAX, BAND_HZ):
-                    hi = lo + BAND_HZ
-                    m  = (freq >= lo) & (freq < hi)
+                for lo in np.arange(HPF_CUTOFF, FMAX, BAND_W):
+                    hi  = lo + BAND_W
+                    m   = (freq >= lo) & (freq < hi)
                     if not m.any():
                         continue
-                    cen = (lo + hi) / 2
+                    cen = (lo + hi) * 0.5
                     rms = np.sqrt(np.mean(amp_lin[m]**2))
                     pk  = amp_lin[m].max()
                     rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
                     pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
-
-                if len(rms_line) >= SMOOTH_N:            # 스무딩
-                    rms_line = list(zip(
-                        [x for x, _ in rms_line],
-                        smooth_y([y for _, y in rms_line])))
-
-                data.append((rms_line, pk_line))         # ① 저장
+    
+                # ── ⑤ 스무딩 ──────────────────────────────────────────────
+                if len(rms_line) >= SMOOTH_N:
+                    ys = smooth_y([y for _, y in rms_line])
+                    rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
+    
+                data.append((rms_line, pk_line))
                 xmax = max(xmax, FMAX)
-
-            # ── ② RMS 차이(dB) 구하기 ────────────────────────────
+    
+            # ===== 2) 두 파일 간 RMS 차이(dB) 계산 =========================
             f1 = dict(data[0][0]);  f2 = dict(data[1][0])
             diff_line = [(f, f1[f] - f2[f]) for f in sorted(set(f1) & set(f2))]
-
-           
-            # ── NEW : 15 dB 이상 차이가 있나?  --------------------
-            LIMIT_DB = 15
-            alert_msg = "PLZ CHECK" if any(abs(d) >= LIMIT_DB for _, d in diff_line) else "GOOD"
-
- 
-            
-            # ── 메인-스레드 업데이트 ──────────────────────────────
+    
+            # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
+            alert_msg = ("PLZ CHECK" if any(abs(d) >= 15 for _, d in diff_line)
+                         else "GOOD")
+    
+            # ===== 4) UI 스레드에 결과 갱신 =================================
             def _update(_dt):
                 rms0, pk0 = data[0]
                 rms1, pk1 = data[1]
     
-                # 그래프 0,1 : 원본 스펙 (status 기본값 "")
                 self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax)
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
-    
-                # 그래프 2 : diff  +  상태 배지
                 self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
     
-                # 화면 하단/토스트 메시지도 동일하게
                 self.log(alert_msg)
     
             Clock.schedule_once(_update)
     
         except Exception as exc:
-            self.log(f"FFT 오류: {exc}")
-            Clock.schedule_once(lambda _dt: None)
+            self.log(f"FFT ERROR : {exc}")
+    
         finally:
-            Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
-
-           
+            Clock.schedule_once(lambda *_:
+                setattr(self.btn_run, "disabled", False))
+               
 
     # ───────────────────────────── CSV 로드
     def _load_csv(self, path):
