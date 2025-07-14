@@ -746,6 +746,7 @@ class FFTApp(App):
     def _rt_fft_loop(self):
         """백그라운드 스레드 – 0.5 s마다 버퍼 스냅샷 → Welch 분석 → 그래프 갱신"""
         FFT_LEN_SEC    = 8
+        FFT_LEN_SEC = 4
         RT_REFRESH_SEC = 0.5
         MIN_FS         = 50
 
@@ -862,7 +863,7 @@ class FFTApp(App):
                 fs = robust_fs(dt_arr)
                 nyp = fs * 0.5
                 
-                FMAX = max(HPF_CUTOFF + BAND_HZ, min(nyq, MAX_FMAX))
+                FMAX = max(HPF_CUTOFF + BAND_HZ, min(nyp, MAX_FMAX))
 
                 #win  = np.hanning(len(a))
                 #raw  = np.fft.fft((a - a.mean()) * win)
@@ -932,7 +933,8 @@ class FFTApp(App):
             Clock.schedule_once(_update)
     
         except Exception as exc:
-            Clock.schedule_once(lambda _dt: self.log(f"FFT 오류: {exc}"))
+            self.log(f"FFT 오류: {exc}")
+            Clock.schedule_once(lambda _dt: None)
         finally:
             Clock.schedule_once(lambda *_: setattr(self.btn_run, "disabled", False))
 
