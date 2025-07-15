@@ -290,54 +290,60 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 
 class ParamPopup(ModalView):
-    """실시간 조정 가능한 FFT 파라미터 팝업"""
     def __init__(self, app, **kw):
         super().__init__(size_hint=(.9, .7), **kw)
         self.app = app
 
-        gl = GridLayout(cols=3, spacing=10, padding=15)
-        self.add_widget(gl)
+        # 항목은 “라벨 + (슬라이더+값표시)” 두 칼럼으로 보이도록
+        root = GridLayout(cols=2, spacing=12, padding=18)
+        self.add_widget(root)
 
-        # ── 항목 정의: (label, key, widget-factory) ──
+        # ── 정의: (표시이름, CFG-키, 슬라이더 kwargs) ──────────────
         items = [
-            ("Band Width (Hz)", "BAND_HZ",  lambda: Slider(min=0.1, max=2.0, step=.1)),
-            ("HPF Cutoff (Hz)", "HPF_CUTOFF", lambda: Slider(min=1, max=20, step=1)),
-            ("Fmax (Hz)",      "MAX_FMAX",   lambda: Slider(min=20, max=200, step=5)),
-            ("Smooth-N",       "SMOOTH_N",   lambda: Slider(min=1, max=5,  step=1)),
+            ("Band Width (Hz)", "BAND_HZ",     dict(min=0.1, max=2.0,  step=.1)),
+            ("HPF Cutoff (Hz)", "HPF_CUTOFF",  dict(min=1.0, max=20.0, step=1)),
+            ("Fmax (Hz)",       "MAX_FMAX",    dict(min=20.0, max=200.0, step=5)),
+            ("Smooth-N",        "SMOOTH_N",    dict(min=1,   max=5,    step=1)),
         ]
 
-        self.widgets = {}             # key → widget 매핑
-        for lab, key, w_fn in items:
-            gl.add_widget(Label(text=lab, halign='left'))
-            w = w_fn();  self.widgets[key] = w
-            gl.add_widget(w)
+        self.sliders = {}
 
-            # 현재값 표시용 TextInput (읽기전용)
-            val = TextInput(text=str(CFG[key]), readonly=True,
-                            background_color=(.1,.1,.1,.8),
-                            size_hint_x=.3)
-            gl.add_widget(val)
+        for text, key, s_kwargs in items:
 
-            # 슬라이더 값이 바뀌면 TextInput·CFG 업데이트
-            def _on_val(widget, v, k=key, txt=val):
-                CFG[k] = type(CFG[k])(v)           # 형 변환 유지
-                txt.text = f"{CFG[k]:g}"
-            w.bind(value=_on_val)
+            # ① 왼쪽 : 파라미터 이름
+            root.add_widget(Label(text=text, size_hint_x=.35, halign='left'))
 
-            # 슬라이더 초기 위치
-            w.value = CFG[key]
+            # ② 오른쪽 : 슬라이더 + 값 라벨을 한 줄(BoxLayout)에
+            line = BoxLayout(orientation='horizontal', spacing=8)
 
-        # 닫기 버튼
-        btn = Button(text="APPLY / CLOSE", size_hint=(1,.2))
+            slider = Slider(**s_kwargs, value=CFG[key], size_hint_x=.75)
+            val_lbl = Label(text=f"{CFG[key]:g}",
+                            size_hint_x=.25, bold=True)
+
+            # 슬라이더 값이 바뀌면 CFG와 라벨 동시 업데이트
+            def _on_val(slider, v, k=key, lbl=val_lbl):
+                CFG[k] = type(CFG[k])(v)          # 형 변환 유지
+                lbl.text = f"{CFG[k]:g}"
+
+            slider.bind(value=_on_val)
+
+            line.add_widget(slider)
+            line.add_widget(val_lbl)
+            root.add_widget(line)
+
+            self.sliders[key] = slider
+
+        # ── 하단 APPLY / CLOSE 버튼 ───────────────────────────
+        btn = Button(text="APPLY  ⟶  CLOSE", size_hint=(1, .18))
         btn.bind(on_release=self._apply_and_close)
-        gl.add_widget(Label())      # 빈 칸 맞춤
-        gl.add_widget(btn)
-        gl.add_widget(Label())
+        # GridLayout의 두 칼럼을 꽉 채우도록 colspan 흉내
+        root.add_widget(Label())   # 빈 셀
+        root.add_widget(btn)
 
     def _apply_and_close(self, *_):
-        # 파라미터가 바뀌었으니 모든 그래프 y-축·스케일 재계산
+        # 파라미터가 바뀌었으니 그래프 스케일 갱신
         for g in self.app.graphs:
-            g.update_graph(g.datasets, g.diff, g.max_x)  # status 그대로
+            g.update_graph(g.datasets, g.diff, g.max_x)
         self.dismiss()
 
 ###############################################################################
