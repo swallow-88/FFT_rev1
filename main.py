@@ -9,7 +9,7 @@ os.makedirs(_LOG_DIR, exist_ok=True)
 Config.set("kivy", "log_dir",  _LOG_DIR)
 Config.set("kivy", "log_level", "debug")
 
-###############################################################################
+##########################ㅈ#####################################################
 # 1. 공통 모듈
 ###############################################################################
 import io, csv, sys, traceback, threading, datetime, uuid, urllib.parse, time, re
@@ -277,8 +277,8 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
         rms = np.sqrt(np.mean(amp_lin[s]**2))
         pk  = amp_lin[s].max()
         cen = (lo + hi) / 2
-        band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
-        band_pk.append((cen, 20*np.log10(max(pk,  REF0*1e-4)/REF0)))
+        band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-6)/REF0)))
+        band_pk.append((cen, 20*np.log10(max(pk,  REF0*1e-6)/REF0)))
     if len(band_rms) >= SMOOTH_N:
         ys = smooth_y([y for _, y in band_rms])
         band_rms = list(zip([x for x, _ in band_rms], ys))
@@ -362,7 +362,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
 
     def __init__(self, **kw):
-        super().__init__(**kw)          
+        super().__init__(**kw)         
         self.datasets, self.diff = [],[]
         self.min_x = F_MIN
         self.max_x = 50.0
@@ -423,8 +423,8 @@ class GraphWidget(Widget):
                 if len(chosen) >= self.PEAK_N:
                     break
         return chosen
-    
-        
+   
+       
    
     def _reposition_titles(self, *_):
         # X축 : 위젯 아래쪽 중앙
@@ -444,7 +444,7 @@ class GraphWidget(Widget):
         bx = self.x + (self.width - self.status_lbl.texture_size[0]) * 0.5
         by = self.y + self.height - self.PAD_Y + 6
         self.status_lbl.pos = (bx, by)
-        
+       
    
    
     def _add_axis_label(self, txt: str, loc_xy):
@@ -485,16 +485,16 @@ class GraphWidget(Widget):
     # ───────────────────────────── 외부 API
     # (기존)  ─ Python 3.10+ 전용 --------------------
     from typing import Optional          # 파일 상단에 한 번만!
-    
+   
     def update_graph(self, ds, df, xm, status: Optional[str] = None):
-    
+   
     #def update_graph(self, ds, df, xm, status: str | None = None):
         # ── 3-튜플(rms, pk, axis) 만 저장
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
         self.status_text = status
-    
+   
    
         # ── y 값 모으기 : rms·pk 에서만
         ys = []
@@ -515,7 +515,7 @@ class GraphWidget(Widget):
 
 
         # ── 상태 배지 텍스트/색상 ───────────────────────
-    
+   
         if status is not None:
             self.status_lbl.text  = status
             self.status_lbl.color = (1,0,0,1) if status.startswith("PLZ") else (0,1,0,1)
@@ -585,19 +585,19 @@ class GraphWidget(Widget):
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
         self.canvas.clear()
-    
+   
         # ── ① 축 라벨 삭제는 *꼭* 새로 그릴 때만 ──
         need_new_axis = (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
         if need_new_axis:
             for ch in list(self.children):
                 if getattr(ch, "_axis", False):
                     self.remove_widget(ch)
-    
+   
         # (피크 라벨·배지 제거 코드는 그대로 두세요)
         for ch in list(self.children):
             if getattr(ch, "_peak", False):
                 self.remove_widget(ch)
-    
+   
         # ── ② 축 라벨이 바뀌었을 때만 다시 생성 ──
         if need_new_axis:
             self._make_labels()
@@ -656,7 +656,7 @@ class GraphWidget(Widget):
             if getattr(ch, "_badge", False) and ch.text != self.status_text:
                 self.remove_widget(ch)
 
-        
+       
 ###############################################################################
 # 8. 메인 앱
 ###############################################################################
@@ -675,20 +675,20 @@ class FFTApp(App):
     # ───────────────────────────── UI
     def build(self):
         root = BoxLayout(orientation='vertical', padding=10, spacing=10)
-    
+   
         # ── 0) 상태 라벨 ────────────────────────────────────────────────
-        self.label = Label(text="Pick up to 2 CSV",
+        self.label = Label(text="Pick up to 2 CSV / TXT",
                            size_hint=(1, .05), color=(1, 1, 1, 1))
         root.add_widget(self.label)
-    
+   
         BTN_H   = dp(48)                 # 버튼 높이(한곳에서 일괄 조정)
         SPACING = 10
-    
+   
         # 헬퍼: “두 개씩” 넣는 GridLayout 생성 ---------------------------
         def _row():
             return GridLayout(cols=2, spacing=SPACING,
                               size_hint=(1, None), height=BTN_H)
-    
+   
         # ── 1) 파일 & 실행 ------------------------------------------------
         row = _row()
         self.btn_sel = Button(text="Select CSV", height=BTN_H,
@@ -697,7 +697,7 @@ class FFTApp(App):
                               on_press=self.run_fft,      disabled=True)
         row.add_widget(self.btn_sel);  row.add_widget(self.btn_run)
         root.add_widget(row)
-    
+   
         # ── 2) 녹음 & 실시간 --------------------------------------------
         row = _row()
         self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
@@ -715,7 +715,7 @@ class FFTApp(App):
                                 height=BTN_H)
         self.spin_dur.bind(text=lambda s, t:
                            self._set_rec_dur(float(t.split()[0])))
-    
+   
         self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]),
                                 values=("1","2","3","4","5"),
                                 height=BTN_H)
@@ -723,7 +723,7 @@ class FFTApp(App):
                           self._set_smooth(int(t)))
         row.add_widget(self.spin_dur); row.add_widget(self.spin_sm)
         root.add_widget(row)
-    
+   
         # ── 3) Hi-Res & Mode --------------------------------------------
         row = _row()
         self.btn_hires = Button(text="Hi-Res: OFF", height=BTN_H,
@@ -732,8 +732,8 @@ class FFTApp(App):
                                 on_press=self._toggle_mode)
         row.add_widget(self.btn_hires); row.add_widget(self.btn_mode)
         root.add_widget(row)
-        
-    
+       
+   
         # ── 4) F0 저장 & 파라미터 팝업 -----------------------------------
         row = _row()
         self.btn_setF0 = Button(text="Set F0 (baseline)", height=BTN_H,
@@ -742,9 +742,9 @@ class FFTApp(App):
                                 on_press=lambda *_: ParamPopup(self).open())
         row.add_widget(self.btn_setF0); row.add_widget(self.btn_param)
         root.add_widget(row)
-    
+   
 
-    
+   
         # ── 6) 그래프 영역 ----------------------------------------------
         gbox = BoxLayout(orientation='vertical',
                          size_hint=(1, .60), spacing=SPACING)
@@ -754,7 +754,7 @@ class FFTApp(App):
             self.graphs.append(gw)
             gbox.add_widget(gw)
         root.add_widget(gbox)
-    
+   
         # ── 7) 퍼미션 체크 예약 ------------------------------------------
         Clock.schedule_once(self._ask_perm, 0)
         return root
@@ -763,7 +763,7 @@ class FFTApp(App):
     def log(self, msg: str):
         Logger.info(msg)
         self.label.text = msg
-    
+   
         # ── 메시지 색상 구분 ──────────────────────
         if msg.startswith("PLZ"):             # 예: "PLZ CHECK"
             self.label.color = (1, 0, 0, 1)   # 빨간색
@@ -771,7 +771,7 @@ class FFTApp(App):
             self.label.color = (0, 1, 0, 1)   # 초록색
         else:
             self.label.color = (1, 1, 1, 1)   # 기본 흰색
-    
+   
         if ANDROID and toast:
             try:
                 toast.toast(msg)
@@ -878,7 +878,7 @@ class FFTApp(App):
                     prev = self.rt_buf[axis][-1][0] if self.rt_buf[axis] else now-dt
                     self.rt_buf[axis].append((now,val,now-prev))
 
-                
+               
             if self.rec_on:
                 rel = now-self.rec_start
                 for a,v in zip("xyz",(ax,ay,az)):
@@ -895,7 +895,7 @@ class FFTApp(App):
         self.btn_hires.text = f"Hi-Res: {'ON' if HIRES else 'OFF'}"
         self.log(f"Hi-Res mode → {'ON' if HIRES else 'OFF'}")
 
-    
+   
     # ──────────────────────────────────────────────────────────────
     #  FFT 실시간 분석 루프 – 최종 수정본
     # ──────────────────────────────────────────────────────────────
@@ -909,39 +909,39 @@ class FFTApp(App):
         RT_REFRESH_SEC  = 0.5          # UI 갱신 속도
         MIN_FS          = 50           # 최소 유효 샘플링 주파수
         N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
-    
+   
         try:
             while self.rt_on:
                 time.sleep(RT_REFRESH_SEC)
-    
+   
                 # ① 버퍼 스냅샷 (락 보호) ---------------------------------
                 with self._buf_lock:
                     snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
-    
+   
                 axis_sets: dict[str, tuple] = {}
                 xmax = 0.0
-    
+   
                 # ② 축별 FFT 분석 ----------------------------------------
                 for ax in "xyz":
                     if len(snap[ax]) < MIN_FS * (HIRES_LEN_SEC if HIRES else 4):
                         continue
-    
+   
                     # ── robust fs 추정
                     t_arr, val_arr, _ = zip(*snap[ax])
                     fs = robust_fs(t_arr[-N_KEEP_FS_EST:])
                     if fs is None or fs < MIN_FS:
                         continue
-    
+   
                     # ── FFT 길이 : 2^n 로 패딩
                     seg_len_sec = HIRES_LEN_SEC if HIRES else 4
                     fft_len     = next_pow2(int(fs * seg_len_sec))
                     if len(val_arr) < fft_len:
                         continue      # 샘플 부족
-    
+   
                     # 최근 fft_len 구간 추출
                     sig = np.asarray(val_arr[-fft_len:], float)
                     sig = sig - sig.mean()        # DC 제거
-    
+   
                     # ── 창 & 스펙트럼 ---------------------------------
                     if HIRES and USE_MULTITAPER and ss is not None:
                         tapers  = ss.windows.dpss(fft_len, NW=2.5,
@@ -953,10 +953,10 @@ class FFTApp(App):
                     else:
                         win   = np.hanning(fft_len)
                         amp_a = 2 * np.abs(np.fft.rfft(sig * win)) / (fft_len*np.sqrt(2))
-    
+   
                     freq    = np.fft.rfftfreq(fft_len, d=1/fs)
                     amp_lin, ref0 = acc_to_spec(freq, amp_a)
-    
+   
                     # ── 0.5 Hz 밴드 RMS / Peak -------------------------
                     rms_line, pk_line = [], []
                     FMAX = min(MAX_FMAX, fs * 0.5)
@@ -970,28 +970,28 @@ class FFTApp(App):
                         cen = (lo + hi) * 0.5
                         rms = np.sqrt(np.mean(amp_lin[sel]**2))
                         pk  = amp_lin[sel].max()
-                        rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-4)/ref0)))
-                        pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-4)/ref0)))
-    
+                        rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-6)/ref0)))
+                        pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-6)/ref0)))
+   
                     if not rms_line:
                         continue
-    
+   
                     # ── 스무딩
                     if len(rms_line) >= CFG["SMOOTH_N"]:
                         ys = smooth_y([y for _, y in rms_line])
                         rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
-                        
+                       
                     # ── 공진 주파수(Fₙ) 추적 ---------------------------
                     f_centres = np.array([x for x, _ in rms_line])
                     f_vals    = np.array([y for _, y in rms_line])
                     band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
                     if band_sel.any():
                         self.last_fn = f_centres[band_sel][f_vals[band_sel].argmax()]
-    
+   
                     # ── 결과 저장
                     axis_sets[ax] = (rms_line, pk_line, ax)
                     xmax = max(xmax, FMAX)
-    
+   
                 # ③ UI 스레드로 그래프 업데이트 ---------------------------
                 if axis_sets:
                     def _update(_dt, sets=axis_sets, xm=xmax):
@@ -1001,7 +1001,7 @@ class FFTApp(App):
                             else:
                                 g.update_graph([], [], xm, "")           # 빈 그래프
                     Clock.schedule_once(_update)
-    
+   
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
@@ -1018,48 +1018,48 @@ class FFTApp(App):
     #  CSV 2-개 FFT  → ①RMS/Peak 2 세트 ②RMS 차이(dB)
     # ────────────────────────────────────────────
     def _fft_bg(self):
-    
+   
         # ===== 1) 설정 =========================================================
         HIRES_CSV       = True          # ← 고정밀 모드 ON/OFF
         PAD_FACTOR_HI   = 4             # ← 4 × 패딩 (Δf ≈ 1/4 로 줄어듦)
         BAND_W          = BAND_HZ       # 대역폭(0.5 Hz) – 전역 상수 그대로 사용
         # ======================================================================
-    
+   
         try:
             if len(self.paths) < 2:
                 raise ValueError("SELECT 2 CSV FILE")
-    
+   
             data, xmax = [], 0.0
-    
+   
             # ── 각 CSV 파일 개별 처리 ───────────────────────────────────────
             for path in self.paths[:2]:
                 t, a = self._load_csv(path)
                 if t is None:
                     raise ValueError(f"{os.path.basename(path)} : CSV PARSE FAIL")
-    
+   
                 # ── ① 샘플링 주파수 추정 및 최대 분석 주파수 설정 ───────────
                 fs = robust_fs(t)                # ← 타임스탬프 배열 그대로!
                 if fs is None:
                     raise ValueError("UNSTABLE SAMPLING RATE")
-    
+   
                 nyq  = fs * 0.5
                 FMAX = max(HPF_CUTOFF + BAND_W, min(nyq, MAX_FMAX))
-    
+   
                 # ── ② FFT 신호 준비 (윈도우 + 제로패딩) ────────────────────
                 pad_len = next_pow2(len(a)) * (PAD_FACTOR_HI if HIRES_CSV else 1)
                 win     = np.hanning(pad_len)
                 sig_pad = np.zeros(pad_len, float)
                 sig_pad[:len(a)] = a - a.mean()         # DC 제거
-    
+   
                 spec  = np.fft.fft(sig_pad * win)
                 amp_a = 2 * np.abs(spec[:pad_len//2]) / (pad_len*np.sqrt(2))
                 freq  = np.fft.fftfreq(pad_len, d=1/fs)[:pad_len//2]
-    
+   
                 # ── ③ 사용 대역 잘라내기 ───────────────────────────────────
                 sel = (freq >= HPF_CUTOFF) & (freq <= FMAX)
                 freq, amp_a = freq[sel], amp_a[sel]
                 amp_lin, REF0 = acc_to_spec(freq, amp_a)
-    
+   
                 # ── ④ 0.5 Hz 밴드 RMS / PEAK(dB) 계산 ────────────────────
                 rms_line, pk_line = [], []
                 for lo in np.arange(HPF_CUTOFF, FMAX, BAND_W):
@@ -1070,42 +1070,42 @@ class FFTApp(App):
                     cen = (lo + hi) * 0.5
                     rms = np.sqrt(np.mean(amp_lin[m]**2))
                     pk  = amp_lin[m].max()
-                    rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-4)/REF0)))
-                    pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-4)/REF0)))
-    
+                    rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-6)/REF0)))
+                    pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-6)/REF0)))
+   
                 # ── ⑤ 스무딩 ──────────────────────────────────────────────
                 # ── 스무딩 블록 (두 곳 모두) ────────────────
                 if len(rms_line) >= CFG["SMOOTH_N"]:
                     ys = smooth_y([y for _, y in rms_line])
                     rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
-                    
+                   
                 data.append((rms_line, pk_line))
                 xmax = max(xmax, FMAX)
-    
+   
             # ===== 2) 두 파일 간 RMS 차이(dB) 계산 =========================
             f1 = dict(data[0][0]);  f2 = dict(data[1][0])
             diff_line = [(f, f1[f] - f2[f]) for f in sorted(set(f1) & set(f2))]
-    
+   
             # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
-            alert_msg = ("PLZ CHECK" if any(abs(d) >= 15 for _, d in diff_line)
+            alert_msg = ("PLZ CHECK" if any(abs(d) >= 10 for _, d in diff_line)
                          else "GOOD")
-    
+   
             # ===== 4) UI 스레드에 결과 갱신 =================================
             def _update(_dt):
                 rms0, pk0 = data[0]
                 rms1, pk1 = data[1]
-    
+   
                 self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax)
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
                 self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
-    
+   
                 self.log(alert_msg)
-    
+   
             Clock.schedule_once(_update)
-    
+   
         except Exception as exc:
             self.log(f"FFT ERROR : {exc}")
-    
+   
         finally:
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_run, "disabled", False))
@@ -1117,11 +1117,11 @@ class FFTApp(App):
         try:
             t,a = [],[]
             with open(path, encoding="utf-8", errors="replace") as f:
-                sample=f.read(1024); f.seek(0)
+                sample=f.read(2048); f.seek(0)
                 try:
                     dialect=csv.Sniffer().sniff(sample, delimiters=";, \t")
                 except csv.Error:
-                    dialect=csv.get_dialect("excel")
+                    dialect=csv.excel
                 for row in csv.reader(f,dialect):
                     if len(row)<2: continue
                     if not(num_re.match(row[0].strip())
@@ -1168,13 +1168,13 @@ class FFTApp(App):
             if SharedStorage:
                 try:
                     SharedStorage().open_file(callback=self.on_choose,
-                                              multiple=True, mime_type="text/*")
+                                              multiple=True, mime_type="*/*")
                     return
                 except Exception:
                     pass
             # plyer fallback
             filechooser.open_file(on_selection=self.on_choose,
-                                  multiple=True, filters=["*.csv"],
+                                  multiple=True, filters=["*.csv", "*.txt", "*.*"],
                                   path=DOWNLOAD_DIR)
             return
    
@@ -1185,8 +1185,8 @@ class FFTApp(App):
             from tkinter import filedialog
             root = tk.Tk(); root.withdraw()        # 창 감춤
             paths = filedialog.askopenfilenames(
-                title="Select up to 2 CSV",
-                filetypes=[("CSV files", "*.csv")])
+                title="Select up to 2 data files",
+                filetypes=[("CSV files", "*.csv *.txt"), ("All files", "*,*")])
             # Tk 객체 해제
             root.update(); root.destroy()
             self.on_choose(list(paths)[:3])
@@ -1194,7 +1194,7 @@ class FFTApp(App):
             # 그래도 실패하면 Kivy FileChooserPopup으로 최종 fallback
             Logger.warning(f"Tk file dialog error: {e}")
             filechooser.open_file(on_selection=self.on_choose,
-                                  multiple=True, filters=["*.csv"])
+                                  multiple=True, filters=["*.csv", "*.txt"])
 
     def on_choose(self, sel, *_):
         if not sel:
