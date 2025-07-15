@@ -69,6 +69,7 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
 from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
 from plyer import filechooser, accelerometer
+from kivy.metrics import dp
 
 #from utils_fft import robust_fs, next_pow2
 
@@ -673,63 +674,85 @@ class FFTApp(App):
 
     # ───────────────────────────── UI
     def build(self):
-        root = BoxLayout(orientation="vertical", padding=10, spacing=10)
-
-        # 안내
-        self.label = Label(text="Pick up to 2 CSV", size_hint=(1,.05), color=(1,1,1,1))
+        root = BoxLayout(orientation='vertical', padding=10, spacing=10)
+    
+        # ── 0) 상태 라벨 ────────────────────────────────────────────────
+        self.label = Label(text="Pick up to 2 CSV",
+                           size_hint=(1, .05), color=(1, 1, 1, 1))
         root.add_widget(self.label)
-
-        # 버튼
-        self.btn_sel = Button(text="Select CSV", size_hint=(1,.05),
-                              disabled=True, on_press=self.open_chooser)
-        self.btn_run = Button(text="FFT RUN",  size_hint=(1,.05),
-                              disabled=True, on_press=self.run_fft)
+    
+        BTN_H   = dp(48)                 # 버튼 높이(한곳에서 일괄 조정)
+        SPACING = 10
+    
+        # 헬퍼: “두 개씩” 넣는 GridLayout 생성 ---------------------------
+        def _row():
+            return GridLayout(cols=2, spacing=SPACING,
+                              size_hint=(1, None), height=BTN_H)
+    
+        # ── 1) 파일 & 실행 ------------------------------------------------
+        row = _row()
+        self.btn_sel = Button(text="Select CSV", height=BTN_H,
+                              on_press=self.open_chooser, disabled=True)
+        self.btn_run = Button(text="FFT RUN",    height=BTN_H,
+                              on_press=self.run_fft,      disabled=True)
+        row.add_widget(self.btn_sel);  row.add_widget(self.btn_run)
+        root.add_widget(row)
+    
+        # ── 2) 녹음 & 실시간 --------------------------------------------
+        row = _row()
         self.btn_rec = Button(text=f"Record {int(self.REC_DURATION)} s",
-                              size_hint=(1,.05), disabled=True,
+                              height=BTN_H, disabled=True,
                               on_press=self.start_recording)
-        root.add_widget(self.btn_sel), root.add_widget(self.btn_run), root.add_widget(self.btn_rec)
-
-        # 스피너
+        self.btn_rt  = Button(text="Realtime FFT (OFF)", height=BTN_H,
+                              on_press=self.toggle_realtime)
+        row.add_widget(self.btn_rec);  row.add_widget(self.btn_rt)
+        root.add_widget(row)
+    
+        # ── 3) Hi-Res & Mode --------------------------------------------
+        row = _row()
+        self.btn_hires = Button(text="Hi-Res: OFF", height=BTN_H,
+                                on_press=self._toggle_hires)
+        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}", height=BTN_H,
+                                on_press=self._toggle_mode)
+        row.add_widget(self.btn_hires); row.add_widget(self.btn_mode)
+        root.add_widget(row)
+    
+        # ── 4) F0 저장 & 파라미터 팝업 -----------------------------------
+        row = _row()
+        self.btn_setF0 = Button(text="Set F0 (baseline)", height=BTN_H,
+                                on_press=self._save_baseline)
+        self.btn_param = Button(text="⚙︎ PARAM", height=BTN_H,
+                                on_press=lambda *_: ParamPopup(self).open())
+        row.add_widget(self.btn_setF0); row.add_widget(self.btn_param)
+        root.add_widget(row)
+    
+        # ── 5) 스피너 두 개도 한 줄 --------------------------------------
+        row = _row()
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=("10 s","30 s","60 s","120 s"),
-                                size_hint=(1,.05))
-        self.spin_dur.bind(text=lambda s,t: self._set_rec_dur(float(t.split()[0])))
-        self.spin_sm  = Spinner(text=str(SMOOTH_N),
+                                height=BTN_H)
+        self.spin_dur.bind(text=lambda s, t:
+                           self._set_rec_dur(float(t.split()[0])))
+    
+        self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]),
                                 values=("1","2","3","4","5"),
-                                size_hint=(1,.05))
-        self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-        root.add_widget(self.spin_dur), root.add_widget(self.spin_sm)
-
-                # Hi-Res 토글 버튼
-        self.btn_hires = Button(text="Hi-Res: OFF", size_hint=(1,.05),
-                                on_press=self._toggle_hires)
-        root.add_widget(self.btn_hires)
-        
-
-        # 모드/Realtime
-        self.btn_mode = Button(text=f"Mode: {MEAS_MODE}", size_hint=(1,.05),
-                               on_press=self._toggle_mode)
-        self.btn_setF0 = Button(text="Set F0 (baseline)", size_hint=(1,.05),
-                                on_press=self._save_baseline)
-        self.btn_rt = Button(text="Realtime FFT (OFF)", size_hint=(1,.05),
-                             on_press=self.toggle_realtime)
-        root.add_widget(self.btn_mode), root.add_widget(self.btn_setF0), root.add_widget(self.btn_rt)
-
-
-        # 기존 버튼들 아래에 옵션 버튼 삽입
-        self.btn_param = Button(text="⚙︎ PARAM", size_hint=(1,.05),
-                                on_press=lambda *_: ParamPopup(self).open())
-        root.add_widget(self.btn_param)
-                
-        # 그래프 3-way
-        self.graphs=[]
-        gbox = BoxLayout(orientation="vertical", size_hint=(1,.60), spacing=4)
+                                height=BTN_H)
+        self.spin_sm.bind(text=lambda s, t:
+                          self._set_smooth(int(t)))
+        row.add_widget(self.spin_dur); row.add_widget(self.spin_sm)
+        root.add_widget(row)
+    
+        # ── 6) 그래프 영역 ----------------------------------------------
+        gbox = BoxLayout(orientation='vertical',
+                         size_hint=(1, .60), spacing=SPACING)
+        self.graphs = []
         for _ in range(3):
-            gw = GraphWidget(size_hint=(1,1/3))
+            gw = GraphWidget(size_hint=(1, 1/3))
             self.graphs.append(gw)
             gbox.add_widget(gw)
         root.add_widget(gbox)
-
+    
+        # ── 7) 퍼미션 체크 예약 ------------------------------------------
         Clock.schedule_once(self._ask_perm, 0)
         return root
 
