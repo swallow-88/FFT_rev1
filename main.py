@@ -1104,7 +1104,7 @@ class FFTApp(App):
                 self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
    
                 # ★ 화면 하단 메시지 = 경고(or GOOD) + Top-3 정보
-                self.log(f"{msg}   |   TOP Δ: {peaks}")
+                self.log(f"{alert_msg}   |   TOP Δ: {peak_txt}")
    
             Clock.schedule_once(_update)
    
