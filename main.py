@@ -1085,6 +1085,10 @@ class FFTApp(App):
             # ===== 2) 두 파일 간 RMS 차이(dB) 계산 =========================
             f1 = dict(data[0][0]);  f2 = dict(data[1][0])
             diff_line = [(f, f1[f] - f2[f]) for f in sorted(set(f1) & set(f2))]
+
+            # |dB| 가 큰 순서 Top-3 추출
+            top3 = sorted(diff_line, key=lambda p: abs(p[1]), reverse=True)[:3]
+            peak_txt = "  •  ".join(f"{f:4.1f} Hz : {d:+.1f} dB" for f, d in top3)
    
             # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
             alert_msg = ("PLZ CHECK" if any(abs(d) >= 10 for _, d in diff_line)
@@ -1099,7 +1103,8 @@ class FFTApp(App):
                 self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
                 self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
    
-                self.log(alert_msg)
+                # ★ 화면 하단 메시지 = 경고(or GOOD) + Top-3 정보
+                self.log(f"{msg}   |   TOP Δ: {peaks}")
    
             Clock.schedule_once(_update)
    
