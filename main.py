@@ -707,25 +707,7 @@ class FFTApp(App):
                               on_press=self.toggle_realtime)
         row.add_widget(self.btn_rec);  row.add_widget(self.btn_rt)
         root.add_widget(row)
-    
-        # ── 3) Hi-Res & Mode --------------------------------------------
-        row = _row()
-        self.btn_hires = Button(text="Hi-Res: OFF", height=BTN_H,
-                                on_press=self._toggle_hires)
-        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}", height=BTN_H,
-                                on_press=self._toggle_mode)
-        row.add_widget(self.btn_hires); row.add_widget(self.btn_mode)
-        root.add_widget(row)
-    
-        # ── 4) F0 저장 & 파라미터 팝업 -----------------------------------
-        row = _row()
-        self.btn_setF0 = Button(text="Set F0 (baseline)", height=BTN_H,
-                                on_press=self._save_baseline)
-        self.btn_param = Button(text="⚙︎ PARAM", height=BTN_H,
-                                on_press=lambda *_: ParamPopup(self).open())
-        row.add_widget(self.btn_setF0); row.add_widget(self.btn_param)
-        root.add_widget(row)
-    
+
         # ── 5) 스피너 두 개도 한 줄 --------------------------------------
         row = _row()
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
@@ -741,6 +723,27 @@ class FFTApp(App):
                           self._set_smooth(int(t)))
         row.add_widget(self.spin_dur); row.add_widget(self.spin_sm)
         root.add_widget(row)
+    
+        # ── 3) Hi-Res & Mode --------------------------------------------
+        row = _row()
+        self.btn_hires = Button(text="Hi-Res: OFF", height=BTN_H,
+                                on_press=self._toggle_hires)
+        self.btn_mode  = Button(text=f"Mode: {MEAS_MODE}", height=BTN_H,
+                                on_press=self._toggle_mode)
+        row.add_widget(self.btn_hires); row.add_widget(self.btn_mode)
+        root.add_widget(row)
+        
+    
+        # ── 4) F0 저장 & 파라미터 팝업 -----------------------------------
+        row = _row()
+        self.btn_setF0 = Button(text="Set F0 (baseline)", height=BTN_H,
+                                on_press=self._save_baseline)
+        self.btn_param = Button(text="⚙︎ PARAM", height=BTN_H,
+                                on_press=lambda *_: ParamPopup(self).open())
+        row.add_widget(self.btn_setF0); row.add_widget(self.btn_param)
+        root.add_widget(row)
+    
+
     
         # ── 6) 그래프 영역 ----------------------------------------------
         gbox = BoxLayout(orientation='vertical',
