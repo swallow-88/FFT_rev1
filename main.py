@@ -692,67 +692,63 @@ class FFTApp(App):
 
 
     # ───────────────────────────── UI
+    
     def build(self):
-        root = BoxLayout(orientation="vertical", padding=8, spacing=6)
+        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
     
-        # ── 상태/알림 한 줄 (self.label) ───────────────────
-        self.label = Label(text="", size_hint_y=.04,
-                           halign="left", valign="middle")
-        root.add_widget(self.label)
+        # ───────────────────── ① 컨트롤 패널 ─────────────────────
+        ctrl = BoxLayout(orientation="vertical", size_hint_y=.28, spacing=dp(4))
     
-        # ── (1) 버튼 2열 그리드 ──────────────────────────────
-        btn_grid = GridLayout(cols=2, spacing=6, size_hint_y=.20)  # 높이 20 %
-        mkbtn = lambda txt, cb, dis=False: Button(text=txt,
-                                                  on_press=cb,
-                                                  disabled=dis,
-                                                  size_hint_y=None,
-                                                  height="34sp")   # <= 작게
-        self.btn_sel   = mkbtn("Select CSV",  self.open_chooser, True)
-        self.btn_run   = mkbtn("FFT RUN",     self.run_fft,       True)
-        self.btn_rec   = mkbtn(f"Record {int(self.REC_DURATION)} s",
-                               self.start_recording, True)
-        self.btn_mode  = mkbtn(f"Mode: {MEAS_MODE}",   self._toggle_mode)
-        self.btn_rt    = mkbtn("Realtime FFT (OFF)",   self.toggle_realtime)
-        self.btn_hires = mkbtn("Hi-Res: OFF",          self._toggle_hires)
-        self.btn_setF0 = mkbtn("Set F₀ (baseline)",    self._save_baseline)
-        self.btn_param = mkbtn("⚙︎ PARAM",             lambda *_: ParamPopup(self).open())
+        # ―― (1-a) 버튼 2×4 그리드 ――――――――――――――――――――――――――――
+        btn_grid = GridLayout(cols=2, spacing=dp(4), size_hint_y=None)
+        btn_grid.bind(minimum_height=lambda g,*_: setattr(g,'height',g.minimum_height))
     
-        for w in (self.btn_sel, self.btn_run,
-                  self.btn_rec, self.btn_mode,
-                  self.btn_rt,  self.btn_hires,
-                  self.btn_setF0, self.btn_param):
+        mk   = lambda t, cb, dis=False: Button(text=t, on_press=cb,
+                                               disabled=dis,
+                                               size_hint_y=None, height=dp(34))
+        self.btn_sel   = mk('Select CSV',  self.open_chooser, True)
+        self.btn_run   = mk('FFT RUN',     self.run_fft,      True)
+        self.btn_rec   = mk(f'Record {int(self.REC_DURATION)} s', self.start_recording, True)
+        self.btn_mode  = mk(f'Mode: {MEAS_MODE}',    self._toggle_mode)
+        self.btn_rt    = mk('Realtime FFT (OFF)',    self.toggle_realtime)
+        self.btn_hires = mk('Hi-Res: OFF',           self._toggle_hires)
+        self.btn_setF0 = mk('Set F₀ (baseline)',     self._save_baseline)
+        self.btn_param = mk('⚙︎ PARAM',              lambda *_: ParamPopup(self).open())
+    
+        for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
+                  self.btn_rt, self.btn_hires, self.btn_setF0, self.btn_param):
             btn_grid.add_widget(w)
-        root.add_widget(btn_grid)
+        ctrl.add_widget(btn_grid)
     
-        # ── (2) Spinner 한 줄 (원한다면 생략 가능) ─────────────
-        spin_row = GridLayout(cols=2, spacing=6, size_hint_y=.08)
+        # ―― (1-b) 두 개의 스피너 한 줄 ――――――――――――――――――――――――
+        spin_row = GridLayout(cols=2, spacing=dp(4), size_hint_y=None, height=dp(34))
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
-                                values=("10 s", "30 s", "60 s", "120 s"))
+                                values=('10 s','30 s','60 s','120 s'))
         self.spin_dur.bind(text=lambda s,t: self._set_rec_dur(float(t.split()[0])))
-        self.spin_sm = Spinner(text=str(CFG["SMOOTH_N"]),
-                               values=("1","2","3","4","5"))
+        self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]), values=('1','2','3','4','5'))
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-        spin_row.add_widget(self.spin_dur)
-        spin_row.add_widget(self.spin_sm)
-        root.add_widget(spin_row)
+        spin_row.add_widget(self.spin_dur); spin_row.add_widget(self.spin_sm)
+        ctrl.add_widget(spin_row)
     
-        # ── (3) 5-라인 로그 패널 ─────────────────────────────
-        self.log_buffer = deque(maxlen=200)             # 최근 200줄 저장
-        self.log_label  = Label(text="", valign="top", halign="left",
+        root.add_widget(ctrl)
+    
+        # ───────────────────── ② 로그 패널 (스크롤) ──────────────────
+        self.log_buffer = deque(maxlen=200)
+        self.log_label  = Label(text='', valign='top', halign='left',
                                 size_hint_y=None)
-        self.log_label.bind(
-            texture_size=lambda l, v: setattr(l, "height", v[1]))  # 자동높이
+        self.log_label.bind(texture_size=lambda l,v: setattr(l, 'height', v[1]))
     
-        scroll = ScrollView(size_hint_y=.12)            # 화면 12 % 차지 ≈ 5줄
+        scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
         root.add_widget(scroll)
     
-        # ── (4) 그래프들 ────────────────────────────────────
-        gbox = BoxLayout(orientation="vertical", spacing=4)
-        self.graphs = [GraphWidget(size_hint=(1,1/3)) for _ in range(3)]
+        # ───────────────────── ③ 그래프 3-way ─────────────────────
+        gbox = BoxLayout(orientation="vertical", spacing=dp(4))
+        self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
         for g in self.graphs: gbox.add_widget(g)
         root.add_widget(gbox)
     
+        # 권한 체크 예약
         Clock.schedule_once(self._ask_perm, 0)
         return root
         
