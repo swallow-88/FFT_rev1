@@ -639,22 +639,37 @@ class GraphWidget(Widget):
                 Color(1, 1, 1)
                 self._safe_line(self._scale(self.diff))
 
+
+                diff_sorted = sorted(self.diff,
+                                     key=lambda p: abs(p[1]), reverse=True)
+                for k, (fx, fy) in enumerate(self._select_peaks(diff_sorted)):
+                    sx, sy = self._scale([(fx, fy)])[:2]
+                    peaks.append((sx, sy, fx, 'diff', k, fy))
+
+
             PopMatrix()
 
 
         # ── ③ 피크 라벨 배치 -----------------------------------------------
-        for sx, sy, fx, axis, order in peaks:
-            lbl = Label(text=f"{fx:.1f} Hz",
-                        color=self.AXIS_CLR[axis] + (1,),
-                        size_hint=(None, None))
+        for pt in peaks:
+            if len(pt) == 5:                      # ▸ X / Y / Z 라벨 (기존 형태)
+                sx, sy, fx, axis, order = pt
+                txt  = f"{fx:.1f} Hz"
+                color = self.AXIS_CLR[axis] + (1,)
+            else:                                 # ▸ diff 라벨  (Hz + dB)
+                sx, sy, fx, axis, order, dv = pt   # axis 값은 'diff' 자리 → 쓰진 않음
+                txt  = f"{fx:.1f} Hz\n{dv:+.1f} dB"
+                color = (1, 1, 1, 1)               # 흰색
+        
+            lbl = Label(text=txt, color=color, size_hint=(None, None))
             lbl.texture_update()
             w, h = lbl.texture_size
-
-            # — 꼭짓점 위 조금 띄워서, 그래프 영역 안에 들어오도록 조정 —
+        
+            # 꼭짓점 위에서 조금 띄워, 그래프 영역 안쪽에 배치
             px = self.x + sx - w / 2
-            py = self.y + min(sy + 8 + order * 14,   # 겹치면 위로 조금씩 밀기
+            py = self.y + min(sy + 8 + order * 14,
                               self.height - h - 4)
-
+        
             lbl.pos = (px, py)
             lbl._peak = True
             self.add_widget(lbl)
