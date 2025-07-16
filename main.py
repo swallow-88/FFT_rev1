@@ -528,6 +528,8 @@ class GraphWidget(Widget):
             # 실시간 호출 등으로 배지를 지우고 싶을 때는 None/""를 넘겨서 빈 문자열 처리
             self.status_lbl.text = ""
 
+        self._prev_ticks = (None, None)
+        
         # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
         self._schedule_redraw()
        
