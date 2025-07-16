@@ -70,6 +70,7 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
 from plyer import filechooser, accelerometer
 from kivy.metrics import dp
+from kivy.uix.scrollview import ScrollView
 
 #from utils_fft import robust_fs, next_pow2
 
