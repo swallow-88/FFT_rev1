@@ -363,7 +363,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
 
     def __init__(self, **kw):
-        super().__init__(**kw)         
+        super().__init__(**kw)       
         self.datasets, self.diff = [],[]
         self.min_x = F_MIN
         self.max_x = 50.0
@@ -373,6 +373,9 @@ class GraphWidget(Widget):
         self._prev_ticks = (None, None)
         self.bind(size=lambda *_: self.redraw())
         self.status_text = None
+        self._redraw_ev = None
+       
+        self.bind(size=self._schedule_redraw, pos = self._schedule_redraw)
 
        # ───────────────────────────── 축 라벨
         # ── 축 제목(Label) ────────────────────────────────
@@ -495,6 +498,7 @@ class GraphWidget(Widget):
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
         self.status_text = status
+        self._schedule_redraw()
    
    
         # ── y 값 모으기 : rms·pk 에서만
@@ -525,7 +529,8 @@ class GraphWidget(Widget):
             self.status_lbl.text = ""
 
         # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
-        self.redraw()
+        self._schedule_redraw()
+       
 
 
     # ───────────────────────────── 내부 헬퍼
@@ -582,20 +587,39 @@ class GraphWidget(Widget):
             chunk = pts[i:i+MAX_V]
             if len(chunk) >= 4:
                 Line(points=chunk, width=self.LINE_W)
+               
+               
+               
+               
+         
+    def _schedule_redraw(self, *_):
+        if self._redraw_ev:
+            Clock.unschedule(self._redraw_ev)
+        # 0 초 → 다음 프레임,  -1 초 → 레이아웃보다 뒤
+        self._redraw_ev = Clock.schedule_once(self._do_redraw, 0)
+   
+    def _do_redraw(self, *_):
+        self._redraw_ev = None
+        self.redraw()
+           
+               
+               
 
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
         self.canvas.clear()
-    
+   
         # ------------------------------- 변경 블록 시작
         # 지금 라벨이 전혀 없으면 → 새로 만든다
+        if self.width < 5 or self.height < 5:
+            self._schedule_redraw()
+            return
+       
         axis_missing = not any(getattr(ch, "_axis", False) for ch in self.children)
-    
+   
         # 기존 판정 + 라벨 부재 여부까지 포함
-        need_new_axis = (
-            (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
-        ) or axis_missing                # ◀︎ 여기!
-    
+        need_new_axis = ((self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks) or axis_missing                # ◀︎ 여기!
+   
         if need_new_axis:
             # 남아 있던 라벨 싹 제거
             for ch in list(self.children):
@@ -609,6 +633,7 @@ class GraphWidget(Widget):
                 # 라벨을 못 그렸으니 다음 프레임에도 다시 시도하게끔
                 self._prev_ticks = (None, None)
         # ------------------------------- 변경 블록 끝
+
        
         # (피크 라벨·배지 제거 코드는 그대로 두세요)
         for ch in list(self.children):
@@ -664,16 +689,16 @@ class GraphWidget(Widget):
                 sx, sy, fx, axis, order, dv = pt   # axis 값은 'diff' 자리 → 쓰진 않음
                 txt  = f"{fx:.1f} Hz\n{dv:+.1f} dB"
                 color = (1, 1, 1, 1)               # 흰색
-        
+       
             lbl = Label(text=txt, color=color, size_hint=(None, None))
             lbl.texture_update()
             w, h = lbl.texture_size
-        
+       
             # 꼭짓점 위에서 조금 띄워, 그래프 영역 안쪽에 배치
             px = self.x + sx - w / 2
             py = self.y + min(sy + 8 + order * 14,
                               self.height - h - 4)
-        
+       
             lbl.pos = (px, py)
             lbl._peak = True
             self.add_widget(lbl)
@@ -699,25 +724,27 @@ class FFTApp(App):
         self._buf_lock = threading.Lock()
 
 
-    # ───────────────────────────── UI    
-    def build(self):
+    # ───────────────────────────── UI
 
+
+   
+    def build(self):
+       
         ROW_H = dp(34)      # 버튼·스피너 공통 높이
         GAP   = dp(4)       # 컨트롤 내부 간격
-        
+       
         root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
-    
+   
         # ── 0) 상태 바(Label) ─────────────────────────────────────────────
         self.label = Label(text="", size_hint_y=None, height=ROW_H)
         root.add_widget(self.label)
-
-        #스페이서
+       
+        # 상태바 스페이서 공간
         root.add_widget(Widget(size_hint_y=None, height=dp(35)))
-
-        
+   
         # ── 1) 컨트롤 패널(버튼 + 스피너) ─────────────────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
-        
+       
         # 1-a) 2×4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
         btn_grid.bind(minimum_height=lambda g,*_
@@ -725,7 +752,7 @@ class FFTApp(App):
         mk = lambda t, cb, d=False: Button(text=t, on_press=cb,
                                            disabled=d, size_hint_y=None,
                                            height=ROW_H)
-    
+   
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
         self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s", self.start_recording, True)
@@ -734,49 +761,50 @@ class FFTApp(App):
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
         self.btn_setF0 = mk("Set F₀ (baseline)",  self._save_baseline)
         self.btn_param = mk("⚙︎ PARAM",           lambda *_: ParamPopup(self).open())
-    
+   
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
-    
+   
         # 1-b) 스피너 한 줄 ― 버튼과 “같은 높이·여백 0”
         spin_row = GridLayout(cols=2, spacing=GAP, size_hint_y=None, height=ROW_H)
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=("10 s","30 s","60 s","120 s"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_dur.bind(text=lambda s,t: self._set_rec_dur(float(t.split()[0])))
-    
+   
         self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]), values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-    
+   
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
-    
+   
         # 컨트롤 패널 전체 높이 = 버튼그리드 높이 + GAP + 스피너행 높이
         ctrl.height = btn_grid.height + GAP + ROW_H
         root.add_widget(ctrl)
-    
+   
         # ── 2) 로그 패널 (스크롤) ───────────────────────────────────────
         self.log_buffer = deque(maxlen=200)
         self.log_label  = Label(text="", valign="top", halign="left",
                                 size_hint_y=None)
         self.log_label.bind(texture_size=lambda l,v: setattr(l, "height", v[1]))
-    
+   
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
         root.add_widget(scroll)
-    
+   
         # ── 3) 그래프 3-way ────────────────────────────────────────────
         gbox = BoxLayout(orientation="vertical", spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
         for g in self.graphs: gbox.add_widget(g)
         root.add_widget(gbox)
-    
+   
         Clock.schedule_once(self._ask_perm, 0)
         return root
+           
     # ───────────────────────────── 헬퍼
     def log(self, msg: str):
         # 1) 로그 버퍼 갱신
@@ -784,7 +812,7 @@ class FFTApp(App):
         line = f"[{ts}] {msg}"
         self.log_buffer.append(line)
         self.log_label.text = "\n".join(self.log_buffer)
-    
+   
         # 2) 색깔만 하단 토스트 & 상태바에
         self.label.text  = msg
         self.label.color = (1,0,0,1) if msg.startswith("PLZ") else \
@@ -1105,7 +1133,7 @@ class FFTApp(App):
             top3 = sorted(diff_line, key=lambda p: abs(p[1]), reverse=True)[:2]
             peak_txt = "  •  ".join(f"{f:4.1f} Hz : {d:+.1f} dB" for f, d in top3)
    
-            # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
+            # ===== 3) 9.9 dB 이상이면 PLZ CHECK 배지 띄우기 ================
             alert_msg = ("PLZ CHECK" if any(abs(d) > 10 for _, d in diff_line)
                          else "GOOD")
    
@@ -1187,10 +1215,10 @@ class FFTApp(App):
         if getattr(self, "_chooser_open", False):
             return
         self._chooser_open = True   # 재진입 락
-    
+   
         def _cleanup(*_):
             self._chooser_open = False
-    
+   
         # ---------- 1) Android : SAF 또는 plyer ----------
         if ANDROID:
             if SharedStorage:
@@ -1207,7 +1235,7 @@ class FFTApp(App):
                 multiple=True,
                 filters=["*.csv", "*.txt", "*.*"])
             return
-    
+   
         # ---------- 2) Windows / macOS / Linux ----------
         try:
             import tkinter as tk
