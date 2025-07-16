@@ -1094,7 +1094,7 @@ class FFTApp(App):
             diff_line = [(f, f1[f] - f2[f]) for f in sorted(set(f1) & set(f2))]
 
             # |dB| 가 큰 순서 Top-3 추출
-            top3 = sorted(diff_line, key=lambda p: abs(p[1]), reverse=True)[:3]
+            top3 = sorted(diff_line, key=lambda p: abs(p[1]), reverse=True)[:2]
             peak_txt = "  •  ".join(f"{f:4.1f} Hz : {d:+.1f} dB" for f, d in top3)
    
             # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
