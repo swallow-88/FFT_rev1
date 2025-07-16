@@ -586,13 +586,21 @@ class GraphWidget(Widget):
     def redraw(self, *_):
         self.canvas.clear()
    
-        # ── ① 축 라벨 삭제는 *꼭* 새로 그릴 때만 ──
-        need_new_axis = (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
+        # ① 현재 축 라벨이 전혀 없으면 무조건 다시 만들어야 함
+        no_axis_now = not any(getattr(ch, "_axis", False) for ch in self.children)
+    
+        need_new_axis = (
+            (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
+        ) or no_axis_now          # ← 여기 한 줄만 추가!
+    
         if need_new_axis:
+            # 남아 있던 축 라벨 제거
             for ch in list(self.children):
                 if getattr(ch, "_axis", False):
                     self.remove_widget(ch)
-   
+            self._make_labels()
+            self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
+       
         # (피크 라벨·배지 제거 코드는 그대로 두세요)
         for ch in list(self.children):
             if getattr(ch, "_peak", False):
