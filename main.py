@@ -586,21 +586,29 @@ class GraphWidget(Widget):
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
         self.canvas.clear()
-   
-        # ① 현재 축 라벨이 전혀 없으면 무조건 다시 만들어야 함
-        no_axis_now = not any(getattr(ch, "_axis", False) for ch in self.children)
     
+        # ------------------------------- 변경 블록 시작
+        # 지금 라벨이 전혀 없으면 → 새로 만든다
+        axis_missing = not any(getattr(ch, "_axis", False) for ch in self.children)
+    
+        # 기존 판정 + 라벨 부재 여부까지 포함
         need_new_axis = (
             (self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks
-        ) or no_axis_now          # ← 여기 한 줄만 추가!
+        ) or axis_missing                # ◀︎ 여기!
     
         if need_new_axis:
-            # 남아 있던 축 라벨 제거
+            # 남아 있던 라벨 싹 제거
             for ch in list(self.children):
                 if getattr(ch, "_axis", False):
                     self.remove_widget(ch)
-            self._make_labels()
-            self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
+            # **위젯 크기가 너무 작으면 나중에 다시 그리도록 보류**
+            if self.width > 10 and self.height > 10:
+                self._make_labels()
+                self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
+            else:
+                # 라벨을 못 그렸으니 다음 프레임에도 다시 시도하게끔
+                self._prev_ticks = (None, None)
+        # ------------------------------- 변경 블록 끝
        
         # (피크 라벨·배지 제거 코드는 그대로 두세요)
         for ch in list(self.children):
