@@ -593,13 +593,12 @@ class GraphWidget(Widget):
                
          
     def _schedule_redraw(self, *_):
-        if self._redraw_ev:
-            Clock.unschedule(self._redraw_ev)
-        # 0 초 → 다음 프레임,  -1 초 → 레이아웃보다 뒤
-        self._redraw_ev = Clock.schedule_once(self._do_redraw, 0)
-   
+        # 이미 예약돼 있으면 그대로 두기
+        if self._redraw_ev is None:
+            self._redraw_ev = Clock.schedule_once(self._do_redraw, 0)
+    
     def _do_redraw(self, *_):
-        self._redraw_ev = None
+        self._redraw_ev = None          # ← 다시 예약할 수 있도록 리셋
         self.redraw()
            
                
