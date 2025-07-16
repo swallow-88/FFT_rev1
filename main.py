@@ -371,7 +371,7 @@ class GraphWidget(Widget):
         self.Y_MIN, self.Y_MAX = 0, 100
         self.Y_TICKS = [0,20,40,60,80,100]
         self._prev_ticks = (None, None)
-        self.bind(size=lambda *_: self.redraw())
+        #self.bind(size=lambda *_: self.redraw())
         self.status_text = None
         self._redraw_ev = None
        
@@ -498,7 +498,7 @@ class GraphWidget(Widget):
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
         self.status_text = status
-        self._schedule_redraw()
+        #self._schedule_redraw()
    
    
         # ── y 값 모으기 : rms·pk 에서만
