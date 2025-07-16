@@ -607,11 +607,6 @@ class GraphWidget(Widget):
             if getattr(ch, "_peak", False):
                 self.remove_widget(ch)
    
-        # ── ② 축 라벨이 바뀌었을 때만 다시 생성 ──
-        if need_new_axis:
-            self._make_labels()
-            self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
-
 
         with self.canvas:
             PushMatrix()
@@ -699,6 +694,11 @@ class FFTApp(App):
     # ───────────────────────────── UI
     def build(self):
         root = BoxLayout(orientation="vertical", padding=8, spacing=6)
+    
+        # ── 상태/알림 한 줄 (self.label) ───────────────────
+        self.label = Label(text="", size_hint_y=.04,
+                           halign="left", valign="middle")
+        root.add_widget(self.label)
     
         # ── (1) 버튼 2열 그리드 ──────────────────────────────
         btn_grid = GridLayout(cols=2, spacing=6, size_hint_y=.20)  # 높이 20 %
@@ -1162,38 +1162,53 @@ class FFTApp(App):
     # ───────────────────────────── 파일 선택
        
     def open_chooser(self, *_):
+        # ── 이미 열려 있으면 무시 ──────────────────────
+        if getattr(self, "_chooser_open", False):
+            return
+        self._chooser_open = True   # 재진입 락
+    
+        def _cleanup(*_):
+            self._chooser_open = False
+    
         # ---------- 1) Android : SAF 또는 plyer ----------
         if ANDROID:
             if SharedStorage:
                 try:
-                    SharedStorage().open_file(callback=self.on_choose,
-                                              multiple=True, mime_type="*/*")
+                    SharedStorage().open_file(
+                        callback=lambda sel, *a: (self.on_choose(sel), _cleanup()),
+                        multiple=True, mime_type="*/*")
                     return
                 except Exception:
                     pass
             # plyer fallback
-            filechooser.open_file(on_selection=self.on_choose,
-                                  multiple=True, filters=["*.csv", "*.txt", "*.*"],
-                                  path=DOWNLOAD_DIR)
+            filechooser.open_file(
+                on_selection=lambda sel: (self.on_choose(sel), _cleanup()),
+                multiple=True,
+                filters=["*.csv", "*.txt", "*.*"])
             return
-   
+    
         # ---------- 2) Windows / macOS / Linux ----------
         try:
-            # Tkinter는 파이썬 표준 라이브러리라 별도 설치 불필요
             import tkinter as tk
             from tkinter import filedialog
-            root = tk.Tk(); root.withdraw()        # 창 감춤
+            root = tk.Tk(); root.withdraw()
             paths = filedialog.askopenfilenames(
                 title="Select up to 2 data files",
-                filetypes=[("CSV files", "*.csv *.txt"), ("All files", "*,*")])
-            # Tk 객체 해제
+                filetypes=[("Data files", "*.csv *.txt"),
+                           ("All files", "*.*")])
             root.update(); root.destroy()
             self.on_choose(list(paths)[:3])
         except Exception as e:
-            # 그래도 실패하면 Kivy FileChooserPopup으로 최종 fallback
             Logger.warning(f"Tk file dialog error: {e}")
-            filechooser.open_file(on_selection=self.on_choose,
-                                  multiple=True, filters=["*.csv", "*.txt"])
+            # 최종 fallback
+            filechooser.open_file(
+                on_selection=lambda sel: (self.on_choose(sel), _cleanup()),
+                multiple=True,
+                filters=["*.csv", "*.txt", "*.*"])
+        finally:
+            # Tk 경로든, 예외든 → cleanup
+            if not ANDROID:
+                _cleanup()
 
     def on_choose(self, sel, *_):
         if not sel:
