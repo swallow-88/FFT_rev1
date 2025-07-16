@@ -702,7 +702,11 @@ class FFTApp(App):
         # ── 0) 상태 바(Label) ─────────────────────────────────────────────
         self.label = Label(text="", size_hint_y=None, height=ROW_H)
         root.add_widget(self.label)
-    
+
+        #스페이서
+        root.add_widget(Widget(size_hint_y=None, height=dp(35)))
+
+        
         # ── 1) 컨트롤 패널(버튼 + 스피너) ─────────────────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
         
