@@ -1098,7 +1098,7 @@ class FFTApp(App):
             peak_txt = "  •  ".join(f"{f:4.1f} Hz : {d:+.1f} dB" for f, d in top3)
    
             # ===== 3) 15 dB 이상이면 PLZ CHECK 배지 띄우기 ================
-            alert_msg = ("PLZ CHECK" if any(abs(d) >= 10 for _, d in diff_line)
+            alert_msg = ("PLZ CHECK" if any(abs(d) > 10 for _, d in diff_line)
                          else "GOOD")
    
             # ===== 4) UI 스레드에 결과 갱신 =================================
