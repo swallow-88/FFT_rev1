@@ -734,7 +734,7 @@ class FFTApp(App):
     def build(self):
         ROW_H = dp(34)
         GAP = dp(4)
-        TOAST_H = dp(36)
+        self.TOAST_H = dp(36)
         
         # ── Safe-Area (상단 알림바) 적용 ───────────────────────
         TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
