@@ -1,3 +1,4 @@
+ 
 ###############################################################################
 # 0. Config ― 반드시 Kivy import *이전*에!
 ###############################################################################
@@ -77,6 +78,35 @@ from kivy.animation import Animation
 from functools import partial
 
 #from utils_fft import robust_fs, next_pow2
+
+
+
+def get_top_safe():
+    """
+    가능한 방법 순서대로 --
+    ① Android API ≥ 23 : Window.insets.top
+    ② 리소스에서 status_bar_height 호출
+    ③ 최후엔 32dp 고정
+    """
+    # ① Kivy insets (안드 11+ / 일부 기기)
+    top = getattr(Window, "insets", None)
+    if top and top.top:
+        return top.top         # 이미 px 단위
+
+    # ② pyjnius 로 status_bar_height dimen
+    if platform == "android":
+        try:
+            from jnius import autoclass, cast
+            Context = autoclass("org.kivy.android.PythonActivity").mActivity
+            res = Context.getResources()
+            res_id = res.getIdentifier("status_bar_height", "dimen", "android")
+            if res_id:
+                return res.getDimensionPixelSize(res_id)
+        except Exception:
+            pass
+
+    # ③ fallback
+    return dp(32)              # 24dp 보다 약간 여유
 
 
 # ------------------------------------------------------------------
@@ -353,16 +383,15 @@ class ParamPopup(ModalView):
         root.add_widget(Label())   # 빈 셀
         root.add_widget(btn)
 
-
     def _apply_and_close(self, *_):
-        # ① 그래프 재계산 (원래 코드)
+        # 파라미터가 바뀌었으니 그래프 스케일 갱신
         for g in self.app.graphs:
             g.update_graph(g.datasets, g.diff, g.max_x)
-    
-        # ② ★ 모든 레거시 상수 동기화 -------------------------
+           
+       
         for k in ("HPF_CUTOFF", "BAND_HZ", "MAX_FMAX", "SMOOTH_N"):
-            globals()[k] = CFG[k]          # <─ 핵심 한 줄!
-    
+            globals()[k] = CFG[k]
+       
         self.dismiss()
 
 ###############################################################################
@@ -747,6 +776,7 @@ class FFTApp(App):
     # ───────────────────────────── UI 
     def build(self):
         ROW_H, GAP = dp(34), dp(4)
+        TOP_SAFE = get_top_safe()
         self.TOAST_H = ROW_H
    
         # ── Safe-area
@@ -758,7 +788,7 @@ class FFTApp(App):
    
         # ── root (들여쓰기 0)
         root = BoxLayout(orientation='vertical',
-                         padding=[dp(8), top_pad, dp(8), dp(6)],
+                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
                          spacing=dp(6))
 
         # ② 상태바
