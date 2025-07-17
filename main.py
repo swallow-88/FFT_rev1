@@ -733,22 +733,38 @@ class FFTApp(App):
 
     # ───────────────────────────── UI   
     def build(self):
-        ROW_H = dp(34)
-        GAP = dp(4)
-        
-    
-        # 토스트는 버튼 높이와 동일하게
-        self.toast_btn = Button(text='',              # 처음엔 비어 있음
-                                size_hint_y=None,
-                                height=ROW_H,
-                                disabled=True,        # 눌러도 아무 일 없음
-                                background_normal='', # 투명 배경
-                                background_color=(0,0,0,0))  # or 원하는 색
-        root.add_widget(self.toast_btn)   # ★ 상태라벨 바로 다음 줄에 추가
-    
+        ROW_H, GAP = dp(34), dp(4)
+        self.TOAST_H = ROW_H           # 토스트도 버튼 높이와 동일
 
-        # ── ② 버튼·스피너 패널 : 상태바 바로 아래 ───────────────────────
-        ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
+        # Safe area
+        TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
+                   if hasattr(Window, "insets") else dp(24)
+
+        # ① 루트 레이아웃 먼저
+        root = BoxLayout(orientation='vertical',
+                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
+                         spacing=dp(6))
+
+        # ② 상태바
+        self.label = Label(text='', halign='left', valign='middle',
+                           size_hint_y=None)
+        def _fit(lbl,*_):
+            lbl.text_size = (lbl.width, None)
+            lbl.texture_update()
+            lbl.height = lbl.texture_size[1] + dp(6)
+        self.label.bind(size=_fit)
+        root.add_widget(self.label); _fit(self.label)
+
+        # ③ 토스트용 ‘더미 버튼’ 1줄
+        self.toast_btn = Button(text='',
+                                size_hint_y=None, height=self.TOAST_H,
+                                disabled=True,
+                                background_normal='',
+                                background_color=(0,0,0,0))  # 투명
+        root.add_widget(self.toast_btn)
+
+        # ④ 컨트롤 패널 (버튼/스피너) ― 기존 코드 그대로
+        ctrl = BoxLayout(orientation='vertical', spacing=GAP, size_hint_y=None)
        
         # ★ 추가 : 라벨-버튼 사이 여백 6dp
         #root.add_widget(Widget(size_hint_y=None, height=dp(50)))
@@ -824,17 +840,7 @@ class FFTApp(App):
             gbox.add_widget(g)
         root.add_widget(gbox)
 
-                # ── ⓵ Toast 전용 바(고정 높이) ─────────────────────────────
-        self.toast_box = BoxLayout(size_hint_y=None, height=self.TOAST_H,
-                                   padding=[dp(4), 0, dp(4), 0])
-        self.toast_lbl = Label(text="", valign="middle", halign="center")
-        self.toast_box.add_widget(self.toast_lbl)
-        root.add_widget(self.toast_box)
 
-        # root.padding[3] (=bottom) 을 Toast 높이만큼 확장하면
-        # 스크롤뷰가 마지막 줄까지 가려지지 않습니다.
-        root.padding[3] += self.TOAST_H
-   
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
