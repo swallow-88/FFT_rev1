@@ -728,81 +728,79 @@ class FFTApp(App):
         self._buf_lock = threading.Lock()
 
 
-    # ───────────────────────────── UI
-
-
-   
+    # ───────────────────────────── UI    
     def build(self):
-       
-        #ROW_H = dp(34)      # 버튼·스피너 공통 높이
-        GAP   = dp(4)       # 컨트롤 내부 간격
-       
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
-   
-        # ── 0) 상태 바(Label) ─────────────────────────────────────────────
-        self.label = Label(text="", size_hint_y=None, height=ROW_H)
-        root.add_widget(self.label)
-       
-        # 상태바 스페이서 공간
-        #root.add_widget(Widget(size_hint_y=None, height=dp(35)))
-        # build() 내부 ― root 만들자마자
-        
-        TOP_SAFE = dp(8) + Window.top  # Window.top → OS가 확보한 safe-area 픽셀
+    
+        # ── 공통 치수 --------------------------------------------------
+        ROW_H  = dp(34)                 # 버튼·스피너 공통 높이
+        GAP    = dp(4)                  # 컨트롤 내부 간격
+        TOP_SAFE = dp(8) + Window.top   # 상단 safe-area
+    
+        # ── 루트 컨테이너 (한 번만!) -----------------------------------
         root = BoxLayout(orientation="vertical",
-                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],  # ← top 만 가변
+                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
                          spacing=dp(6))
-   
-        # ── 1) 컨트롤 패널(버튼 + 스피너) ─────────────────────────────────
+    
+        # ── 0) 상태 바 -------------------------------------------------
+        self.label = Label(text="",
+                           size_hint_y=None, height=ROW_H,
+                           halign="left", valign="middle")
+        root.add_widget(self.label)
+    
+        # ── 1) 컨트롤 패널 --------------------------------------------
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
-       
-        # 1-a) 2×4 버튼 그리드
+    
+        # 1-a) 2 × 4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
-        btn_grid.bind(minimum_height=lambda g,*_
-                      : setattr(g, "height", g.minimum_height))  # ← 자동 높이
-        mk = lambda t, cb, d=False: Button(text=t, on_press=cb,
-                                           disabled=d, size_hint_y=None,
-                                           height=ROW_H)
-   
+        btn_grid.bind(minimum_height=lambda g,*_:
+                      setattr(g, "height", g.minimum_height))
+    
+        mk = lambda t, cb, dis=False: Button(text=t, on_press=cb,
+                                             disabled=dis,
+                                             size_hint_y=None, height=ROW_H)
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
-        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s", self.start_recording, True)
+        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s",
+                            self.start_recording, True)
         self.btn_mode  = mk(f"Mode: {MEAS_MODE}", self._toggle_mode)
         self.btn_rt    = mk("Realtime FFT (OFF)", self.toggle_realtime)
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
         self.btn_setF0 = mk("Set F₀ (baseline)",  self._save_baseline)
-        self.btn_param = mk("⚙︎ PARAM",           lambda *_: ParamPopup(self).open())
-   
+        self.btn_param = mk("⚙︎ PARAM",           lambda *_:
+                            ParamPopup(self).open())
+    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
-   
-        # 1-b) 스피너 한 줄 ― 버튼과 “같은 높이·여백 0”
-        spin_row = GridLayout(cols=2, spacing=GAP, size_hint_y=None, height=ROW_H)
+    
+        # 1-b) 스피너 한 줄
+        spin_row = GridLayout(cols=2, spacing=GAP,
+                              size_hint_y=None, height=ROW_H)
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=("10 s","30 s","60 s","120 s"),
                                 size_hint_y=None, height=ROW_H)
-        self.spin_dur.bind(text=lambda s,t: self._set_rec_dur(float(t.split()[0])))
-   
-        self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]), values=("1","2","3","4","5"),
+        self.spin_dur.bind(text=lambda s,t:
+                           self._set_rec_dur(float(t.split()[0])))
+    
+        self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]),
+                                values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-   
+    
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
-   
-        # 컨트롤 패널 전체 높이 = 버튼그리드 높이 + GAP + 스피너행 높이
+    
+        # 컨트롤 패널 높이 = 버튼그리드 + GAP + ROW_H
         ctrl.height = btn_grid.height + GAP + ROW_H
         root.add_widget(ctrl)
-   
-        # ── 2) 로그 패널 (스크롤) ───────────────────────────────────────
+    
+        # ── 2) 로그 패널 (줄바꿈 + 작은 글꼴) --------------------------
         self.log_buffer = deque(maxlen=200)
-        # ── (로그 패널) -------------------------------------------------
-        self.log_label = Label(text="",
-                               valign="top", halign="left",
-                               font_size="12sp",          # ← 살짝 작게
-                               size_hint_y=None)
+        self.log_label  = Label(text="", font_size="12sp",
+                                valign="top", halign="left",
+                                size_hint_y=None)
         # 폭이 바뀔 때 마다 text_size 갱신 → 자동 줄바꿈
         def _wrap(label, *_):
             label.text_size = (label.width, None)
