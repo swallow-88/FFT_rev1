@@ -93,7 +93,7 @@ def robust_fs(t_arr, min_fs=10.0, n_keep=None):
     if len(t_arr) < 3:
         return None
     dt = np.diff(t_arr)
-    dt = dt[dt > 1e-6]
+    dt = dt[dt > MIN_AMP_RATIO]
     if not dt.size:
         return None
     fs = 1.0 / np.median(dt)
@@ -171,6 +171,10 @@ BUF_LEN, MIN_LEN   = 8192, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
+MIN_DB_FLOOR = -160.0
+MIN_AMP_RATIO = 10**(MIN_DB_FLOOR / 20)
+
+
 # 4. 사용자 조정 상수
 # ────────────────── Hi-Res (고정 정밀) ──────────────────
 HIRES = False          # 토글 버튼으로 바뀜
@@ -220,6 +224,9 @@ sys.excepthook = _ex
 ###############################################################################
 # 6. 공용 함수
 ###############################################################################
+
+
+
 from typing import Optional
 def uri_to_file(uri: str) -> Optional[str]:
     if not uri:
@@ -241,7 +248,7 @@ def uri_to_file(uri: str) -> Optional[str]:
 
 def acc_to_spec(freq, amp_a):
     if MEAS_MODE == "VEL":
-        f_nz = np.where(freq < 1e-6, 1e-6, freq)
+        f_nz = np.where(freq < MIN_AMP_RATIO, MIN_AMP_RATIO, freq)
         amp  = amp_a / (2 * np.pi * f_nz) * 1e3
         ref  = REF_MM_S
     else:
@@ -282,8 +289,8 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
         rms = np.sqrt(np.mean(amp_lin[s]**2))
         pk  = amp_lin[s].max()
         cen = (lo + hi) / 2
-        band_rms.append((cen, 20*np.log10(max(rms, REF0*1e-6)/REF0)))
-        band_pk.append((cen, 20*np.log10(max(pk,  REF0*1e-6)/REF0)))
+        band_rms.append((cen, 20*np.log10(max(rms, REF0*MIN_AMP_RATIO)/REF0)))
+        band_pk.append((cen, 20*np.log10(max(pk,  REF0*MIN_AMP_RATIO)/REF0)))
     if len(band_rms) >= SMOOTH_N:
         ys = smooth_y([y for _, y in band_rms])
         band_rms = list(zip([x for x, _ in band_rms], ys))
@@ -367,7 +374,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
 
     def __init__(self, **kw):
-        super().__init__(**kw)     
+        super().__init__(**kw)   
         self.datasets, self.diff = [],[]
         self.min_x = F_MIN
         self.max_x = 50.0
@@ -579,7 +586,7 @@ class GraphWidget(Widget):
             for i in range(0,len(pts)-2,2):
                 x1,y1,x2,y2 = pts[i:i+4]
                 seg = ((x2-x1)**2+(y2-y1)**2)**0.5
-                if seg < 1e-6:
+                if seg < MIN_AMP_RATIO:
                     continue
                 nx,ny,ofs,draw = (x2-x1)/seg,(y2-y1)/seg,0.,True
                 while ofs < seg:
@@ -731,18 +738,18 @@ class FFTApp(App):
        
 
 
-    # ───────────────────────────── UI   
+    # ───────────────────────────── UI 
     def build(self):
         ROW_H, GAP = dp(34), dp(4)
-        self.TOAST_H = ROW_H           # 토스트도 버튼 높이와 동일
-
-        # Safe area    # ── Safe-area
+        self.TOAST_H = ROW_H
+   
+        # ── Safe-area
         if hasattr(Window, "insets") and Window.insets.top:
             safe_dp = Window.insets.top * 160.0 / Window.dpi
             top_pad = dp(safe_dp + 4)            # ← 약간 여유
         else:
             top_pad = dp(28)
-    
+   
         # ── root (들여쓰기 0)
         root = BoxLayout(orientation='vertical',
                          padding=[dp(8), top_pad, dp(8), dp(6)],
@@ -853,14 +860,14 @@ class FFTApp(App):
         self.toast_btn.text    = msg
         self.toast_btn.opacity = 0
         Animation(opacity=1, d=0.15).start(self.toast_btn)
-    
+   
         def _fade_out(*_):
             anim = Animation(opacity=0, d=0.4)
             anim.bind(on_complete=lambda *_: setattr(self.toast_btn, 'text', ''))
             anim.start(self.toast_btn)
-    
+   
         Clock.schedule_once(_fade_out, dur)
-        
+       
     # ───────────────────────────── 상태바 갱신
     def _refresh_status(self):
         txt = f"[{self._status['files']}]  |  {self._status['action']}"
@@ -885,10 +892,10 @@ class FFTApp(App):
         self.log_label.text = "\n".join(self.log_buffer)
         self.log_label.texture_update()
         self.log_label.height = self.log_label.texture_size[1] + dp(12)
-        
+       
    
         # 상태바에도 동일 메시지
-        
+       
         #self.label.text  = msg
         #self.label.color = (1,0,0,1) if msg.startswith("PLZ") else \
         #                   (0,1,0,1) if msg.startswith("GOOD") else (1,1,1,1)
@@ -955,10 +962,10 @@ class FFTApp(App):
         self.btn_rec.disabled = True
         self._status['action'] = f"REC 0/{int(self.REC_DURATION)}s"   # ← ②
         self._refresh_status()
-            
+           
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
             # self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
-    
+   
 
     def _stop_recording(self, *_):
         if not self.rec_on:
@@ -1014,8 +1021,8 @@ class FFTApp(App):
                 if int(rel*2)%2==0:
                     #self.label.text=f"Recording {rel:4.1f}/{int(self.REC_DURATION)} s …"
                     self._status['action'] = f"REC {rel:4.1f}/{int(self.REC_DURATION)}s"  # ← ②
-                    self._refresh_status() 
-            
+                    self._refresh_status()
+           
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
 
@@ -1101,8 +1108,8 @@ class FFTApp(App):
                         cen = (lo + hi) * 0.5
                         rms = np.sqrt(np.mean(amp_lin[sel]**2))
                         pk  = amp_lin[sel].max()
-                        rms_line.append((cen, 20*np.log10(max(rms, ref0*1e-6)/ref0)))
-                        pk_line .append((cen, 20*np.log10(max(pk , ref0*1e-6)/ref0)))
+                        rms_line.append((cen, 20*np.log10(max(rms, ref0*MIN_AMP_RATIO)/ref0)))
+                        pk_line .append((cen, 20*np.log10(max(pk , ref0*MIN_AMP_RATIO)/ref0)))
    
                     if not rms_line:
                         continue
@@ -1203,8 +1210,8 @@ class FFTApp(App):
                     cen = (lo + hi) * 0.5
                     rms = np.sqrt(np.mean(amp_lin[m]**2))
                     pk  = amp_lin[m].max()
-                    rms_line.append((cen, 20*np.log10(max(rms, REF0*1e-6)/REF0)))
-                    pk_line .append((cen, 20*np.log10(max(pk , REF0*1e-6)/REF0)))
+                    rms_line.append((cen, 20*np.log10(max(rms, REF0*MIN_AMP_RATIO)/REF0)))
+                    pk_line .append((cen, 20*np.log10(max(pk , REF0*MIN_AMP_RATIO)/REF0)))
    
                 # ── ⑤ 스무딩 ──────────────────────────────────────────────
                 # ── 스무딩 블록 (두 곳 모두) ────────────────
