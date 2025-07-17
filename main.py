@@ -71,6 +71,9 @@ from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate,
 from plyer import filechooser, accelerometer
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
+# build() 내부 ― root 만들자마자
+from kivy.core.window import Window
+
 
 #from utils_fft import robust_fs, next_pow2
 
@@ -731,7 +734,7 @@ class FFTApp(App):
    
     def build(self):
        
-        ROW_H = dp(34)      # 버튼·스피너 공통 높이
+        #ROW_H = dp(34)      # 버튼·스피너 공통 높이
         GAP   = dp(4)       # 컨트롤 내부 간격
        
         root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
@@ -741,7 +744,13 @@ class FFTApp(App):
         root.add_widget(self.label)
        
         # 상태바 스페이서 공간
-        root.add_widget(Widget(size_hint_y=None, height=dp(35)))
+        #root.add_widget(Widget(size_hint_y=None, height=dp(35)))
+        # build() 내부 ― root 만들자마자
+        
+        TOP_SAFE = dp(8) + Window.top  # Window.top → OS가 확보한 safe-area 픽셀
+        root = BoxLayout(orientation="vertical",
+                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],  # ← top 만 가변
+                         spacing=dp(6))
    
         # ── 1) 컨트롤 패널(버튼 + 스피너) ─────────────────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
@@ -789,9 +798,19 @@ class FFTApp(App):
    
         # ── 2) 로그 패널 (스크롤) ───────────────────────────────────────
         self.log_buffer = deque(maxlen=200)
-        self.log_label  = Label(text="", valign="top", halign="left",
-                                size_hint_y=None)
-        self.log_label.bind(texture_size=lambda l,v: setattr(l, "height", v[1]))
+        # ── (로그 패널) -------------------------------------------------
+        self.log_label = Label(text="",
+                               valign="top", halign="left",
+                               font_size="12sp",          # ← 살짝 작게
+                               size_hint_y=None)
+        # 폭이 바뀔 때 마다 text_size 갱신 → 자동 줄바꿈
+        def _wrap(label, *_):
+            label.text_size = (label.width, None)
+            label.texture_update()
+            label.height = label.texture_size[1]
+        
+        self.log_label.bind(width=_wrap)
+        _wrap(self.log_label)            # 최초 1회
    
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
