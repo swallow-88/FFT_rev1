@@ -74,6 +74,7 @@ from kivy.uix.scrollview import ScrollView
 # build() 내부 ― root 만들자마자
 from kivy.core.window import Window
 from kivy.animation import Animation
+from functools import partial
 
 #from utils_fft import robust_fs, next_pow2
 
@@ -734,27 +735,18 @@ class FFTApp(App):
     def build(self):
         ROW_H = dp(34)
         GAP = dp(4)
-        self.TOAST_H = dp(36)
         
-        # ── Safe-Area (상단 알림바) 적용 ───────────────────────
-        TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
-                   if hasattr(Window, "insets") else dp(24)
-        
-        root = BoxLayout(orientation="vertical",
-                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
-                         spacing=dp(6))
-        
-        # ── 상태 라벨 : 높이 자동 조정 ────────────────────────
-        self.label = Label(text="", halign="left", valign="middle",
-                           size_hint_y=None)        # ← height 지정 X
-        def _fit(lbl,*_):
-            lbl.text_size = (lbl.width, None)
-            lbl.texture_update()
-            lbl.height = lbl.texture_size[1] + dp(6)   # 상하 3dp 패딩
-        self.label.bind(size=_fit)
-        root.add_widget(self.label)
-        _fit(self.label)
-   
+    
+        # 토스트는 버튼 높이와 동일하게
+        self.toast_btn = Button(text='',              # 처음엔 비어 있음
+                                size_hint_y=None,
+                                height=ROW_H,
+                                disabled=True,        # 눌러도 아무 일 없음
+                                background_normal='', # 투명 배경
+                                background_color=(0,0,0,0))  # or 원하는 색
+        root.add_widget(self.toast_btn)   # ★ 상태라벨 바로 다음 줄에 추가
+    
+
         # ── ② 버튼·스피너 패널 : 상태바 바로 아래 ───────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
        
@@ -763,10 +755,6 @@ class FFTApp(App):
         #root.add_widget(ctrl)
 
 
-
-
-        
-   
         # 3-a) 2×4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
         btn_grid.bind(minimum_height=lambda g,*_: setattr(g,'height',g.minimum_height))
@@ -852,15 +840,19 @@ class FFTApp(App):
         return root
 
 
-
-
     def show_toast(self, msg, dur=2.5):
-        self.toast_lbl.text = msg
-        self.toast_box.opacity = 1
-        # 페이드아웃
-        Animation(opacity=0, d=0.5, t='out_quad').start(self.toast_box)
-        # d=dur 후 실행
-        Clock.schedule_once(lambda *_: setattr(self.toast_lbl, 'text', ""), dur)
+        # 텍스트 넣고 투명 → 불투명 애니메이션
+        self.toast_btn.text = msg
+        self.toast_btn.opacity = 0
+        Animation(opacity=1, d=0.15).start(self.toast_btn)
+
+        # dur 초 뒤에 사라지기
+        def _fade_out(*_):
+            Animation(opacity=0, d=0.4).start(self.toast_btn)
+            # 애니메이션 끝나고 나서 텍스트 지움
+            Clock.schedule_once(lambda *_: setattr(self.toast_btn, 'text', ''), 0.4)
+    
+        Clock.schedule_once(_fade_out, dur)
         
     # ───────────────────────────── 상태바 갱신
     def _refresh_status(self):
