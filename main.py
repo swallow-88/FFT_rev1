@@ -733,31 +733,31 @@ class FFTApp(App):
     # ───────────────────────────── UI   
     def build(self):
         ROW_H = dp(34)
-        GAP   = dp(4)
-   
-        # ── Safe-Area 계산 (Android 13+ / 기타) ─────────────────────────
-        TOP_SAFE = (dp(Window.insets.top / Window.dpi * 160)
-                    if hasattr(Window, "insets") else dp(24))
-   
+        
+        # ── Safe-Area (상단 알림바) 적용 ───────────────────────
+        TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
+                   if hasattr(Window, "insets") else dp(24)
+        
         root = BoxLayout(orientation="vertical",
                          padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
                          spacing=dp(6))
-       
-
-        # ── ① 상태바 : 앱 최상단에 고정 ─────────────────────────────────
-        self.label = Label(text="READY",
-                           size_hint_y=None, height=ROW_H,
-                           halign="left", valign="middle")
-        self.label.bind(size=lambda l,*_: setattr(l, "text_size", l.size))
-        root.add_widget(self.label)          # ★ 꼭 첫 번째 child!
-       
-
+        
+        # ── 상태 라벨 : 높이 자동 조정 ────────────────────────
+        self.label = Label(text="", halign="left", valign="middle",
+                           size_hint_y=None)        # ← height 지정 X
+        def _fit(lbl,*_):
+            lbl.text_size = (lbl.width, None)
+            lbl.texture_update()
+            lbl.height = lbl.texture_size[1] + dp(6)   # 상하 3dp 패딩
+        self.label.bind(size=_fit)
+        root.add_widget(self.label)
    
         # ── ② 버튼·스피너 패널 : 상태바 바로 아래 ───────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
        
         # ★ 추가 : 라벨-버튼 사이 여백 6dp
-        root.add_widget(Widget(size_hint_y=None, height=dp(50)))
+        #root.add_widget(Widget(size_hint_y=None, height=dp(50)))
+        root.add_widget(ctrl)
 
    
         # 3-a) 2×4 버튼 그리드
@@ -857,6 +857,7 @@ class FFTApp(App):
         self.log_label.text = "\n".join(self.log_buffer)
         self.log_label.texture_update()
         self.log_label.height = self.log_label.texture_size[1] + dp(12)
+        
    
         # 상태바에도 동일 메시지
         
