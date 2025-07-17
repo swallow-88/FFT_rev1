@@ -73,7 +73,7 @@ from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 # build() 내부 ― root 만들자마자
 from kivy.core.window import Window
-
+from kivy.animation import Animation
 
 #from utils_fft import robust_fs, next_pow2
 
@@ -734,6 +734,7 @@ class FFTApp(App):
     def build(self):
         ROW_H = dp(34)
         GAP = dp(4)
+        TOAST_H = dp(36)
         
         # ── Safe-Area (상단 알림바) 적용 ───────────────────────
         TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
@@ -761,6 +762,10 @@ class FFTApp(App):
         #root.add_widget(Widget(size_hint_y=None, height=dp(50)))
         #root.add_widget(ctrl)
 
+
+
+
+        
    
         # 3-a) 2×4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
@@ -830,11 +835,33 @@ class FFTApp(App):
         for g in self.graphs:
             gbox.add_widget(g)
         root.add_widget(gbox)
+
+                # ── ⓵ Toast 전용 바(고정 높이) ─────────────────────────────
+        self.toast_box = BoxLayout(size_hint_y=None, height=self.TOAST_H,
+                                   padding=[dp(4), 0, dp(4), 0])
+        self.toast_lbl = Label(text="", valign="middle", halign="center")
+        self.toast_box.add_widget(self.toast_lbl)
+        root.add_widget(self.toast_box)
+
+        # root.padding[3] (=bottom) 을 Toast 높이만큼 확장하면
+        # 스크롤뷰가 마지막 줄까지 가려지지 않습니다.
+        root.padding[3] += self.TOAST_H
    
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
 
+
+
+
+    def show_toast(self, msg, dur=2.5):
+        self.toast_lbl.text = msg
+        self.toast_box.opacity = 1
+        # 페이드아웃
+        Animation(opacity=0, d=0.5, t='out_quad').start(self.toast_box)
+        # d=dur 후 실행
+        Clock.schedule_once(lambda *_: setattr(self.toast_lbl, 'text', ""), dur)
+        
     # ───────────────────────────── 상태바 갱신
     def _refresh_status(self):
         txt = f"[{self._status['files']}]  |  {self._status['action']}"
