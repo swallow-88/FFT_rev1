@@ -738,12 +738,15 @@ class FFTApp(App):
 
         # Safe area    # ── Safe-area
         if hasattr(Window, "insets") and Window.insets.top:
-            TOP_SAFE = Window.insets.top          # 이미 px
+            safe_dp = Window.insets.top * 160.0 / Window.dpi
+            top_pad = dp(safe_dp + 4)            # ← 약간 여유
         else:
-            TOP_SAFE = dp(24)
+            top_pad = dp(28)
     
-            # ① 루트 레이아웃 먼저
-        root = BoxLayout(orientation='vertical',padding=[dp(8), TOP_SAFE, dp(8), dp(6)], spacing=dp(6))
+        # ── root (들여쓰기 0)
+        root = BoxLayout(orientation='vertical',
+                         padding=[dp(8), top_pad, dp(8), dp(6)],
+                         spacing=dp(6))
 
         # ② 상태바
         self.label = Label(text='', halign='left', valign='middle',
@@ -847,16 +850,14 @@ class FFTApp(App):
 
 
     def show_toast(self, msg, dur=2.5):
-        # 텍스트 넣고 투명 → 불투명 애니메이션
-        self.toast_btn.text = msg
+        self.toast_btn.text    = msg
         self.toast_btn.opacity = 0
         Animation(opacity=1, d=0.15).start(self.toast_btn)
-
-        # dur 초 뒤에 사라지기
+    
         def _fade_out(*_):
-            Animation(opacity=0, d=0.4).start(self.toast_btn)
-            # 애니메이션 끝나고 나서 텍스트 지움
-            Clock.schedule_once(lambda *_: setattr(self.toast_btn, 'text', ''), 0.4)
+            anim = Animation(opacity=0, d=0.4)
+            anim.bind(on_complete=lambda *_: setattr(self.toast_btn, 'text', ''))
+            anim.start(self.toast_btn)
     
         Clock.schedule_once(_fade_out, dur)
         
