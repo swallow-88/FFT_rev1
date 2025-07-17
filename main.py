@@ -366,7 +366,7 @@ class GraphWidget(Widget):
     DIFF_CLR = (1,1,1)
 
     def __init__(self, **kw):
-        super().__init__(**kw)       
+        super().__init__(**kw)     
         self.datasets, self.diff = [],[]
         self.min_x = F_MIN
         self.max_x = 50.0
@@ -532,7 +532,7 @@ class GraphWidget(Widget):
             self.status_lbl.text = ""
 
         self._prev_ticks = (None, None)
-        
+       
         # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
         self._schedule_redraw()
        
@@ -601,7 +601,7 @@ class GraphWidget(Widget):
         # 이미 예약돼 있으면 그대로 두기
         if self._redraw_ev is None:
             self._redraw_ev = Clock.schedule_once(self._do_redraw, 0)
-    
+   
     def _do_redraw(self, *_):
         self._redraw_ev = None          # ← 다시 예약할 수 있도록 리셋
         self.redraw()
@@ -726,37 +726,44 @@ class FFTApp(App):
         self.REC_DURATION = REC_DURATION_DEF
         self.last_fn = self.F0 = None
         self._buf_lock = threading.Lock()
+        self._status = dict(files="-", action = "IDLE", result="")
+       
 
 
-    # ───────────────────────────── UI    
+    # ───────────────────────────── UI   
     def build(self):
-        ROW_H   = dp(34)     # 버튼·스피너 공통 높이
-        GAP     = dp(4)
-    
-        # ── ① root 한 번만 만든다 ───────────────────────────────
-        TOP_SAFE = dp(8) + Window.top          # 노치·알림바 만큼 확보
-        root = BoxLayout(
-            orientation="vertical",
-            padding=[dp(8), TOP_SAFE, dp(8), dp(6)],  # ← top padding 확보!
-            spacing=dp(6)
-        )
-    
-        # ── ② 상태바(Label) : 맨 위 고정 ───────────────────────
-        self.label = Label(text="",
-                           size_hint_y=None,
-                           height=ROW_H,
+        ROW_H = dp(34)
+        GAP   = dp(4)
+   
+        # ── Safe-Area 계산 (Android 13+ / 기타) ─────────────────────────
+        TOP_SAFE = (dp(Window.insets.top / Window.dpi * 160)
+                    if hasattr(Window, "insets") else dp(24))
+   
+        root = BoxLayout(orientation="vertical",
+                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
+                         spacing=dp(6))
+       
+
+        # ── ① 상태바 : 앱 최상단에 고정 ─────────────────────────────────
+        self.label = Label(text="READY",
+                           size_hint_y=None, height=ROW_H,
                            halign="left", valign="middle")
-        # 글자 길어져도 자동 줄바꿈
-        self.label.bind(size=lambda l,*_: setattr(l, 'text_size', l.size))
-        root.add_widget(self.label)
-    
-        # ── ③ 컨트롤 패널 (버튼 + 스피너) ─────────────────────
+        self.label.bind(size=lambda l,*_: setattr(l, "text_size", l.size))
+        root.add_widget(self.label)          # ★ 꼭 첫 번째 child!
+       
+
+   
+        # ── ② 버튼·스피너 패널 : 상태바 바로 아래 ───────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
-    
+       
+        # ★ 추가 : 라벨-버튼 사이 여백 6dp
+        root.add_widget(Widget(size_hint_y=None, height=dp(50)))
+
+   
         # 3-a) 2×4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
         btn_grid.bind(minimum_height=lambda g,*_: setattr(g,'height',g.minimum_height))
-    
+   
         mk = lambda t, cb, d=False: Button(
             text=t, on_press=cb, disabled=d,
             size_hint_y=None, height=ROW_H
@@ -769,12 +776,12 @@ class FFTApp(App):
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
         self.btn_setF0 = mk("Set F₀ (baseline)",  self._save_baseline)
         self.btn_param = mk("⚙︎ PARAM",           lambda *_: ParamPopup(self).open())
-    
+   
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
-    
+   
         # 3-b) 스피너 한 줄 (버튼 높이와 동일)
         spin_row = GridLayout(cols=2, spacing=GAP,
                               size_hint_y=None, height=ROW_H)
@@ -788,59 +795,78 @@ class FFTApp(App):
                                 values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-    
+   
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
-    
+   
         # 컨트롤 패널 최종 높이
         ctrl.height = btn_grid.height + GAP + ROW_H
         root.add_widget(ctrl)
-    
-        # ── ④ 로그 패널 (ScrollView) ─────────────────────────
+   
+       
+        # ── ③ 로그 뷰 : 버튼 아래 (스크롤뷰) ────────────────────────────
         self.log_buffer = deque(maxlen=200)
-        self.log_label  = Label(
-            text="", valign="top", halign="left",
-            font_size="12sp",
-            padding_y=dp(2),              # ★ 위아래 여유 → 첫 줄 안 잘림
-            size_hint_y=None
-        )
+        self.log_label  = Label(text="", valign="top", halign="left",
+                                font_size="12sp",
+                                padding_y=dp(6),            # ↑ 여유 ↑
+                                size_hint_y=None)
         def _wrap(l,*_):
             l.text_size = (l.width, None)
             l.texture_update()
-            l.height = l.texture_size[1] + dp(4)      # 패딩 고려
+            l.height = l.texture_size[1] + dp(12)   # ← +12 로 첫 줄 완전 노출
         self.log_label.bind(width=_wrap)
-        _wrap(self.log_label)
-    
+        _wrap(self.log_label)                       # 초기 높이 설정
+   
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
         root.add_widget(scroll)
-    
+   
         # ── ⑤ 그래프 3-way ──────────────────────────────────
         gbox = BoxLayout(orientation="vertical", spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
         for g in self.graphs:
             gbox.add_widget(g)
         root.add_widget(gbox)
-    
+   
         Clock.schedule_once(self._ask_perm, 0)
         return root
-           
+
+    # ───────────────────────────── 상태바 갱신
+    def _refresh_status(self):
+        txt = f"[{self._status['files']}]  |  {self._status['action']}"
+        if self._status['result']:
+            txt += f"  |  {self._status['result']}"
+        self.label.text = txt
+   
+        # 색상 : 결과(PLZ/GOOD)가 있으면 우선, 없으면 진행중 여부
+        if self._status['result'].startswith("PLZ"):
+            self.label.color = (1, 0, 0, 1)   # 빨강
+        elif self._status['result'].startswith("GOOD"):
+            self.label.color = (0, 1, 0, 1)   # 초록
+        else:                                 # 회색 계열
+            self.label.color = (.9, .9, .9, 1)
+
+
     # ───────────────────────────── 헬퍼
     def log(self, msg: str):
-        # 1) 로그 버퍼 갱신
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        ts   = datetime.datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}] {msg}"
         self.log_buffer.append(line)
         self.log_label.text = "\n".join(self.log_buffer)
+        self.log_label.texture_update()
+        self.log_label.height = self.log_label.texture_size[1] + dp(12)
    
-        # 2) 색깔만 하단 토스트 & 상태바에
+        # 상태바에도 동일 메시지
         self.label.text  = msg
         self.label.color = (1,0,0,1) if msg.startswith("PLZ") else \
                            (0,1,0,1) if msg.startswith("GOOD") else (1,1,1,1)
+   
+        # Android Toast
         if ANDROID and toast:
             try: toast.toast(msg)
             except Exception: pass
+
 
     def _set_rec_dur(self, sec):
         self.REC_DURATION = sec
@@ -914,6 +940,9 @@ class FFTApp(App):
     def toggle_realtime(self, *_):
         self.rt_on = not self.rt_on
         self.btn_rt.text = f"Realtime FFT ({'ON' if self.rt_on else 'OFF'})"
+        self._status['action'] = "REALTIME ON" if self.rt_on else "IDLE"
+        self._refresh_status()
+       
         if self.rt_on:
             try:
                 accelerometer.enable()
@@ -1075,6 +1104,8 @@ class FFTApp(App):
     def run_fft(self, *_):
         self.btn_run.disabled = True
         threading.Thread(target=self._fft_bg, daemon=True).start()
+        self._status['action'] = "FFT RUNNING..."
+        self._refresh_status()
 
 
 
@@ -1169,6 +1200,9 @@ class FFTApp(App):
    
                 # ★ 화면 하단 메시지 = 경고(or GOOD) + Top-3 정보
                 self.log(f"{alert_msg}   |   TOP Δ: {peak_txt}")
+                self._status['action'] = "FFT DONE"
+                self._status['result'] = alert_msg     # GOOD / PLZ CHECK
+                self._refresh_status()
    
             Clock.schedule_once(_update)
    
@@ -1291,12 +1325,14 @@ class FFTApp(App):
             if not real:
                 self.log("FAILED COPY"); return
             self.paths.append(real)
-        self.label.text = " · ".join(os.path.basename(p) for p in self.paths)
         self.btn_run.disabled = False
+        self._status['files']   = " · ".join(os.path.basename(p) for p in self.paths)
+        self._status['action']  = "FILES SELECTED"
+        self._status['result']  = ""             # 이전 결과 초기화
+        self._refresh_status()                    # ← 추가
 
 ###############################################################################
 # 9. Run
 ###############################################################################
 if __name__ == "__main__":
     FFTApp().run()
- 
