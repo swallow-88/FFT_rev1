@@ -774,8 +774,8 @@ class FFTApp(App):
         self.btn_mode  = mk(f"Mode: {MEAS_MODE}", self._toggle_mode)
         self.btn_rt    = mk("Realtime FFT (OFF)", self.toggle_realtime)
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
-        self.btn_setF0 = mk("Set F₀ (baseline)",  self._save_baseline)
-        self.btn_param = mk("⚙︎ PARAM",           lambda *_: ParamPopup(self).open())
+        self.btn_setF0 = mk("Set F0 (baseline)",  self._save_baseline)
+        self.btn_param = mk("PARAM",           lambda *_: ParamPopup(self).open())
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
@@ -830,6 +830,7 @@ class FFTApp(App):
         root.add_widget(gbox)
    
         Clock.schedule_once(self._ask_perm, 0)
+        self._refresh_status()
         return root
 
     # ───────────────────────────── 상태바 갱신
@@ -858,9 +859,10 @@ class FFTApp(App):
         self.log_label.height = self.log_label.texture_size[1] + dp(12)
    
         # 상태바에도 동일 메시지
-        self.label.text  = msg
-        self.label.color = (1,0,0,1) if msg.startswith("PLZ") else \
-                           (0,1,0,1) if msg.startswith("GOOD") else (1,1,1,1)
+        
+        #self.label.text  = msg
+        #self.label.color = (1,0,0,1) if msg.startswith("PLZ") else \
+        #                   (0,1,0,1) if msg.startswith("GOOD") else (1,1,1,1)
    
         # Android Toast
         if ANDROID and toast:
@@ -1186,7 +1188,7 @@ class FFTApp(App):
             peak_txt = "  •  ".join(f"{f:4.1f} Hz : {d:+.1f} dB" for f, d in top3)
    
             # ===== 3) 9.9 dB 이상이면 PLZ CHECK 배지 띄우기 ================
-            alert_msg = ("PLZ CHECK" if any(abs(d) > 10 for _, d in diff_line)
+            alert_msg = ("PLZ CHECK" if any(abs(d) > 9.9 for _, d in diff_line)
                          else "GOOD")
    
             # ===== 4) UI 스레드에 결과 갱신 =================================
