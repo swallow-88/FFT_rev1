@@ -736,14 +736,14 @@ class FFTApp(App):
         ROW_H, GAP = dp(34), dp(4)
         self.TOAST_H = ROW_H           # 토스트도 버튼 높이와 동일
 
-        # Safe area
-        TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
-                   if hasattr(Window, "insets") else dp(24)
-
-        # ① 루트 레이아웃 먼저
-        root = BoxLayout(orientation='vertical',
-                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
-                         spacing=dp(6))
+        # Safe area    # ── Safe-area
+        if hasattr(Window, "insets") and Window.insets.top:
+            TOP_SAFE = Window.insets.top          # 이미 px
+        else:
+            TOP_SAFE = dp(24)
+    
+            # ① 루트 레이아웃 먼저
+        root = BoxLayout(orientation='vertical',padding=[dp(8), TOP_SAFE, dp(8), dp(6)], spacing=dp(6))
 
         # ② 상태바
         self.label = Label(text='', halign='left', valign='middle',
