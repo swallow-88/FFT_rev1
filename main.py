@@ -733,6 +733,7 @@ class FFTApp(App):
     # ───────────────────────────── UI   
     def build(self):
         ROW_H = dp(34)
+        GAP = dp(4)
         
         # ── Safe-Area (상단 알림바) 적용 ───────────────────────
         TOP_SAFE = dp(Window.insets.top / Window.dpi * 160) \
@@ -751,6 +752,7 @@ class FFTApp(App):
             lbl.height = lbl.texture_size[1] + dp(6)   # 상하 3dp 패딩
         self.label.bind(size=_fit)
         root.add_widget(self.label)
+        _fit(self.label)
    
         # ── ② 버튼·스피너 패널 : 상태바 바로 아래 ───────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
@@ -925,8 +927,12 @@ class FFTApp(App):
         self.rec_on = True
         self.rec_start = time.time()
         self.btn_rec.disabled = True
-        self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
+        self._status['action'] = f"REC 0/{int(self.REC_DURATION)}s"   # ← ②
+        self._refresh_status()
+            
         Clock.schedule_once(self._stop_recording, self.REC_DURATION)
+            # self.label.text = f"Recording 0/{int(self.REC_DURATION)} s …"
+    
 
     def _stop_recording(self, *_):
         if not self.rec_on:
@@ -980,7 +986,10 @@ class FFTApp(App):
                 for a,v in zip("xyz",(ax,ay,az)):
                     csv.writer(self.rec_files[a]).writerow((rel,v))
                 if int(rel*2)%2==0:
-                    self.label.text=f"Recording {rel:4.1f}/{int(self.REC_DURATION)} s …"
+                    #self.label.text=f"Recording {rel:4.1f}/{int(self.REC_DURATION)} s …"
+                    self._status['action'] = f"REC {rel:4.1f}/{int(self.REC_DURATION)}s"  # ← ②
+                    self._refresh_status() 
+            
         except Exception as e:
             Logger.warning(f"acc read fail: {e}")
 
