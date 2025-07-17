@@ -730,59 +730,60 @@ class FFTApp(App):
 
     # ───────────────────────────── UI    
     def build(self):
+        ROW_H   = dp(34)     # 버튼·스피너 공통 높이
+        GAP     = dp(4)
     
-        # ── 공통 치수 --------------------------------------------------
-        ROW_H  = dp(34)                 # 버튼·스피너 공통 높이
-        GAP    = dp(4)                  # 컨트롤 내부 간격
-        TOP_SAFE = dp(8) + Window.top   # 상단 safe-area
+        # ── ① root 한 번만 만든다 ───────────────────────────────
+        TOP_SAFE = dp(8) + Window.top          # 노치·알림바 만큼 확보
+        root = BoxLayout(
+            orientation="vertical",
+            padding=[dp(8), TOP_SAFE, dp(8), dp(6)],  # ← top padding 확보!
+            spacing=dp(6)
+        )
     
-        # ── 루트 컨테이너 (한 번만!) -----------------------------------
-        root = BoxLayout(orientation="vertical",
-                         padding=[dp(8), TOP_SAFE, dp(8), dp(6)],
-                         spacing=dp(6))
-    
-        # ── 0) 상태 바 -------------------------------------------------
+        # ── ② 상태바(Label) : 맨 위 고정 ───────────────────────
         self.label = Label(text="",
-                           size_hint_y=None, height=ROW_H,
+                           size_hint_y=None,
+                           height=ROW_H,
                            halign="left", valign="middle")
+        # 글자 길어져도 자동 줄바꿈
+        self.label.bind(size=lambda l,*_: setattr(l, 'text_size', l.size))
         root.add_widget(self.label)
     
-        # ── 1) 컨트롤 패널 --------------------------------------------
+        # ── ③ 컨트롤 패널 (버튼 + 스피너) ─────────────────────
         ctrl = BoxLayout(orientation="vertical", spacing=GAP, size_hint_y=None)
     
-        # 1-a) 2 × 4 버튼 그리드
+        # 3-a) 2×4 버튼 그리드
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
-        btn_grid.bind(minimum_height=lambda g,*_:
-                      setattr(g, "height", g.minimum_height))
+        btn_grid.bind(minimum_height=lambda g,*_: setattr(g,'height',g.minimum_height))
     
-        mk = lambda t, cb, dis=False: Button(text=t, on_press=cb,
-                                             disabled=dis,
-                                             size_hint_y=None, height=ROW_H)
+        mk = lambda t, cb, d=False: Button(
+            text=t, on_press=cb, disabled=d,
+            size_hint_y=None, height=ROW_H
+        )
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
-        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s",
-                            self.start_recording, True)
+        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s", self.start_recording, True)
         self.btn_mode  = mk(f"Mode: {MEAS_MODE}", self._toggle_mode)
         self.btn_rt    = mk("Realtime FFT (OFF)", self.toggle_realtime)
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
         self.btn_setF0 = mk("Set F₀ (baseline)",  self._save_baseline)
-        self.btn_param = mk("⚙︎ PARAM",           lambda *_:
-                            ParamPopup(self).open())
+        self.btn_param = mk("⚙︎ PARAM",           lambda *_: ParamPopup(self).open())
     
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
     
-        # 1-b) 스피너 한 줄
+        # 3-b) 스피너 한 줄 (버튼 높이와 동일)
         spin_row = GridLayout(cols=2, spacing=GAP,
                               size_hint_y=None, height=ROW_H)
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=("10 s","30 s","60 s","120 s"),
                                 size_hint_y=None, height=ROW_H)
-        self.spin_dur.bind(text=lambda s,t:
-                           self._set_rec_dur(float(t.split()[0])))
-    
+        self.spin_dur.bind(
+            text=lambda s,t: self._set_rec_dur(float(t.split()[0]))
+        )
         self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]),
                                 values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
@@ -792,34 +793,36 @@ class FFTApp(App):
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
     
-        # 컨트롤 패널 높이 = 버튼그리드 + GAP + ROW_H
+        # 컨트롤 패널 최종 높이
         ctrl.height = btn_grid.height + GAP + ROW_H
         root.add_widget(ctrl)
     
-        # ── 2) 로그 패널 (줄바꿈 + 작은 글꼴) --------------------------
+        # ── ④ 로그 패널 (ScrollView) ─────────────────────────
         self.log_buffer = deque(maxlen=200)
-        self.log_label  = Label(text="", font_size="12sp",
-                                valign="top", halign="left",
-                                size_hint_y=None)
-        # 폭이 바뀔 때 마다 text_size 갱신 → 자동 줄바꿈
-        def _wrap(label, *_):
-            label.text_size = (label.width, None)
-            label.texture_update()
-            label.height = label.texture_size[1]
-        
+        self.log_label  = Label(
+            text="", valign="top", halign="left",
+            font_size="12sp",
+            padding_y=dp(2),              # ★ 위아래 여유 → 첫 줄 안 잘림
+            size_hint_y=None
+        )
+        def _wrap(l,*_):
+            l.text_size = (l.width, None)
+            l.texture_update()
+            l.height = l.texture_size[1] + dp(4)      # 패딩 고려
         self.log_label.bind(width=_wrap)
-        _wrap(self.log_label)            # 최초 1회
-   
+        _wrap(self.log_label)
+    
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
         root.add_widget(scroll)
-   
-        # ── 3) 그래프 3-way ────────────────────────────────────────────
+    
+        # ── ⑤ 그래프 3-way ──────────────────────────────────
         gbox = BoxLayout(orientation="vertical", spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
-        for g in self.graphs: gbox.add_widget(g)
+        for g in self.graphs:
+            gbox.add_widget(g)
         root.add_widget(gbox)
-   
+    
         Clock.schedule_once(self._ask_perm, 0)
         return root
            
