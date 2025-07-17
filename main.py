@@ -93,7 +93,7 @@ def robust_fs(t_arr, min_fs=10.0, n_keep=None):
     if len(t_arr) < 3:
         return None
     dt = np.diff(t_arr)
-    dt = dt[dt > MIN_AMP_RATIO]
+    dt = dt[dt > 1e-6]
     if not dt.size:
         return None
     fs = 1.0 / np.median(dt)
@@ -248,7 +248,7 @@ def uri_to_file(uri: str) -> Optional[str]:
 
 def acc_to_spec(freq, amp_a):
     if MEAS_MODE == "VEL":
-        f_nz = np.where(freq < MIN_AMP_RATIO, MIN_AMP_RATIO, freq)
+        f_nz = np.where(freq < 1e-6, 1e-6, freq)
         amp  = amp_a / (2 * np.pi * f_nz) * 1e3
         ref  = REF_MM_S
     else:
@@ -586,7 +586,7 @@ class GraphWidget(Widget):
             for i in range(0,len(pts)-2,2):
                 x1,y1,x2,y2 = pts[i:i+4]
                 seg = ((x2-x1)**2+(y2-y1)**2)**0.5
-                if seg < MIN_AMP_RATIO:
+                if seg < 1e-6:
                     continue
                 nx,ny,ofs,draw = (x2-x1)/seg,(y2-y1)/seg,0.,True
                 while ofs < seg:
