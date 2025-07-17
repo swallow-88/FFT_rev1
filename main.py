@@ -353,10 +353,16 @@ class ParamPopup(ModalView):
         root.add_widget(Label())   # 빈 셀
         root.add_widget(btn)
 
+
     def _apply_and_close(self, *_):
-        # 파라미터가 바뀌었으니 그래프 스케일 갱신
+        # ① 그래프 재계산 (원래 코드)
         for g in self.app.graphs:
             g.update_graph(g.datasets, g.diff, g.max_x)
+    
+        # ② ★ 모든 레거시 상수 동기화 -------------------------
+        for k in ("HPF_CUTOFF", "BAND_HZ", "MAX_FMAX", "SMOOTH_N"):
+            globals()[k] = CFG[k]          # <─ 핵심 한 줄!
+    
         self.dismiss()
 
 ###############################################################################
