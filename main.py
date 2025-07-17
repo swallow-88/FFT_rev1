@@ -759,7 +759,7 @@ class FFTApp(App):
        
         # ★ 추가 : 라벨-버튼 사이 여백 6dp
         #root.add_widget(Widget(size_hint_y=None, height=dp(50)))
-        root.add_widget(ctrl)
+        #root.add_widget(ctrl)
 
    
         # 3-a) 2×4 버튼 그리드
