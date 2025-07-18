@@ -1512,7 +1512,7 @@ class FFTApp(App):
            
            
             f_ax_crop = f_ax_all[:n_f]
-            t_ax_crop = t_ax_all[:n_f]
+            t_ax_crop = t_ax_all[:n_t]
            
             tex_arrays = (db1, db2, diff_db)
    
