@@ -1,4 +1,4 @@
- 
+
 ###############################################################################
 # 0. Config ― 반드시 Kivy import *이전*에!
 ###############################################################################
@@ -24,6 +24,19 @@ try:
 except ImportError:
     ss = None
     USE_MULTITAPER = False           # SciPy 없으면 Welch 로만
+   
+   
+# === NEW [top] --------------------------------------------------------------
+try:
+    import pyfftw
+    _rfft  = pyfftw.interfaces.numpy_fft.rfft
+    _irfft = pyfftw.interfaces.numpy_fft.irfft
+    pyfftw.interfaces.cache.enable()
+except ImportError:          # 데스크톱/안드에서 pyFFTW 없으면 numpy FFT
+    from numpy.fft import rfft as _rfft, irfft as _irfft
+# ---------------------------------------------------------------------------
+   
+   
 
 ###############################################################################
 # 2. faulthandler – 디바이스·퍼미션 관계없이 안전하게
@@ -51,7 +64,6 @@ def _open_log(mode="a", buffering=1):
         return open(p, mode, buffering=buffering, encoding="utf-8")
     except (FileNotFoundError, PermissionError):
         # 최후의 fallback → 메모리 버퍼(로그는 화면에만 남음)
-        import io
         return io.StringIO()
    
 ###############################################################################
@@ -68,7 +80,7 @@ from kivy.uix.widget import Widget
 from kivy.uix.spinner import Spinner
 from kivy.uix.modalview import ModalView
 from kivy.uix.popup import Popup
-from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle
+from kivy.graphics import Line, Color, PushMatrix, PopMatrix, Translate, Rotate, RoundedRectangle, Rectangle
 from plyer import filechooser, accelerometer
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
@@ -76,8 +88,70 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 from kivy.animation import Animation
 from functools import partial
+from kivy.properties import StringProperty
 
 #from utils_fft import robust_fs, next_pow2
+
+from kivy.graphics.texture import Texture
+
+
+def make_turbo_lut(n=256):
+    c = np.asarray([  # 5차식 계수 (각각 R,G,B)
+        [ 0.13572138,  4.61539260, -42.66032258, 132.13108234, -152.94239396, 59.28637943],
+        [ 0.09140261,  2.19418839,   4.84296658, -14.18503333,    4.27729857,  2.82956604],
+        [ 0.10667330,  3.29983755, -20.05558518,  47.45825585,  -47.17130942,  17.97445186]
+    ])
+    x = np.linspace(0, 1, n)[:, None]           # shape (n,1)
+    x_pow = x ** np.arange(1, 6)                # x, x², …, x⁵
+    lut = (c[:,0] + (x_pow @ c[:,1:].T)).clip(0, 1)
+    return (lut * 255).astype(np.uint8)         # (n,3) uint8
+TURBO = make_turbo_lut()
+
+
+
+def diverging_lut(n=256):
+    x  = np.linspace(-1, 1, n)          # -1 → 1
+    r  = (x > 0) * x
+    b  = (x < 0) * (-x)
+    g  = 1 - r - b
+    lut = np.stack([r, g, b], 1)
+    return (lut * 255).astype(np.uint8)
+BWR = diverging_lut()
+
+
+
+
+# utils section ──────
+
+# (heatmap_to_texture 안)
+def heatmap_to_texture(mat_db: np.ndarray,
+                       vmin=None, vmax=None,
+                       lut:TURBO=TURBO,
+                       nearest=False) -> Texture:
+    """
+    dB 행렬 → RGBA Texture (lut 로 컬러 적용)
+      • lut.shape == (256,3)  uint8
+      • vmin/vmax 미지정 시, 입력의 최소·최대 사용
+    """
+    mat = np.nan_to_num(mat_db)
+
+    vmin = mat.min() if vmin is None else vmin
+    vmax = mat.max() if vmax is None else vmax
+    vmax = max(vmax, vmin + 1e-9)                # 0-division 방지
+
+    idx  = np.clip(((mat - vmin) / (vmax - vmin) * 255), 0, 255).astype(np.uint8)
+    rgba = np.empty(idx.shape + (4,), np.uint8)
+    rgba[..., :3] = lut[idx]                     # LUT 인덱스
+    rgba[...,  3] = 255                          # alpha=opaque
+
+    tex = Texture.create(size=rgba.shape[1::-1], colorfmt='rgba')
+    tex.blit_buffer(rgba[::-1].tobytes(), colorfmt='rgba', bufferfmt='ubyte')
+    tex.wrap = 'clamp_to_edge'
+    mode = 'nearest' if nearest else 'linear'
+    tex.min_filter = tex.mag_filter = mode
+    return tex
+
+
 
 
 
@@ -327,6 +401,36 @@ def welch_band_stats(sig, fs, f_lo=HPF_CUTOFF, f_hi=MAX_FMAX,
     return band_rms, band_pk
 
 
+
+# === NEW [§6 common funcs] --------------------------------------------------
+def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
+    """STFT → |spec|^2 [dB], f[Hz], t[s]  (pure-NumPy/pyFFTW)"""
+    if len(sig) < win:
+        win = len(sig)
+        hop = max(1, win//4)
+       
+    w = window(win).astype(np.float32)
+    nfrm = 1 + (len(sig) - win)//hop
+    spec = np.empty((win//2+1, nfrm), np.float32)
+    for i in range(nfrm):
+        seg = sig[i*hop:i*hop+win] * w
+        spec[:, i] = np.square(np.abs(_rfft(seg)))
+    spec = 10*np.log10(spec + 1e-12)
+    f = np.fft.rfftfreq(win, 1/fs)
+    t = (np.arange(nfrm)*hop)/fs
+    return spec, f, t
+
+
+
+def env_rms_np(sig, fs, band=(80, 120), win=1024, hop=512):
+    """scipy 없이: IIR 대역통과(예: biquad 설계) → Hilbert → RMS"""
+    # 매우 간단 FIR 예 (창법) — 길어지므로 필요 시 구현해 두세요
+    pass
+# ---------------------------------------------------------------------------
+
+
+
+
 from kivy.uix.modalview import ModalView
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.slider import Slider
@@ -448,6 +552,24 @@ class GraphWidget(Widget):
 
         # 크기 바뀔 때마다 배지·축제목 위치 갱신
         self.bind(size=self._reposition_titles, pos=self._reposition_titles)
+       
+       
+        self._use_tex = False
+        self._tex = None
+        self.x_unit = "Hz"
+       
+       
+     # ── Heat-map 전용 ----------
+    def set_texture(self, tex):
+        """STFT 모드: 외부에서 Texture 주입"""
+        self._tex = tex          # ← 새 속성
+        self._use_tex = tex is not None
+       
+        self.datasets = []
+        self.diff = []
+        self.canvas.clear()
+       
+        self._schedule_redraw()
 
 
 
@@ -522,7 +644,7 @@ class GraphWidget(Widget):
                 continue
             rel = (f - self.min_x)/(self.max_x-self.min_x)
             x   = self.PAD_X + rel*(self.width-2*self.PAD_X) - 18
-            self._add_axis_label(f"{f} Hz", (x, self.PAD_Y-28))
+            self._add_axis_label(f"{f:g} {self.x_unit}", (x, self.PAD_Y-28))
 
         # ③ Y-축
         for v in self.Y_TICKS:
@@ -536,14 +658,15 @@ class GraphWidget(Widget):
     # (기존)  ─ Python 3.10+ 전용 --------------------
     from typing import Optional          # 파일 상단에 한 번만!
    
-    def update_graph(self, ds, df, xm, status: Optional[str] = None):
+    def update_graph(self, ds, df, xm, status: Optional[str] = None, mode = "FFT"):
    
-    #def update_graph(self, ds, df, xm, status: str | None = None):
         # ── 3-튜플(rms, pk, axis) 만 저장
+        self.clear_texture()
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
         self.max_x    = min(float(xm), 50.0)
-        self.status_text = status
+        self.x_unit = "Hz" if mode == "FFT" else "s"
+ 
         #self._schedule_redraw()
    
    
@@ -575,6 +698,10 @@ class GraphWidget(Widget):
             self.status_lbl.text = ""
 
         self._prev_ticks = (None, None)
+       
+        self.X_TICKS = [x for x in (5,10,20,30,40,50) if x <= self.max_x]
+       
+        self.status_text = status
        
         # -------- 모든 내부 상태 정리 끝 → 실제 그리기 ----------
         self._schedule_redraw()
@@ -655,7 +782,25 @@ class GraphWidget(Widget):
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
         self.canvas.clear()
-   
+       
+       
+        # Heat-map 모드
+        if self._use_tex and self._tex is not None:
+            with self.canvas:
+                PushMatrix()
+                Translate(self.x, self.y)
+                Color(1,1,1,1)
+                Rectangle(texture=self._tex,
+                          pos=(self.PAD_X, self.PAD_Y),
+                          size=(self.width - 2*self.PAD_X,
+                                self.height - 2*self.PAD_Y))
+                Color(.7,.7,.7,.6)
+                self._grid()
+
+                PopMatrix()
+
+       
+ 
         # ------------------------------- 변경 블록 시작
         # 지금 라벨이 전혀 없으면 → 새로 만든다
         if self.width < 5 or self.height < 5:
@@ -755,7 +900,19 @@ class GraphWidget(Widget):
             if getattr(ch, "_badge", False) and ch.text != self.status_text:
                 self.remove_widget(ch)
 
-       
+
+
+    # === NEW [GraphWidget methods] ---------------------------------------------
+
+   
+   
+    def clear_texture(self):
+        self._use_tex = False
+        self._tex = None
+        self._schedule_redraw()
+    # ---------------------------------------------------------------------------
+
+
 ###############################################################################
 # 8. 메인 앱
 ###############################################################################
@@ -770,6 +927,7 @@ class FFTApp(App):
         self.last_fn = self.F0 = None
         self._buf_lock = threading.Lock()
         self._status = dict(files="-", action = "IDLE", result="")
+        self.view_mode = "FFT"
        
 
 
@@ -782,9 +940,9 @@ class FFTApp(App):
         # ── Safe-area
         if hasattr(Window, "insets") and Window.insets.top:
             safe_dp = Window.insets.top * 160.0 / Window.dpi
-            top_pad = dp(safe_dp + 4)            # ← 약간 여유
+            TOP_SAFE = dp(safe_dp + 4)            # ← 약간 여유
         else:
-            top_pad = dp(28)
+            TOP_SAFE = dp(28)
    
         # ── root (들여쓰기 0)
         root = BoxLayout(orientation='vertical',
@@ -833,9 +991,10 @@ class FFTApp(App):
         self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
         self.btn_setF0 = mk("Set F0 (baseline)",  self._save_baseline)
         self.btn_param = mk("PARAM",           lambda *_: ParamPopup(self).open())
+        self.btn_view = mk("VIEW: FFT", self._toggle_view)
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
-                  self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param):
+                  self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param, self.btn_view):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
    
@@ -890,6 +1049,15 @@ class FFTApp(App):
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
+   
+   
+    def _toggle_view(self, *_):
+        self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
+        self.btn_view.text = f"VIEW: {self.view_mode}"
+       
+        for g in self.graphs:
+            g.clear_texture()
+            #g.update_graph([], [], g.max_x)
 
 
     def show_toast(self, msg, dur=2.5):
@@ -1171,9 +1339,9 @@ class FFTApp(App):
                     def _update(_dt, sets=axis_sets, xm=xmax):
                         for ax, g in zip("xyz", self.graphs):
                             if ax in sets:
-                                g.update_graph([sets[ax]], [], xm, "")   # status 없음
+                                g.update_graph([sets[ax]], [], xm, mode = "FFT")   # status 없음
                             else:
-                                g.update_graph([], [], xm, "")           # 빈 그래프
+                                g.update_graph([], [], xm, mode = "FFT")           # 빈 그래프
                     Clock.schedule_once(_update)
    
         except Exception:
@@ -1181,11 +1349,16 @@ class FFTApp(App):
             self.rt_on = False
             Clock.schedule_once(
                 lambda *_: setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
+           
+           
     # ───────────────────────────── CSV FFT (백그라운드)
     def run_fft(self, *_):
         self.btn_run.disabled = True
-        threading.Thread(target=self._fft_bg, daemon=True).start()
-        self._status['action'] = "FFT RUNNING..."
+        if getattr(self, 'view_mode', 'FFT') == 'FFT':
+            threading.Thread(target=self._fft_bg, daemon=True).start()
+        else:
+            threading.Thread(target=self._stft_bg, daemon=True).start()
+        self._status['action'] = f"{self.view_mode} RUN..."
         self._refresh_status()
 
 
@@ -1275,9 +1448,9 @@ class FFTApp(App):
                 rms0, pk0 = data[0]
                 rms1, pk1 = data[1]
    
-                self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax)
-                self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax)
-                self.graphs[2].update_graph([], diff_line, xmax, alert_msg)
+                self.graphs[0].update_graph([(rms0, pk0, 'x')], [], xmax, mode = "FFT")
+                self.graphs[1].update_graph([(rms1, pk1, 'y')], [], xmax, mode = "FFT")
+                self.graphs[2].update_graph([], diff_line, xmax, alert_msg, mode = "FFT")
    
                 # ★ 화면 하단 메시지 = 경고(or GOOD) + Top-3 정보
                 self.log(f"{alert_msg}   |   TOP Δ: {peak_txt}")
@@ -1293,6 +1466,116 @@ class FFTApp(App):
         finally:
             Clock.schedule_once(lambda *_:
                 setattr(self.btn_run, "disabled", False))
+               
+               
+               
+    # ─────────────────────────────────────────────
+    #   CSV 2 개 → STFT 2 개 → 차 스펙트럼(Heat-map)
+    # ─────────────────────────────────────────────
+
+    def _stft_bg(self):
+        """
+        • 두 CSV → STFT(dB) → (파일-1, 파일-2, 차이) 3개 컬러 히트맵
+        • Texture 생성은 반드시 UI 스레드에서!
+        """
+        try:
+            # 0) 입력 체크 -------------------------------------------------------
+            if len(self.paths) < 2:
+                raise ValueError("SELECT 2 CSV FILE")
+   
+            stft_dbs = []                       # (F × T) dB 행렬 2개
+            f_axes_all = []
+            f_ax_all = t_ax_all = None
+            win  = 4096 if HIRES else 2048      # 해상도 선택
+            hop  = 256  if HIRES else 512
+   
+            # 1) CSV → STFT(dB) -------------------------------------------------
+            for pth in self.paths[:2]:
+                t, sig = self._load_csv(pth)
+                if t is None or sig is None:
+                    raise ValueError(f"{pth}: CSV PARSE FAIL (no numeric data)")
+           
+                fs = robust_fs(t)
+                if fs is None:
+                    raise ValueError(f"{pth}: UNSTABLE SAMPLING RATE")
+           
+                spec_db, f_ax, t_ax = stft_np(sig, fs, win=win, hop=hop)
+                f_sel = (f_ax >=HPF_CUTOFF) & (f_ax <= MAX_FMAX)
+                spec_db = spec_db[f_sel, :]
+                f_ax = f_ax[f_sel]
+               
+                stft_dbs.append(spec_db)
+                f_axes_all.append(f_ax)
+           
+                f_ax_all, t_ax_all = f_ax, t_ax     # 정상일 때만 축 보관
+   
+            # 2) 공통 크기로 크롭 ----------------------------------------------
+            n_f = min(s.shape[0] for s in stft_dbs)
+            n_t = min(s.shape[1] for s in stft_dbs)
+           
+            db1 = stft_dbs[0][:n_f, :n_t]
+            db2 = stft_dbs[1][:n_f, :n_t]
+           
+            diff_db = db1 - db2                                   # Δ dB
+           
+           
+            f_ax_crop = f_ax_all[:n_f]
+            t_ax_crop = t_ax_all[:n_f]
+           
+            tex_arrays = (db1, db2, diff_db)
+   
+            Logger.info(f"STFT shape 1: {db1.shape}, 2: {db2.shape}, diff: {diff_db.shape}")
+   
+            # 3) UI 스레드에서 Texture 생성 -------------------------------------
+            def _update(_dt, arrs=tex_arrays, f_axis=f_ax_crop, t_axis=t_ax_crop):
+                # (optional) LUT / vmin-vmax 컬러맵 적용
+                texs = [heatmap_to_texture(a, vmin=-100, vmax=0, lut=TURBO)
+                        for a in arrs[:2]]
+                texs.append(heatmap_to_texture(arrs[2], vmin=-20, vmax=20, lut=BWR))
+           
+                # 축 최대값
+                f_max = float(f_axis[-1])
+                t_max = float(t_axis[-1])
+               
+               
+                for g in self.graphs:
+                    g.update_graph([], [], g.max_x)  # 선·배지 지우기
+               
+                # 1) 텍스처 주입
+                texs = [heatmap_to_texture(a) for a in arrs]
+                for tex, g in zip(texs, self.graphs):
+                    g.set_texture(tex)
+           
+                   
+                    # ② 축 범위 / 눈금
+                    g.x_unit = "s"
+                    g.min_x   = 0.0
+                    g.max_x   = t_max
+                    g.X_TICKS = [round(x, 2) for x in np.linspace(0, t_max, 6)]
+           
+                    g.Y_MIN   = 0.0
+                    g.Y_MAX   = f_max
+                    g.Y_TICKS = [round(y) for y in np.linspace(0, f_max, 6)]
+           
+                    # ③ 축 라벨 텍스트
+                    g.lbl_x.text = "Time (s)"
+                    g.lbl_y.text = "Freq (Hz)"
+           
+                    # ④ “축 바뀜” 표시 ⇒ 재그리드/라벨
+                    g._prev_ticks = (None, None)
+                    g._schedule_redraw()
+
+
+            Clock.schedule_once(_update)
+   
+        except Exception as e:
+            self.log(f"STFT ERROR: {e}")
+   
+        finally:
+            # RUN 버튼 다시 활성화
+            Clock.schedule_once(lambda *_: setattr(self.btn_run, 'disabled', False))
+
+                   
                
 
     # ───────────────────────────── CSV 로드
