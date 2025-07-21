@@ -1508,7 +1508,7 @@ class FFTApp(App):
                 self.graphs[2].update_graph([], diff_line, xmax, alert_msg, mode = "FFT")
    
                 # ★ 화면 하단 메시지 = 경고(or GOOD) + Top-3 정보
-                self.log(f"{alert_msg}   |   TOP Δ: {peak_txt}")
+                self.log(f"[FFT] {alert_msg}   |   TOP Δ: {peak_txt}")
                 self._status['action'] = "FFT DONE"
                 self._status['result'] = alert_msg     # GOOD / PLZ CHECK
                 self._refresh_status()
@@ -1578,6 +1578,24 @@ class FFTApp(App):
 
             # _stft_bg 내부  ➟ diff_db 계산 직후(로그 찍는 곳)에 삽입
             TH_DIFF_DB = 15.0          # ★ 임계값: 15 dB
+            # ----------------- Δ-스펙트럼 통계 ----------------------------------
+            
+            abs_diff = np.abs(diff_db)                 # |Δ| dB 행렬
+            flat     = abs_diff.ravel()
+            
+            # -- 상위 2개 인덱스 얻기 (값 큰 순)
+            topk_idx = np.argpartition(flat, -2)[-2:]          # 일단 2개 뽑고
+            topk_idx = topk_idx[np.argsort(flat[topk_idx])[::-1]]  # 내림차순 정렬
+            
+            tops = []    # [(|Δ|, f, t), …] 2개
+            for idx in topk_idx:
+                f_i, t_i  = np.unravel_index(idx, abs_diff.shape)
+                tops.append((flat[idx], float(f_ax_crop[f_i]), float(t_ax_crop[t_i])))
+            
+            # 로그용 문자열  ─ 예) “18.2 dB@32 Hz/12.5 s • 16.1 dB@28 Hz/10.0 s”
+            tops_txt = "  •  ".join(f"{d:.1f} dB@{f:.0f} Hz/{t:.2f} s" for d,f,t in tops)
+
+            # --------------------------------------------------------------------
             
             abs_diff   = np.abs(diff_db)
             peak_dB    = float(abs_diff.max())                 # 최대 |Δ|
@@ -1585,11 +1603,10 @@ class FFTApp(App):
             peak_f     = float(f_ax_crop[f_idx])               # 주파수
             peak_t     = float(t_ax_crop[t_idx])               # 시간
             
-            status = "PLZ CHECK" if peak_dB >= TH_DIFF_DB else "GOOD"   # ← 판정
+                        
+            status = "PLZ CHECK" if tops[0][0] >= TH_DIFF_DB else "GOOD"
+            self.log(f"[STFT] {status}  |  TOP Δ: {tops_txt}")
             
-            # 예) “[STFT] NG : Δ 18.2 dB @ 32 Hz / 12.5 s”
-            self.log(f"[STFT] {status} : Δmax {peak_dB:4.1f} dB  @ "
-                     f"{peak_f:.0f} Hz / {peak_t:.2f} s")
 
     
     
