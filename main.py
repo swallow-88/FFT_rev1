@@ -418,7 +418,7 @@ def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
         spec[:, i] = np.square(np.abs(_rfft(seg)))
     spec = 10*np.log10(spec + 1e-12)
     f = np.fft.rfftfreq(win, 1/fs)
-    t = (np.arange(nfrm)*hop)/fs
+    t = (np.arange(nfrm)*hop + win/2)/fs
     return spec, f, t
 
 
