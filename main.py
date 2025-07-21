@@ -421,6 +421,39 @@ def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
     t = (np.arange(nfrm)*hop + win/2)/fs
     return spec, f, t
 
+# === STFT Δ 분석 util -------------------------------------------------
+def analyze_stft_diff(diff_db: np.ndarray,
+                      f_ax: np.ndarray,
+                      t_ax: np.ndarray,
+                      thr_db: float = 6.0):
+    """
+    diff_db : (F,T) dB 차이  (= db1 - db2)
+    f_ax    : 길이 F, 주파수축  [Hz]
+    t_ax    : 길이 T, 시간축    [s]
+    thr_db  : 이상 판단 임계값 (abs ΔdB)
+
+    return  zones  ─ [{ 't':(t0,t1), 'f':(f0,f1), 'peak':max_dB }, ...] 큰값 순
+            mask   ─ bool (F,T) 배열 (abs(diff_db)>thr)
+    """
+    score = np.abs(diff_db)
+    mask  = score > thr_db
+
+    from scipy.ndimage import label
+    lab, n = label(mask)
+    zones = []
+    for k in range(1, n+1):
+        ys, xs = np.where(lab == k)
+        if xs.size < 8:              # 너무 작은 잡음 blob 제거
+            continue
+        t0, t1 = t_ax[xs.min()], t_ax[xs.max()]
+        f0, f1 = f_ax[ys.min()], f_ax[ys.max()]
+        zones.append(dict(t=(t0, t1),
+                          f=(f0, f1),
+                          peak=score[ys, xs].max()))
+    zones.sort(key=lambda z: z['peak'], reverse=True)
+    return zones, mask
+
+
 
 
 def env_rms_np(sig, fs, band=(80, 120), win=1024, hop=512):
@@ -528,6 +561,9 @@ class GraphWidget(Widget):
        
         self.bind(size=self._schedule_redraw, pos = self._schedule_redraw)
 
+        self._overlay = []
+        
+
        # ───────────────────────────── 축 라벨
         # ── 축 제목(Label) ────────────────────────────────
         self.lbl_x = Label(text="Frequency (Hz)",
@@ -558,6 +594,13 @@ class GraphWidget(Widget):
         self._use_tex = False
         self._tex = None
         self.x_unit = "Hz"
+
+    def set_overlay(self, boxes):
+        """
+        boxes : [( (t0,t1), (f0,f1) ), ...]  ―  STFT 모드 전용
+        """
+        self._overlay = boxes
+        self._schedule_redraw()
        
        
      # ── Heat-map 전용 ----------
@@ -798,6 +841,19 @@ class GraphWidget(Widget):
                 Color(.7,.7,.7,.6)
                 self._grid()
 
+                # --- overlay zone ----------------------------
+                Color(1, 0, 0, .35)
+                for (t0, t1), (f0, f1) in self._overlay:
+                    # 축 → 화면 좌표 변환
+                    w = self.width  - 2*self.PAD_X
+                    h = self.height - 2*self.PAD_Y
+                    x0 = self.PAD_X + (t0-self.min_x)/(self.max_x-self.min_x)*w
+                    x1 = self.PAD_X + (t1-self.min_x)/(self.max_x-self.min_x)*w
+                    y0 = self.PAD_Y + (f0-self.Y_MIN)/(self.Y_MAX-self.Y_MIN)*h
+                    y1 = self.PAD_Y + (f1-self.Y_MIN)/(self.Y_MAX-self.Y_MIN)*h
+                    Line(rectangle=(x0, y0, x1-x0, y1-y0), width=1.5)
+
+                
                 PopMatrix()
 
        
@@ -911,6 +967,7 @@ class GraphWidget(Widget):
         self._use_tex = False
         self._tex = None
         self._schedule_redraw()
+        self.overlay = []
     # ---------------------------------------------------------------------------
 
 
@@ -927,7 +984,7 @@ class FFTApp(App):
         self.REC_DURATION = REC_DURATION_DEF
         self.last_fn = self.F0 = None
         self._buf_lock = threading.Lock()
-        self._status = dict(files="-", action = "IDLE", result="")
+        self._status = dict(files="-", action = "READY", result="")
         self.view_mode = "FFT"
    
    
@@ -936,7 +993,8 @@ class FFTApp(App):
         ROW_H, GAP = dp(34), dp(4)
    
         # 상태표시줄 높이(px) + 여유 4dp 만큼 BoxLayout 상단 패딩으로
-        top_pad = get_top_safe() + dp(4)
+        top_pad = get_top_safe()
+        EXTRA_DPY = dp(6)
         self.TOAST_H = ROW_H       # 토스트 한 줄 높이 = 버튼 높이
    
         # root = 수직 BoxLayout  (토스트 포함 모든 UI)
@@ -955,7 +1013,8 @@ class FFTApp(App):
    
         # ② 토스트용 더미 Button  (평소엔 투명·비활성)
         self.toast_lbl = Button(text='',
-                                size_hint_y=None, height=self.TOAST_H,
+                                size_hint=(1,None), height=self.TOAST_H,
+                                pos_hint={'x':0, 'top':1 - (top_pad +EXTRA_DPY)/Window.height},
                                 background_normal='',
                                 background_color=(0,0,0,0),
                                 disabled=True,
@@ -1049,6 +1108,10 @@ class FFTApp(App):
 
 
     def show_toast(self, msg, dur=2.5):
+        EXTRA_DPY = dp(6)
+        top_safe = get_top_safe()
+        self.toast_lbl.pos_hint = {'x':0, 'top':1 - (top_safe + EXTRA_DPY) / Window.height}
+        
         self.toast_lbl.text = msg
         self.toast_lbl.opacity = 0
    
@@ -1467,106 +1530,114 @@ class FFTApp(App):
 
     def _stft_bg(self):
         """
-        • 두 CSV → STFT(dB) → (파일-1, 파일-2, 차이) 3개 컬러 히트맵
-        • Texture 생성은 반드시 UI 스레드에서!
+        두 CSV → STFT(dB) → (파일-1, 파일-2, Δ) 컬러 히트맵 3매
+        Texture 생성은 반드시 UI 스레드에서!
         """
         try:
-            # 0) 입력 체크 -------------------------------------------------------
+            # ─── 0) 입력 확인 ───────────────────────────────────────────────
             if len(self.paths) < 2:
                 raise ValueError("SELECT 2 CSV FILE")
-   
-            stft_dbs = []                       # (F × T) dB 행렬 2개
-            f_axes_all = []
-            f_ax_all = t_ax_all = None
-            win  = 4096 if HIRES else 2048      # 해상도 선택
+    
+            win  = 4096 if HIRES else 2048
             hop  = 256  if HIRES else 512
-   
-            # 1) CSV → STFT(dB) -------------------------------------------------
+    
+            stft_dbs, f_axes, t_axes = [], [], []
+    
+            # ─── 1) CSV → STFT(dB) ─────────────────────────────────────────
             for pth in self.paths[:2]:
                 t, sig = self._load_csv(pth)
-                if t is None or sig is None:
-                    raise ValueError(f"{pth}: CSV PARSE FAIL (no numeric data)")
-           
+                if t is None:
+                    raise ValueError(f"{pth} : NO NUMERIC DATA")
+    
                 fs = robust_fs(t)
                 if fs is None:
-                    raise ValueError(f"{pth}: UNSTABLE SAMPLING RATE")
-           
-                spec_db, f_ax, t_ax = stft_np(sig, fs, win=win, hop=hop)
-                f_sel = (f_ax >=HPF_CUTOFF) & (f_ax <= MAX_FMAX)
-                spec_db = spec_db[f_sel, :]
-                f_ax = f_ax[f_sel]
-               
-                stft_dbs.append(spec_db)
-                f_axes_all.append(f_ax)
-           
-                f_ax_all, t_ax_all = f_ax, t_ax     # 정상일 때만 축 보관
-   
-            # 2) 공통 크기로 크롭 ----------------------------------------------
-            n_f = min(s.shape[0] for s in stft_dbs)
-            n_t = min(s.shape[1] for s in stft_dbs)
-           
-            db1 = stft_dbs[0][:n_f, :n_t]
-            db2 = stft_dbs[1][:n_f, :n_t]
-           
-            diff_db = db1 - db2                                   # Δ dB
-           
-           
-            f_ax_crop = f_ax_all[:n_f]
-            t_ax_crop = t_ax_all[:n_t]
-           
-            tex_arrays = (db1, db2, diff_db)
-   
-            Logger.info(f"STFT shape 1: {db1.shape}, 2: {db2.shape}, diff: {diff_db.shape}")
-   
-            # 3) UI 스레드에서 Texture 생성 -------------------------------------
-            def _update(_dt, arrs=tex_arrays, f_axis=f_ax_crop, t_axis=t_ax_crop):
-                # (optional) LUT / vmin-vmax 컬러맵 적용
-                texs = [heatmap_to_texture(a, vmin=-100, vmax=0, lut=TURBO)
-                        for a in arrs[:2]]
-                texs.append(heatmap_to_texture(arrs[2], vmin=-20, vmax=20, lut=BWR))
-           
-                # 축 최대값
+                    raise ValueError(f"{pth} : UNSTABLE SAMPLING RATE")
+    
+                spec, f_ax, t_ax = stft_np(sig, fs, win=win, hop=hop)
+    
+                sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
+                spec  = spec[sel_f, :]
+                f_ax  = f_ax[sel_f]
+    
+                stft_dbs.append(spec)
+                f_axes.append(f_ax)        # 파일별 개별 축도 저장
+                t_axes.append(t_ax)
+    
+            # ─── 2) 공통 영역으로 크롭 ───────────────────────────────────────
+            n_f = min(m.shape[0] for m in stft_dbs)     # freq-bins
+            n_t = min(m.shape[1] for m in stft_dbs)     # time-frames
+            if n_f == 0 or n_t == 0:
+                raise ValueError("STFT 해상도가 너무 낮습니다")
+    
+            db1, db2 = (m[:n_f, :n_t] for m in stft_dbs[:2])
+            diff_db  = db1 - db2
+    
+            f_ax_crop = f_axes[0][:n_f]     # 두 파일 모두 같은 길이
+            t_ax_crop = t_axes[0][:n_t]
+
+
+            # _stft_bg 내부  ➟ diff_db 계산 직후(로그 찍는 곳)에 삽입
+            TH_DIFF_DB = 15.0          # ★ 임계값: 15 dB
+            
+            abs_diff   = np.abs(diff_db)
+            peak_dB    = float(abs_diff.max())                 # 최대 |Δ|
+            f_idx, t_idx = np.unravel_index(abs_diff.argmax(), abs_diff.shape)
+            peak_f     = float(f_ax_crop[f_idx])               # 주파수
+            peak_t     = float(t_ax_crop[t_idx])               # 시간
+            
+            status = "PLZ CHECK" if peak_dB >= TH_DIFF_DB else "GOOD"   # ← 판정
+            
+            # 예) “[STFT] NG : Δ 18.2 dB @ 32 Hz / 12.5 s”
+            self.log(f"[STFT] {status} : Δmax {peak_dB:4.1f} dB  @ "
+                     f"{peak_f:.0f} Hz / {peak_t:.2f} s")
+
+    
+    
+            # ─── 3) UI 스레드에서 Texture 생성 ───────────────────────────────
+            def _update(_dt,
+                        arrs   =(db1, db2, diff_db),
+                        f_axis = list(f_ax_crop),
+                        t_axis = list(t_ax_crop)):
+    
+                texs = [
+                    heatmap_to_texture(arrs[0], vmin=-50, vmax=50,   lut=TURBO),
+                    heatmap_to_texture(arrs[1], vmin=-50, vmax=50,   lut=TURBO),
+                    heatmap_to_texture(arrs[2], vmin=-20,  vmax=20,  lut=TURBO)
+                ]
+    
                 f_max = float(f_axis[-1])
                 t_max = float(t_axis[-1])
-               
-               
-                for g in self.graphs:
-                    g.update_graph([], [], g.max_x)  # 선·배지 지우기
-               
-                # 1) 텍스처 주입
-                texs = [heatmap_to_texture(a) for a in arrs]
-                for tex, g in zip(texs, self.graphs):
+    
+                for g, tex in zip(self.graphs, texs):
+                    # ① 그래프 영역 초기화 & 히트맵 주입
+                    g.update_graph([], [], g.max_x)   # 선 지우기
                     g.set_texture(tex)
-           
-                   
-                    # ② 축 범위 / 눈금
-                    g.x_unit = "s"
+    
+                    # ② 축 스케일 & 라벨
+                    g.x_unit  = "s"
                     g.min_x   = 0.0
                     g.max_x   = t_max
                     g.X_TICKS = [round(x, 2) for x in np.linspace(0, t_max, 6)]
-           
+    
                     g.Y_MIN   = 0.0
                     g.Y_MAX   = f_max
                     g.Y_TICKS = [round(y) for y in np.linspace(0, f_max, 6)]
-           
-                    # ③ 축 라벨 텍스트
+    
                     g.lbl_x.text = "Time (s)"
                     g.lbl_y.text = "Freq (Hz)"
-           
-                    # ④ “축 바뀜” 표시 ⇒ 재그리드/라벨
+    
+                    # 새 축으로 다시 그리기
                     g._prev_ticks = (None, None)
                     g._schedule_redraw()
-
-
+    
             Clock.schedule_once(_update)
-   
+    
         except Exception as e:
             self.log(f"STFT ERROR: {e}")
-   
+    
         finally:
-            # RUN 버튼 다시 활성화
-            Clock.schedule_once(lambda *_: setattr(self.btn_run, 'disabled', False))
-
+            Clock.schedule_once(lambda *_:
+                setattr(self.btn_run, "disabled", False))
                    
                
 
