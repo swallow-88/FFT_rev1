@@ -991,119 +991,113 @@ class FFTApp(App):
    
     def build(self):
         ROW_H, GAP = dp(34), dp(4)
-   
-        # 상태표시줄 높이(px) + 여유 4dp 만큼 BoxLayout 상단 패딩으로
-        top_pad = get_top_safe()
-        EXTRA_DPY = dp(6)
-        self.TOAST_H = ROW_H       # 토스트 한 줄 높이 = 버튼 높이
-   
-        # root = 수직 BoxLayout  (토스트 포함 모든 UI)
-        root = BoxLayout(orientation='vertical',
-                         padding=[dp(8),    top_pad,     # left , top
-                                  dp(8),    dp(6)],      # right, bottom
-                         spacing=dp(6))
-   
-        # ① 상태바 라벨 -------------------------------------------------
-        self.label = Label(text='', halign='left', valign='middle',
-                           size_hint_y=None)
-        self.label.bind(size=lambda lbl,*_:
-                        setattr(lbl, 'height',
-                                lbl.texture_size[1] + dp(6)))
-        root.add_widget(self.label)
-   
-        # ② 토스트용 더미 Button  (평소엔 투명·비활성)
-        self.toast_lbl = Label(text='',size_hint_y=None, height=self.TOAST_H,
-                               color = (1,1,1,1),
-                               bold = True,
-                               opacity=0)
-        # ── 배경(반투명 검정) 그리기
-        with self.toast_lbl.canvas.before:
-            Color(0, 0, 0, .75)                          # RGBA
-            self._toast_rect = Rectangle()
-
     
-        
-        def _sync_bg(inst, *_):
+        TOP_SAFE   = get_top_safe()       # 기기마다 status-bar 높이
+        self.TOAST_H = ROW_H              # 토스트 한 줄 높이 = 버튼 높이
+    
+        # ── 전체 UI: 세로 BoxLayout ───────────────────────────────────────
+        root = BoxLayout(orientation='vertical',
+                         padding=[dp(8), dp(6), dp(8), dp(6)],  # L,B,R
+                         spacing=dp(6))
+        # 맨 윗 패딩에 TOP_SAFE 만큼 더 추가
+        root.padding[1] += TOP_SAFE
+    
+        # ① 상태 라벨 ------------------------------------------------------
+        self.label = Label(text='',
+                           halign='left', valign='middle',
+                           size_hint_y=None)
+        self.label.bind(texture_size=lambda l,*_:
+                        setattr(l, 'height', l.texture_size[1] + dp(6)))
+        root.add_widget(self.label)
+    
+        # ② 토스트 라벨 (컬럼 안의 “한 줄”) -------------------------------
+        self.toast_lbl = Label(text='',
+                               size_hint_y=None, height=self.TOAST_H,
+                               color=(1,1,1,1), bold=True,
+                               opacity=0)
+    
+        # 배경(반투명 검정) 붙이기
+        with self.toast_lbl.canvas.before:
+            Color(0,0,0,.75)
+            self._toast_rect = Rectangle()
+        def _sync_bg(inst,*_):
             self._toast_rect.pos  = inst.pos
             self._toast_rect.size = inst.size
         self.toast_lbl.bind(pos=_sync_bg, size=_sync_bg)
-        
-        root.add_widget(self.toast_lbl)  
-        # ④ 컨트롤 패널(버튼, 스피너) ─ 기존 코드 그
-        #root.add_widget(self.toast_lbl)
-       
-        #root.add_widget(Widget(size_hint_y=None, height=self.TOAST_H))
-   
-        # ③ 컨트롤 패널 ------------------------------------------------
+    
+        root.add_widget(self.toast_lbl)   # 상태라벨 아래, 버튼 위
+    
+        # ③ 컨트롤 패널 ---------------------------------------------------
         ctrl = BoxLayout(orientation='vertical', spacing=GAP, size_hint_y=None)
-   
-        # 3-a) 버튼 그리드
+    
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
-        btn_grid.bind(minimum_height=lambda g,*_: setattr(g,'height',g.minimum_height))
-   
-        mk = lambda t, cb, d=False: Button(text=t, on_press=cb, disabled=d,
+        btn_grid.bind(minimum_height=lambda g,*_:
+                      setattr(g,'height',g.minimum_height))
+    
+        mk = lambda t, cb, d=False: Button(text=t, on_press=cb,
+                                           disabled=d,
                                            size_hint_y=None, height=ROW_H)
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
-        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s", self.start_recording, True)
+        self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s",
+                            self.start_recording, True)
         self.btn_mode  = mk(f"Mode: {MEAS_MODE}", self._toggle_mode)
         self.btn_rt    = mk("Realtime FFT (OFF)", self.toggle_realtime)
-        self.btn_hires = mk("Hi-Res: OFF",         self._toggle_hires)
-        self.btn_setF0 = mk("Set F0 (baseline)",   self._save_baseline)
-        self.btn_param = mk("PARAM",               lambda *_: ParamPopup(self).open())
-        self.btn_view  = mk("VIEW: FFT",           self._toggle_view)
-   
+        self.btn_hires = mk("Hi-Res: OFF",        self._toggle_hires)
+        self.btn_setF0 = mk("Set F0 (baseline)",  self._save_baseline)
+        self.btn_param = mk("PARAM",
+                            lambda *_: ParamPopup(self).open())
+        self.btn_view  = mk("VIEW: FFT",   self._toggle_view)
+    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
-                  self.btn_rt,  self.btn_hires, self.btn_setF0, self.btn_param,
-                  self.btn_view):
+                  self.btn_rt, self.btn_hires, self.btn_setF0,
+                  self.btn_param, self.btn_view):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
-   
-        # 3-b) 스피너 두 개
+    
+        # 스피너 줄 --------------------------------------------------------
         spin_row = GridLayout(cols=2, spacing=GAP,
                               size_hint_y=None, height=ROW_H)
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
                                 values=("10 s","30 s","60 s","120 s"),
                                 size_hint_y=None, height=ROW_H)
-        self.spin_dur.bind(text=lambda s,t: self._set_rec_dur(float(t.split()[0])))
-   
+        self.spin_dur.bind(text=lambda s,t:
+                           self._set_rec_dur(float(t.split()[0])))
         self.spin_sm  = Spinner(text=str(CFG["SMOOTH_N"]),
                                 values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-   
+    
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
-   
-        # 컨트롤 패널 높이 계산 후 root에 삽입
+    
         ctrl.height = btn_grid.height + GAP + ROW_H
         root.add_widget(ctrl)
-   
-        # ④ 로그 뷰 ----------------------------------------------------
+    
+        # ④ 로그 뷰 -------------------------------------------------------
         self.log_buffer = deque(maxlen=200)
-        self.log_label = Label(text="", valign="top", halign="left",
-                               font_size="12sp",
-                               padding_y=dp(6),
-                               size_hint_y=None)
-        def _wrap(lbl,*_):
-            lbl.text_size = (lbl.width, None)
-            lbl.texture_update()
-            lbl.height = lbl.texture_size[1] + dp(12)
-        self.log_label.bind(width=_wrap); _wrap(self.log_label)
-   
+        self.log_label  = Label(text='', valign='top', halign='left',
+                                font_size='12sp', padding_y=dp(6),
+                                size_hint_y=None)
+        def _wrap(l,*_):
+            l.text_size = (l.width, None)
+            l.texture_update()
+            l.height    = l.texture_size[1] + dp(12)
+        self.log_label.bind(width=_wrap);  _wrap(self.log_label)
+    
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
         root.add_widget(scroll)
-   
-        # ⑤ 그래프 3-way ----------------------------------------------
-        gbox = BoxLayout(orientation="vertical", spacing=dp(4))
+    
+        # ⑤ 그래프 3-way ---------------------------------------------------
+        gbox = BoxLayout(orientation='vertical', spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
         for g in self.graphs:
             gbox.add_widget(g)
         root.add_widget(gbox)
-   
-        # 권한 확인 & 상태바 초기화
+    
+        # 권한 체크, 상태 초기화
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
