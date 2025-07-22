@@ -1012,16 +1012,21 @@ class FFTApp(App):
         root.add_widget(self.label)
    
         # ② 토스트용 더미 Button  (평소엔 투명·비활성)
-        self.toast_lbl = Button(text='',
-                                size_hint=(1,None), height=self.TOAST_H,
-                                pos_hint={'x':0, 'top':1 - (top_pad +EXTRA_DPY)/Window.height},
-                                background_normal='',
-                                background_color=(0,0,0,0),
-                                disabled=True,
-                                opacity=0)
-        root.add_widget(self.toast_lbl)
+        self.toast_lbl = Label(text='',size_hint_y=None, height=self.TOAST_H,
+                               color = (1,1,1,1),
+                               bold = True,
+                               opacity=0,
+                               canvas_before=[Color(0,0,0,.7), Rectangle(size=(1,1)])
+        
+          def _sync_bg(inst, *_):
+              inst.canvas_before.children[-1].size = inst.size
+          self.toast_lbl.bind(size=_sync_bg, pos=_sync_bg)
+          root.add_widget(self.toast_lbl)
+
+    # ④ 컨트롤 패널(버튼, 스피너) ─ 기존 코드 그
+        #root.add_widget(self.toast_lbl)
        
-        root.add_widget(Widget(size_hint_y=None, height=self.TOAST_H))
+        #root.add_widget(Widget(size_hint_y=None, height=self.TOAST_H))
    
         # ③ 컨트롤 패널 ------------------------------------------------
         ctrl = BoxLayout(orientation='vertical', spacing=GAP, size_hint_y=None)
@@ -1107,22 +1112,23 @@ class FFTApp(App):
             #g.update_graph([], [], g.max_x)
 
 
+    # ─────────────────────────────────────────────
+    #  show_toast  (토스트 라벨 행을 fade-in/out)
+    # ─────────────────────────────────────────────
     def show_toast(self, msg, dur=2.5):
-        EXTRA_DPY = dp(6)
-        top_safe = get_top_safe()
-        self.toast_lbl.pos_hint = {'x':0, 'top':1 - (top_safe + EXTRA_DPY) / Window.height}
-        
         self.toast_lbl.text = msg
-        self.toast_lbl.opacity = 0
-   
+        self.toast_lbl.opacity = 0          # 먼저 투명하게
+    
         anim_in  = Animation(opacity=1, d=0.15)
         anim_out = Animation(opacity=0, d=0.4, t='out_quad')
-   
+        
+
         def _fade(*_):
-            Clock.schedule_once(lambda *_: anim_out.start(self.toast_lbl), dur)
+            Clock.schedule_once(lambda *_:
+                anim_out.start(self.toast_lbl), dur)
         anim_in.bind(on_complete=_fade)
         anim_in.start(self.toast_lbl)
-
+       
 
    
 
