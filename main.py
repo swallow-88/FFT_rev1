@@ -992,7 +992,7 @@ class FFTApp(App):
     def build(self):
         ROW_H, GAP = dp(34), dp(4)
     
-        TOP_SAFE   = get_top_safe()       # 기기마다 status-bar 높이
+        TOP_SAFE   = get_top_safe() or dp(28) # 기기마다 status-bar 높이
         self.TOAST_H = ROW_H              # 토스트 한 줄 높이 = 버튼 높이
     
         # ── 전체 UI: 세로 BoxLayout ───────────────────────────────────────
@@ -1000,7 +1000,9 @@ class FFTApp(App):
                          padding=[dp(8), dp(6), dp(8), dp(6)],  # L,B,R
                          spacing=dp(6))
         # 맨 윗 패딩에 TOP_SAFE 만큼 더 추가
-        root.padding[1] += TOP_SAFE
+
+         # 0) 상태바 공간 확보용 빈 위젯  -----------------------------
+        root.add_widget(Widget(size_hint_y=None, height=TOP_SAFE))
     
         # ① 상태 라벨 ------------------------------------------------------
         self.label = Label(text='',
@@ -1011,21 +1013,7 @@ class FFTApp(App):
         root.add_widget(self.label)
     
         # ② 토스트 라벨 (컬럼 안의 “한 줄”) -------------------------------
-        self.toast_lbl = Label(text='',
-                               size_hint_y=None, height=self.TOAST_H,
-                               color=(1,1,1,1), bold=True,
-                               opacity=0)
-    
-        # 배경(반투명 검정) 붙이기
-        with self.toast_lbl.canvas.before:
-            Color(0,0,0,.75)
-            self._toast_rect = Rectangle()
-        def _sync_bg(inst,*_):
-            self._toast_rect.pos  = inst.pos
-            self._toast_rect.size = inst.size
-        self.toast_lbl.bind(pos=_sync_bg, size=_sync_bg)
-    
-        root.add_widget(self.toast_lbl)   # 상태라벨 아래, 버튼 위
+
     
         # ③ 컨트롤 패널 ---------------------------------------------------
         ctrl = BoxLayout(orientation='vertical', spacing=GAP, size_hint_y=None)
@@ -1116,18 +1104,8 @@ class FFTApp(App):
     #  show_toast  (토스트 라벨 행을 fade-in/out)
     # ─────────────────────────────────────────────
     def show_toast(self, msg, dur=2.5):
-        self.toast_lbl.text = msg
-        self.toast_lbl.opacity = 0          # 먼저 투명하게
-    
-        anim_in  = Animation(opacity=1, d=0.15)
-        anim_out = Animation(opacity=0, d=0.4, t='out_quad')
+        self.log(msg)
         
-
-        def _fade(*_):
-            Clock.schedule_once(lambda *_:
-                anim_out.start(self.toast_lbl), dur)
-        anim_in.bind(on_complete=_fade)
-        anim_in.start(self.toast_lbl)
        
 
    
