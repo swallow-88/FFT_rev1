@@ -1009,14 +1009,15 @@ class FFTApp(App):
         root.add_widget(col)
     
         # ── ① Status 라벨 (맨 위) ---------------------------------------
-        self.label = Label(text='',
+        
+        self.status_lbl = Label(text='',
                            halign='left', valign='middle',
                            size_hint_y=None)
         # 높이 자동 조정
-        self.label.bind(size=lambda lbl,*_:
+        self.status_lbl.bind(size=lambda lbl,*_:
                         setattr(lbl, 'height',
                                 lbl.texture_size[1] + dp(6)))
-        col.add_widget(self.label)           # ← 가장 먼저 add → 화면 최상단
+        col.add_widget(self.status_lbl)           # ← 가장 먼저 add → 화면 최상단
     
         # ── ② 컨트롤 패널 ------------------------------------------------
         ctrl = BoxLayout(orientation='vertical',
@@ -1122,15 +1123,15 @@ class FFTApp(App):
         txt = f"[{self._status['files']}]  |  {self._status['action']}"
         if self._status['result']:
             txt += f"  |  {self._status['result']}"
-        self.label.text = txt
+        self.status_lbl.text = txt
    
         # 색상 : 결과(PLZ/GOOD)가 있으면 우선, 없으면 진행중 여부
         if self._status['result'].startswith("PLZ"):
             self.label.color = (1, 0, 0, 1)   # 빨강
         elif self._status['result'].startswith("GOOD"):
-            self.label.color = (0, 1, 0, 1)   # 초록
+            self.status_lbl.color = (0, 1, 0, 1)   # 초록
         else:                                 # 회색 계열
-            self.label.color = (.9, .9, .9, 1)
+            self.status_lbl.color = (.9, .9, .9, 1)
 
 
     # ───────────────────────────── 헬퍼
