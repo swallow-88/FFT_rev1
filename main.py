@@ -992,46 +992,57 @@ class FFTApp(App):
     # =========================================
     #  FFTApp.build  ―  Status 라벨이 맨 위로!
     # =========================================
+     
     def build(self):
-        ROW_H, GAP = dp(34), dp(4)
-        TOP_SAFE   = get_top_safe() + dp(24)         # 기기 status-bar 높이
-        self.TOAST_H = ROW_H                 # (토스트 사용 안 함)
-    
+       
+        ROW_H, GAP = dp(30), dp(4)
+        TOP_SAFE   = get_top_safe() + dp(4)          # 기기 status-bar 높이
+        label_H = dp(40)
+   
         # ── 전체 Root : FloatLayout(겹치기 대비) ──────────────────────────
-        root = FloatLayout()
-    
+        #root = FloatLayout()
+   
         # ── 실제 UI 컬럼 --------------------------------------------------
-        col = BoxLayout(orientation='vertical',
-                        padding=[dp(8), TOP_SAFE + dp(6),  # ← top padding!
-                                 dp(8), dp(6)],
-                        spacing=dp(6),
-                        size_hint=(1, 1))
-        root.add_widget(col)
-    
+        root = BoxLayout(orientation="vertical",
+                         padding=[dp(8), dp(8), dp(8), dp(8)],
+                         spacing=GAP)
+       
+        root.add_widget(Widget(size_hint_y=None, height=TOP_SAFE))
+
+   
         # ── ① Status 라벨 (맨 위) ---------------------------------------
-        
+        ctrl = BoxLayout(orientation='vertical',
+                         spacing=GAP,
+                         size_hint_y=None)
+       
+       
+        status_label = GridLayout(cols=1, spacing=GAP, size_hint_y=None, height = label_H)
+       
+       
         self.status_lbl = Label(text='',
-                           halign='left', valign='middle',
+                           halign='left', valign='middle', color=(1,1,1,1),
                            size_hint_y=None)
         # 높이 자동 조정
         self.status_lbl.bind(size=lambda lbl,*_:
                         setattr(lbl, 'height',
                                 lbl.texture_size[1] + dp(6)))
-        col.add_widget(self.status_lbl)           # ← 가장 먼저 add → 화면 최상단
-    
+        status_label.add_widget(self.status_lbl)
+        ctrl.add_widget(status_label)           # ← 가장 먼저 add → 화면 최상단
+
+
+       
+   
         # ── ② 컨트롤 패널 ------------------------------------------------
-        ctrl = BoxLayout(orientation='vertical',
-                         spacing=GAP,
-                         size_hint_y=None)
-    
-        btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
+   
+        btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None, height = dp(130))
         btn_grid.bind(minimum_height=lambda g,*_:
                       setattr(g, 'height', g.minimum_height))
-    
+   
         mk = lambda t, cb, d=False: Button(
                 text=t, on_press=cb, disabled=d,
                 size_hint_y=None, height=ROW_H)
-    
+       
+   
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
         self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s",
@@ -1043,13 +1054,14 @@ class FFTApp(App):
         self.btn_param = mk("PARAM",
                             lambda *_: ParamPopup(self).open())
         self.btn_view  = mk("VIEW: FFT", self._toggle_view)
-    
+       
+   
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0,
                   self.btn_param, self.btn_view):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
-    
+   
         # ── 스피너 행 ----------------------------------------------------
         spin_row = GridLayout(cols=2, spacing=GAP,
                               size_hint_y=None, height=ROW_H)
@@ -1065,11 +1077,11 @@ class FFTApp(App):
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
-    
+   
         # 컨트롤 패널 높이 확정
-        ctrl.height = btn_grid.height + GAP + ROW_H
-        col.add_widget(ctrl)                 # Status 아래, 로그 위
-    
+        ctrl.height = btn_grid.height + GAP + ROW_H + label_H
+        root.add_widget(ctrl)                 # Status 아래, 로그 위
+   
         # ── ③ 로그 영역 --------------------------------------------------
         self.log_buffer = deque(maxlen=200)
         self.log_label  = Label(text='', valign='top', halign='left',
@@ -1083,20 +1095,20 @@ class FFTApp(App):
         self.log_label.bind(width=_wrap); _wrap(self.log_label)
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
-        col.add_widget(scroll)
-    
+        root.add_widget(scroll)
+   
         # ── ④ 그래프 3-way ----------------------------------------------
         gbox = BoxLayout(orientation='vertical', spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
         for g in self.graphs: gbox.add_widget(g)
-        col.add_widget(gbox)                 # 맨 아래
-    
+        root.add_widget(gbox)                 # 맨 아래
+   
         # ── 권한 확인 및 초기 상태 ---------------------------------------
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
-    
 
+   
    
     def _toggle_view(self, *_):
         self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
@@ -1112,8 +1124,7 @@ class FFTApp(App):
     # ─────────────────────────────────────────────
     def show_toast(self, msg, dur=2.5):
         self.log(msg)
-        
-       
+
 
    
 
@@ -1127,7 +1138,7 @@ class FFTApp(App):
    
         # 색상 : 결과(PLZ/GOOD)가 있으면 우선, 없으면 진행중 여부
         if self._status['result'].startswith("PLZ"):
-            self.label.color = (1, 0, 0, 1)   # 빨강
+            self.status_lbl.color = (1, 0, 0, 1)   # 빨강
         elif self._status['result'].startswith("GOOD"):
             self.status_lbl.color = (0, 1, 0, 1)   # 초록
         else:                                 # 회색 계열
@@ -1282,7 +1293,6 @@ class FFTApp(App):
         HIRES = not HIRES
         self.btn_hires.text = f"Hi-Res: {'ON' if HIRES else 'OFF'}"
         self.log(f"Hi-Res mode → {'ON' if HIRES else 'OFF'}")
-
    
     # ──────────────────────────────────────────────────────────────
     #  FFT 실시간 분석 루프 – 최종 수정본
