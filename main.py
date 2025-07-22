@@ -94,7 +94,7 @@ from kivy.uix.floatlayout import FloatLayout
 #from utils_fft import robust_fs, next_pow2
 
 from kivy.graphics.texture import Texture
-
+from kivy.graphics import Color, Rectangle
 
 def make_turbo_lut(n=256):
     c = np.asarray([  # 5차식 계수 (각각 R,G,B)
@@ -1015,8 +1015,13 @@ class FFTApp(App):
         self.toast_lbl = Label(text='',size_hint_y=None, height=self.TOAST_H,
                                color = (1,1,1,1),
                                bold = True,
-                               opacity=0,
-                               canvas_before=[Color(0,0,0,.7), Rectangle(size=(1,1))])
+                               opacity=0)
+        # ── 배경(반투명 검정) 그리기
+        with self.toast_lbl.canvas.before:
+            Color(0, 0, 0, .75)                          # RGBA
+            self._toast_rect = Rectangle()
+
+    
         
         def _sync_bg(inst, *_):
             inst.canvas_before.children[-1].size = inst.size
