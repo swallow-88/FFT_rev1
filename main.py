@@ -1016,12 +1016,12 @@ class FFTApp(App):
                                color = (1,1,1,1),
                                bold = True,
                                opacity=0,
-                               canvas_before=[Color(0,0,0,.7), Rectangle(size=(1,1)])
+                               canvas_before=[Color(0,0,0,.7), Rectangle(size=(1,1))])
         
-          def _sync_bg(inst, *_):
-              inst.canvas_before.children[-1].size = inst.size
-          self.toast_lbl.bind(size=_sync_bg, pos=_sync_bg)
-          root.add_widget(self.toast_lbl)
+        def _sync_bg(inst, *_):
+            inst.canvas_before.children[-1].size = inst.size
+        self.toast_lbl.bind(size=_sync_bg, pos=_sync_bg)
+        root.add_widget(self.toast_lbl)
 
     # ④ 컨트롤 패널(버튼, 스피너) ─ 기존 코드 그
         #root.add_widget(self.toast_lbl)
