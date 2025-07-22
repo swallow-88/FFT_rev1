@@ -1024,11 +1024,12 @@ class FFTApp(App):
     
         
         def _sync_bg(inst, *_):
-            inst.canvas_before.children[-1].size = inst.size
-        self.toast_lbl.bind(size=_sync_bg, pos=_sync_bg)
-        root.add_widget(self.toast_lbl)
-
-    # ④ 컨트롤 패널(버튼, 스피너) ─ 기존 코드 그
+            self._toast_rect.pos  = inst.pos
+            self._toast_rect.size = inst.size
+        self.toast_lbl.bind(pos=_sync_bg, size=_sync_bg)
+        
+        root.add_widget(self.toast_lbl)  
+        # ④ 컨트롤 패널(버튼, 스피너) ─ 기존 코드 그
         #root.add_widget(self.toast_lbl)
        
         #root.add_widget(Widget(size_hint_y=None, height=self.TOAST_H))
