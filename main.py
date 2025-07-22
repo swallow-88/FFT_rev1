@@ -988,43 +988,49 @@ class FFTApp(App):
         self.view_mode = "FFT"
    
    
-   
+       
+    # =========================================
+    #  FFTApp.build  ―  Status 라벨이 맨 위로!
+    # =========================================
     def build(self):
         ROW_H, GAP = dp(34), dp(4)
+        TOP_SAFE   = get_top_safe() + dp(24)         # 기기 status-bar 높이
+        self.TOAST_H = ROW_H                 # (토스트 사용 안 함)
     
-        TOP_SAFE   = get_top_safe() or dp(28) # 기기마다 status-bar 높이
-        self.TOAST_H = ROW_H              # 토스트 한 줄 높이 = 버튼 높이
+        # ── 전체 Root : FloatLayout(겹치기 대비) ──────────────────────────
+        root = FloatLayout()
     
-        # ── 전체 UI: 세로 BoxLayout ───────────────────────────────────────
-        root = BoxLayout(orientation='vertical',
-                         padding=[dp(8), dp(6), dp(8), dp(6)],  # L,B,R
-                         spacing=dp(6))
-        # 맨 윗 패딩에 TOP_SAFE 만큼 더 추가
-
-         # 0) 상태바 공간 확보용 빈 위젯  -----------------------------
-        root.add_widget(Widget(size_hint_y=None, height=TOP_SAFE))
+        # ── 실제 UI 컬럼 --------------------------------------------------
+        col = BoxLayout(orientation='vertical',
+                        padding=[dp(8), TOP_SAFE + dp(6),  # ← top padding!
+                                 dp(8), dp(6)],
+                        spacing=dp(6),
+                        size_hint=(1, 1))
+        root.add_widget(col)
     
-        # ① 상태 라벨 ------------------------------------------------------
+        # ── ① Status 라벨 (맨 위) ---------------------------------------
         self.label = Label(text='',
                            halign='left', valign='middle',
                            size_hint_y=None)
-        self.label.bind(texture_size=lambda l,*_:
-                        setattr(l, 'height', l.texture_size[1] + dp(6)))
-        root.add_widget(self.label)
+        # 높이 자동 조정
+        self.label.bind(size=lambda lbl,*_:
+                        setattr(lbl, 'height',
+                                lbl.texture_size[1] + dp(6)))
+        col.add_widget(self.label)           # ← 가장 먼저 add → 화면 최상단
     
-        # ② 토스트 라벨 (컬럼 안의 “한 줄”) -------------------------------
-
-    
-        # ③ 컨트롤 패널 ---------------------------------------------------
-        ctrl = BoxLayout(orientation='vertical', spacing=GAP, size_hint_y=None)
+        # ── ② 컨트롤 패널 ------------------------------------------------
+        ctrl = BoxLayout(orientation='vertical',
+                         spacing=GAP,
+                         size_hint_y=None)
     
         btn_grid = GridLayout(cols=2, spacing=GAP, size_hint_y=None)
         btn_grid.bind(minimum_height=lambda g,*_:
-                      setattr(g,'height',g.minimum_height))
+                      setattr(g, 'height', g.minimum_height))
     
-        mk = lambda t, cb, d=False: Button(text=t, on_press=cb,
-                                           disabled=d,
-                                           size_hint_y=None, height=ROW_H)
+        mk = lambda t, cb, d=False: Button(
+                text=t, on_press=cb, disabled=d,
+                size_hint_y=None, height=ROW_H)
+    
         self.btn_sel   = mk("Select CSV",  self.open_chooser, True)
         self.btn_run   = mk("FFT RUN",     self.run_fft,      True)
         self.btn_rec   = mk(f"Record {int(self.REC_DURATION)} s",
@@ -1035,15 +1041,15 @@ class FFTApp(App):
         self.btn_setF0 = mk("Set F0 (baseline)",  self._save_baseline)
         self.btn_param = mk("PARAM",
                             lambda *_: ParamPopup(self).open())
-        self.btn_view  = mk("VIEW: FFT",   self._toggle_view)
+        self.btn_view  = mk("VIEW: FFT", self._toggle_view)
     
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
-                  self.btn_rt, self.btn_hires, self.btn_setF0,
+                  self.btn_rt,  self.btn_hires, self.btn_setF0,
                   self.btn_param, self.btn_view):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
     
-        # 스피너 줄 --------------------------------------------------------
+        # ── 스피너 행 ----------------------------------------------------
         spin_row = GridLayout(cols=2, spacing=GAP,
                               size_hint_y=None, height=ROW_H)
         self.spin_dur = Spinner(text=f"{int(self.REC_DURATION)} s",
@@ -1055,41 +1061,41 @@ class FFTApp(App):
                                 values=("1","2","3","4","5"),
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
-    
         spin_row.add_widget(self.spin_dur)
         spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
     
+        # 컨트롤 패널 높이 확정
         ctrl.height = btn_grid.height + GAP + ROW_H
-        root.add_widget(ctrl)
+        col.add_widget(ctrl)                 # Status 아래, 로그 위
     
-        # ④ 로그 뷰 -------------------------------------------------------
+        # ── ③ 로그 영역 --------------------------------------------------
         self.log_buffer = deque(maxlen=200)
         self.log_label  = Label(text='', valign='top', halign='left',
-                                font_size='12sp', padding_y=dp(6),
+                                font_size='12sp',
+                                padding_y=dp(6),
                                 size_hint_y=None)
-        def _wrap(l,*_):
-            l.text_size = (l.width, None)
-            l.texture_update()
-            l.height    = l.texture_size[1] + dp(12)
-        self.log_label.bind(width=_wrap);  _wrap(self.log_label)
-    
+        def _wrap(lbl,*_):
+            lbl.text_size = (lbl.width, None)
+            lbl.texture_update()
+            lbl.height = lbl.texture_size[1] + dp(12)
+        self.log_label.bind(width=_wrap); _wrap(self.log_label)
         scroll = ScrollView(size_hint_y=.12)
         scroll.add_widget(self.log_label)
-        root.add_widget(scroll)
+        col.add_widget(scroll)
     
-        # ⑤ 그래프 3-way ---------------------------------------------------
+        # ── ④ 그래프 3-way ----------------------------------------------
         gbox = BoxLayout(orientation='vertical', spacing=dp(4))
         self.graphs = [GraphWidget(size_hint=(1, 1/3)) for _ in range(3)]
-        for g in self.graphs:
-            gbox.add_widget(g)
-        root.add_widget(gbox)
+        for g in self.graphs: gbox.add_widget(g)
+        col.add_widget(gbox)                 # 맨 아래
     
-        # 권한 체크, 상태 초기화
+        # ── 권한 확인 및 초기 상태 ---------------------------------------
         Clock.schedule_once(self._ask_perm, 0)
         self._refresh_status()
         return root
-   
+    
+
    
     def _toggle_view(self, *_):
         self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
