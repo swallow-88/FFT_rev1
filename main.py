@@ -422,7 +422,7 @@ def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
     for i in range(nfrm):
         seg = sig[i*hop:i*hop+win] * w
         spec[:, i] = np.square(np.abs(_rfft(seg)))
-    spec = 10*np.log10(spec + 1e-12)
+    spec = np.sqrt(spec)
     f = np.fft.rfftfreq(win, 1/fs)
     t = (np.arange(nfrm)*hop + win/2)/fs
     return spec, f, t
@@ -1585,13 +1585,26 @@ class FFTApp(App):
                 if fs is None:
                     raise ValueError(f"{pth} : UNSTABLE SAMPLING RATE")
     
-                spec, f_ax, t_ax = stft_np(sig, fs, win=win, hop=hop)
+                lin, f_ax, t_ax = stft_np(sig, fs, win=win, hop=hop)
     
                 sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
-                spec  = spec[sel_f, :]
+                lin  = lin[sel_f, :]
                 f_ax  = f_ax[sel_f]
+                f_mat = f_ax[:, None]
+
+
+                # --- ACC → VEL 변환 & 기준 ------------------------------------------------
+                if MEAS_MODE == "VEL":
+                    amp   = lin / (2*np.pi*np.where(f_mat < 1e-6, 1e-6, f_mat)) * 1e3  # mm/s
+                    ref   = REF_MM_S
+                else:                                    # ACC 모드
+                    amp   = lin                           # m/s²
+                    ref   = REF_ACC
     
-                stft_dbs.append(spec)
+                db = 20*np.log10( np.maximum(amp, ref*MIN_AMP_RATIO) / ref )
+                stft_dbs.append(db)           # ★ db 로 바뀜
+    
+                #stft_dbs.append(spec)
                 f_axes.append(f_ax)        # 파일별 개별 축도 저장
                 t_axes.append(t_ax)
     
@@ -1649,8 +1662,10 @@ class FFTApp(App):
                         t_axis = list(t_ax_crop)):
     
                 texs = [
-                    heatmap_to_texture(arrs[0], vmin=-50, vmax=50,   lut=TURBO),
-                    heatmap_to_texture(arrs[1], vmin=-50, vmax=50,   lut=TURBO),
+                    heatmap_to_texture(arrs[0],vmin=-60 if MEAS_MODE=="VEL" else -80,
+                                       vmax= 40 if MEAS_MODE=="VEL" else  20, lut=TURBO),
+                    heatmap_to_texture(arrs[1],vmin=-60 if MEAS_MODE=="VEL" else -80,
+                                       vmax= 40 if MEAS_MODE=="VEL" else  20, lut=TURBO),
                     heatmap_to_texture(arrs[2], vmin=-20,  vmax=20,  lut=TURBO)
                 ]
     
