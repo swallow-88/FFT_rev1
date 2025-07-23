@@ -272,7 +272,7 @@ MEAS_MODE          = "VEL"          # "VEL" 또는 "ACC"
 #MAX_FMAX           = 50
 REC_DURATION_DEF   = 60.0
 FN_BAND            = (5, 50)
-BUF_LEN, MIN_LEN   = 8192, 1024      # 실시간 버퍼
+BUF_LEN, MIN_LEN   = 12000, 1024      # 실시간 버퍼
 USE_SPLIT          = True            # 그래프 3-way 분할
 F_MIN = 5
 
@@ -286,6 +286,12 @@ HIRES = False          # 토글 버튼으로 바뀜
 HIRES_LEN_SEC = 8      # 실시간 FFT 길이 (기존 4 → 8 s)
 N_TAPER = 4            # 멀티테이퍼 개수
 USE_MULTITAPER = True  # False 면 Welch 다중 평균으로 대체
+
+# ── 사용자 조정 상수 근처
+RT_STFT_SEC   = 8        # 실시간 스펙트로그램 가로 길이(초)
+RT_STFT_HOP   = 256      # stft_np() hop (샘플)
+RT_STFT_WIN   = 4096     # stft_np() win (샘플)  – HIRES 때 2× 등으로 조정 가능
+RT_STFT_FMAX  = 50.0     # 실시간 표시 최대 주파수
 
 ###############################################################################
 # 5. 로깅/크래시 헬퍼
@@ -986,7 +992,7 @@ class FFTApp(App):
         self._buf_lock = threading.Lock()
         self._status = dict(files="-", action = "READY", result="")
         self.view_mode = "FFT"
-   
+        self.rt_view = "FFT"
    
        
     # =========================================
@@ -1054,11 +1060,14 @@ class FFTApp(App):
         self.btn_param = mk("PARAM",
                             lambda *_: ParamPopup(self).open())
         self.btn_view  = mk("VIEW: FFT", self._toggle_view)
+
+        # build() → 버튼 만들던 부분
+        self.btn_rt_view = mk("RT VIEW: FFT", self._toggle_rt_view)
        
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0,
-                  self.btn_param, self.btn_view):
+                  self.btn_param, self.btn_view, self.btn_rt_view):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
    
@@ -1117,6 +1126,16 @@ class FFTApp(App):
         for g in self.graphs:
             g.clear_texture()
             #g.update_graph([], [], g.max_x)
+
+
+
+    def _toggle_rt_view(self, *_):
+        self.rt_view = 'STFT' if self.rt_view == "FFT" else "FFT"
+        self.btn_rt_view.text = f"RT VIEW: {self.rt_view}"
+        # 그래프 지우기
+        for g in self.graphs:
+            g.clear_texture()
+            g.update_graph([], [], g.max_x)
 
 
     # ─────────────────────────────────────────────
@@ -1260,6 +1279,13 @@ class FFTApp(App):
                 accelerometer.disable()
             except Exception:
                 pass
+                
+
+
+
+
+
+
 
     def _poll_accel(self, dt):
         if not self.rt_on:
@@ -1298,6 +1324,11 @@ class FFTApp(App):
     #  FFT 실시간 분석 루프 – 최종 수정본
     # ──────────────────────────────────────────────────────────────
     def _rt_fft_loop(self):
+        if self.rt_view == "STFT":
+            self._rt_stft_once()     # ① STFT 모드 한 프레임만 그리고
+            return                   #    리턴 → 0.5 초 뒤 다시 호출
+    # ↓ 기존 FFT 코드 그대로
+
         """
         0.5 초마다 가속도 버퍼 스냅샷 → Welch-like 대역 RMS/Peak 계산 → 그래프 갱신
         Hi-Res 모드가 ON이면
@@ -1776,6 +1807,58 @@ class FFTApp(App):
         self._status['result']  = ""             # 이전 결과 초기화
         self._refresh_status()                    # ← 추가
 
+
+    def _rt_stft_once(self):
+        try:
+            with self._buf_lock:
+                snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
+    
+            # ── 버퍼 길이 확보 체크
+            need_len = RT_STFT_SEC * 50          # 최소 50 Hz*8 s = 400 샘플
+            if any(len(snap[ax]) < need_len for ax in "xyz"):
+                return
+    
+            for ax, gw in zip("xyz", self.graphs):
+                t_arr, val_arr, _ = zip(*snap[ax][-int(need_len):])
+                fs = robust_fs(t_arr)
+                if fs is None:
+                    continue
+    
+                sig = np.asarray(val_arr, float) - np.mean(val_arr)
+                spec, f_ax, t_ax = stft_np(sig, fs,
+                                           win   = RT_STFT_WIN,
+                                           hop   = RT_STFT_HOP)
+    
+                # 표시 구간 자르기
+                sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= RT_STFT_FMAX)
+                spec  = spec[sel_f, -160:]                  # 최신 160 frame 정도만
+                f_ax  = f_ax[sel_f]
+                t_ax  = t_ax[-spec.shape[1]:] - t_ax[-1]    # 0 = 현재, 음수 = 과거
+                t_ax  = -t_ax                               # 좌→우 과거→현재
+    
+                tex = heatmap_to_texture(spec,
+                                         vmin=-60, vmax=10,
+                                         lut=TURBO)
+    
+                # ---- 그래프 위젯에 주입 -------------------------------
+                gw.set_texture(tex)
+                gw.min_x   = 0.0
+                gw.max_x   = float(t_ax[-1])
+                gw.X_TICKS = [round(x,1) for x in
+                              np.linspace(0, gw.max_x, 6)]
+    
+                gw.Y_MIN   = 0.0
+                gw.Y_MAX   = float(f_ax[-1])
+                gw.Y_TICKS = [round(y) for y in
+                              np.linspace(0, gw.Y_MAX, 6)]
+    
+                gw.lbl_x.text = "Time (s)"
+                gw.lbl_y.text = "Freq (Hz)"
+                gw._prev_ticks = (None, None)
+                gw._schedule_redraw()
+    
+        except Exception:
+            Logger.exception("RT-STFT error")
 ###############################################################################
 # 9. Run
 ###############################################################################
