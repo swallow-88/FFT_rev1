@@ -714,7 +714,7 @@ class GraphWidget(Widget):
         self.clear_texture()
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
-        self.max_x    = min(float(xm))
+        self.max_x    = float(xm)
         self.x_unit = "Hz" if mode == "FFT" else "s"
  
         #self._schedule_redraw()
@@ -1075,11 +1075,12 @@ class FFTApp(App):
 
         # build() → 버튼 만들던 부분
         self.btn_rt_view = mk("RT VIEW: FFT", self._toggle_rt_view)
+        self.btn_stft_once = mk("STFT Refresh", lambda *_: self._rt_stft_once())
        
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, self.btn_setF0,
-                  self.btn_param, self.btn_view, self.btn_rt_view):
+                  self.btn_param, self.btn_view, self.btn_rt_view, self.btn_stft_once):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
    
@@ -1134,10 +1135,14 @@ class FFTApp(App):
     def _toggle_view(self, *_):
         self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
         self.btn_view.text = f"VIEW: {self.view_mode}"
-       
-        for g in self.graphs:
-            g.clear_texture()
-            #g.update_graph([], [], g.max_x)
+    
+        # 그래프 클리어
+        for g in self.graphs: g.clear_texture()
+    
+        # 실시간 켜져 있으면 루프 교체
+        if self.rt_on:
+            self.toggle_realtime()   # OFF
+            self.toggle_realtime()   # ON → 새 모드
 
 
 
@@ -1273,28 +1278,33 @@ class FFTApp(App):
     # ───────────────────────────── Realtime poll
     def toggle_realtime(self, *_):
         self.rt_on = not self.rt_on
-        self.btn_rt.text = f"Realtime FFT ({'ON' if self.rt_on else 'OFF'})"
-        self._status['action'] = "REALTIME ON" if self.rt_on else "IDLE"
+        self.btn_rt.text = f"Realtime {self.view_mode} ({'ON' if self.rt_on else 'OFF'})"
+        self._status['action'] = f"REALTIME {self.view_mode}" if self.rt_on else "IDLE"
         self._refresh_status()
-       
+    
         if self.rt_on:
             try:
                 accelerometer.enable()
             except Exception as e:
                 self.log(f"DO NOT USE THE SENSOR: {e}")
                 self.rt_on=False
-                self.btn_rt.text="Realtime FFT (OFF)"; return
+                self.btn_rt.text=f"Realtime {self.view_mode} (OFF)"
+                return
+    
             Clock.schedule_interval(self._poll_accel, 0)
-            threading.Thread(target=self._rt_fft_loop, daemon=True).start()
+    
+            if self.view_mode == "FFT":
+                threading.Thread(target=self._rt_fft_loop, daemon=True).start()
+            else:                             # STFT 모드
+                threading.Thread(target=self._rt_stft_loop, daemon=True).start()
+    
         else:
-            try:
-                accelerometer.disable()
-            except Exception:
-                pass
-                
+            try: accelerometer.disable()
+            except Exception: pass
 
-
-
+        if self.rt_on and self.view_mode == "STFT":
+            self._rt_stft_once()          # 토글 켜질 때 한 번 그려줌
+    
 
 
 
@@ -1449,7 +1459,132 @@ class FFTApp(App):
             Clock.schedule_once(
                 lambda *_: setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
            
-           
+
+    # FFTApp 내부에 새 메서드 추가
+    def _rt_stft_loop(self):
+        """
+        0.5 s마다 버퍼 스냅샷 → STFT(dB) → 3 개의 히트맵(Texture) 업데이트
+        X,Y,Z 축은 각각 한 그래프, 컬러맵은  –50 ~ 50 dB  (필요하면 조정)
+        """
+        RT_REFRESH_SEC = 0.5
+        MIN_FS        = 50
+        WIN, HOP      = (4096, 256) if HIRES else (2048, 512)
+    
+        try:
+            while self.rt_on and self.view_mode == "STFT":
+                time.sleep(RT_REFRESH_SEC)
+    
+                with self._buf_lock:
+                    snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
+    
+                tex_list = []
+                for ax in "xyz":
+                    if len(snap[ax]) < MIN_FS * 4:
+                        tex_list.append(None)
+                        continue
+    
+                    t_arr, val_arr, _ = zip(*snap[ax])
+                    fs = robust_fs(t_arr[-2048:])
+                    if fs is None or fs < MIN_FS:
+                        tex_list.append(None); continue
+    
+                    sig = np.asarray(val_arr, float)
+                    spec, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
+    
+                    sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
+                    if not sel_f.any():
+                        tex_list.append(None); continue
+    
+                    tex = heatmap_to_texture(
+                              spec[sel_f, :],
+                              vmin=-50, vmax=50, lut=TURBO)
+                    tex_list.append((tex, f_ax[sel_f][-1], t_ax[-1]))
+    
+                # UI 갱신 ------------------------------------------------------
+                if any(tex_list):
+                    def _update(_dt, tl=tex_list):
+                        for g, item in zip(self.graphs, tl):
+                            if item is None:
+                                g.clear_texture(); continue
+                            tex, f_max, t_max = item
+                            g.set_texture(tex)
+                            g.x_unit = "s"
+                            g.min_x, g.max_x = 0.0, float(t_max)
+                            g.X_TICKS = [round(x,2) for x
+                                         in np.linspace(0, t_max, 6)]
+                            g.Y_MIN, g.Y_MAX = 0.0, float(f_max)
+                            g.Y_TICKS = list(range(0, int(f_max)+1, 10))
+                            g.lbl_x.text = "Time (s)"
+                            g.lbl_y.text = "Freq (Hz)"
+                            g._prev_ticks = (None, None)
+                            g._schedule_redraw()
+                    Clock.schedule_once(_update)
+    
+        except Exception:
+            Logger.exception("Realtime STFT thread crashed")
+        finally:
+            # 루프가 끝났는데 rt_on 이면 FFT 루프를 다시 돌려도 됨
+            pass
+    
+    
+    def _rt_stft_once(self, *_):
+        """
+        가속도 버퍼 스냅샷을 한 번만 STFT로 변환해
+        3개의 그래프(Texture) 갱신.
+        (실시간 루프가 필요 없는 ‘수동 새로고침’ 용도)
+        """
+        MIN_FS        = 50
+        WIN, HOP      = (4096, 256) if HIRES else (2048, 512)
+    
+        # ----- ① 버퍼 스냅샷 -----
+        with self._buf_lock:
+            snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
+    
+        tex_list = []
+        for ax in "xyz":
+            if len(snap[ax]) < MIN_FS * 4:
+                tex_list.append(None); continue
+    
+            t_arr, val_arr, _ = zip(*snap[ax])
+            fs = robust_fs(t_arr[-2048:])
+            if fs is None or fs < MIN_FS:
+                tex_list.append(None); continue
+    
+            sig = np.asarray(val_arr, float)
+            spec, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
+    
+            sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
+            if not sel_f.any():
+                tex_list.append(None); continue
+    
+            tex = heatmap_to_texture(
+                      spec[sel_f, :],
+                      vmin=-50, vmax=50, lut=TURBO)
+            tex_list.append((tex, f_ax[sel_f][-1], t_ax[-1]))
+    
+        # ----- ② UI 갱신 -----
+        def _update(_dt, tl=tex_list):
+            for g, item in zip(self.graphs, tl):
+                if item is None:
+                    g.clear_texture(); continue
+                tex, f_max, t_max = item
+                g.set_texture(tex)
+    
+                g.x_unit = "s"
+                g.min_x, g.max_x = 0.0, float(t_max)
+                g.X_TICKS = [round(x,2) for x in np.linspace(0, t_max, 6)]
+    
+                g.Y_MIN, g.Y_MAX = 0.0, float(f_max)
+                g.Y_TICKS = list(range(0, int(f_max)+1, 10))
+    
+                g.lbl_x.text = "Time (s)"
+                g.lbl_y.text = "Freq (Hz)"
+    
+                g._prev_ticks = (None, None)
+                g._schedule_redraw()
+    
+        Clock.schedule_once(_update)
+    
     # ───────────────────────────── CSV FFT (백그라운드)
     def run_fft(self, *_):
         self.btn_run.disabled = True
@@ -1835,57 +1970,6 @@ class FFTApp(App):
         self._refresh_status()                    # ← 추가
 
 
-    def _rt_stft_once(self):
-        try:
-            with self._buf_lock:
-                snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
-    
-            # ── 버퍼 길이 확보 체크
-            need_len = RT_STFT_SEC * 50          # 최소 50 Hz*8 s = 400 샘플
-            if any(len(snap[ax]) < need_len for ax in "xyz"):
-                return
-    
-            for ax, gw in zip("xyz", self.graphs):
-                t_arr, val_arr, _ = zip(*snap[ax][-int(need_len):])
-                fs = robust_fs(t_arr)
-                if fs is None:
-                    continue
-    
-                sig = np.asarray(val_arr, float) - np.mean(val_arr)
-                spec, f_ax, t_ax = stft_np(sig, fs,
-                                           win   = RT_STFT_WIN,
-                                           hop   = RT_STFT_HOP)
-    
-                # 표시 구간 자르기
-                sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= RT_STFT_FMAX)
-                spec  = spec[sel_f, -160:]                  # 최신 160 frame 정도만
-                f_ax  = f_ax[sel_f]
-                t_ax  = t_ax[-spec.shape[1]:] - t_ax[-1]    # 0 = 현재, 음수 = 과거
-                t_ax  = -t_ax                               # 좌→우 과거→현재
-    
-                tex = heatmap_to_texture(spec,
-                                         vmin=-60, vmax=10,
-                                         lut=TURBO)
-    
-                # ---- 그래프 위젯에 주입 -------------------------------
-                gw.set_texture(tex)
-                gw.min_x   = 0.0
-                gw.max_x   = float(t_ax[-1])
-                gw.X_TICKS = [round(x,1) for x in
-                              np.linspace(0, gw.max_x, 6)]
-    
-                gw.Y_MIN   = 0.0
-                gw.Y_MAX   = float(f_ax[-1])
-                gw.Y_TICKS = [round(y) for y in
-                              np.linspace(0, gw.Y_MAX, 6)]
-    
-                gw.lbl_x.text = "Time (s)"
-                gw.lbl_y.text = "Freq (Hz)"
-                gw._prev_ticks = (None, None)
-                gw._schedule_redraw()
-    
-        except Exception:
-            Logger.exception("RT-STFT error")
 ###############################################################################
 # 9. Run
 ###############################################################################
