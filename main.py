@@ -1138,11 +1138,11 @@ class FFTApp(App):
 
 
         if self.rt_on:              # 이미 센서 읽는 중이면…
-        self.rt_on = False      # 두 스레드 루프를 자연 종료
-        time.sleep(0.6)         # 1 프레임만큼 대기
-        self.rt_on = True
-        thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
-        threading.Thread(target=thread_func, daemon=True).start()
+            self.rt_on = False      # 두 스레드 루프를 자연 종료
+            time.sleep(0.6)         # 1 프레임만큼 대기
+            self.rt_on = True
+            thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+            threading.Thread(target=thread_func, daemon=True).start()
 
         # 그래프 클리어
         for g in self.graphs: g.clear_texture()
@@ -1159,11 +1159,11 @@ class FFTApp(App):
         self.btn_rt_view.text = f"RT VIEW: {self.rt_view}"
 
         if self.rt_on:              # 이미 센서 읽는 중이면…
-        self.rt_on = False      # 두 스레드 루프를 자연 종료
-        time.sleep(0.6)         # 1 프레임만큼 대기
-        self.rt_on = True
-        thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
-        threading.Thread(target=thread_func, daemon=True).start()
+            self.rt_on = False      # 두 스레드 루프를 자연 종료
+            time.sleep(0.6)         # 1 프레임만큼 대기
+            self.rt_on = True
+            thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+            threading.Thread(target=thread_func, daemon=True).start()
 
 
         # 그래프 지우기
