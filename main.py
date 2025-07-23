@@ -1079,7 +1079,7 @@ class FFTApp(App):
        
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
-                  self.btn_rt,  self.btn_hires, self.btn_setF0,
+                  self.btn_rt,  self.btn_hires, 
                   self.btn_param, self.btn_view, self.btn_rt_view, self.btn_stft_once):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
