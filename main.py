@@ -749,7 +749,19 @@ class GraphWidget(Widget):
 
         self._prev_ticks = (None, None)
        
-        self.X_TICKS = [x for x in (5,10,20,30,40,50) if x <= self.max_x]
+        # === ① X-축 눈금 재계산 부분만 교체 =========================
+        if mode == "FFT":                          # 주파수 모드일 때만
+            if self.max_x <= 50:
+                # ● 기본 : 10,20,30,40,50 Hz   (0 ~ 5 Hz 구간은 F_MIN=5로 이미 잘려있음)
+                self.X_TICKS = [10, 20, 30, 40, 50]
+            else:
+                # ● 50 Hz 초과 → Fmax를 10 단위 올림한 값까지 자동 생성
+                top = int(np.ceil(self.max_x / 10.0)) * 10   # 63 → 70, 101 → 110 …
+                self.X_TICKS = list(range(10, top + 1, 10))
+        else:
+            # STFT(시간축)일 땐 기존 로직( linspace 등 )을 그대로 사용
+            pass
+        # ==========================================================
        
         self.status_text = status
        
