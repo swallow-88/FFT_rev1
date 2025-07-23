@@ -714,7 +714,7 @@ class GraphWidget(Widget):
         self.clear_texture()
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
-        self.max_x    = min(float(xm), 50.0)
+        self.max_x    = min(float(xm))
         self.x_unit = "Hz" if mode == "FFT" else "s"
  
         #self._schedule_redraw()
