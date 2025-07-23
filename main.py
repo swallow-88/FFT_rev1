@@ -1135,7 +1135,15 @@ class FFTApp(App):
     def _toggle_view(self, *_):
         self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
         self.btn_view.text = f"VIEW: {self.view_mode}"
-    
+
+
+        if self.rt_on:              # 이미 센서 읽는 중이면…
+        self.rt_on = False      # 두 스레드 루프를 자연 종료
+        time.sleep(0.6)         # 1 프레임만큼 대기
+        self.rt_on = True
+        thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+        threading.Thread(target=thread_func, daemon=True).start()
+
         # 그래프 클리어
         for g in self.graphs: g.clear_texture()
     
@@ -1149,6 +1157,15 @@ class FFTApp(App):
     def _toggle_rt_view(self, *_):
         self.rt_view = 'STFT' if self.rt_view == "FFT" else "FFT"
         self.btn_rt_view.text = f"RT VIEW: {self.rt_view}"
+
+        if self.rt_on:              # 이미 센서 읽는 중이면…
+        self.rt_on = False      # 두 스레드 루프를 자연 종료
+        time.sleep(0.6)         # 1 프레임만큼 대기
+        self.rt_on = True
+        thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+        threading.Thread(target=thread_func, daemon=True).start()
+
+
         # 그래프 지우기
         for g in self.graphs:
             g.clear_texture()
@@ -1362,7 +1379,7 @@ class FFTApp(App):
         N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
    
         try:
-            while self.rt_on:
+            while self.rt_on and self.view_mode == "FFT":
                 time.sleep(RT_REFRESH_SEC)
    
                 # ① 버퍼 스냅샷 (락 보호) ---------------------------------
@@ -1507,7 +1524,7 @@ class FFTApp(App):
                             if item is None:
                                 g.clear_texture(); continue
                             tex, f_max, t_max = item
-                            g.set_texture(tex)
+                            
                             g.x_unit = "s"
                             g.min_x, g.max_x = 0.0, float(t_max)
                             g.X_TICKS = [round(x,2) for x
@@ -1517,6 +1534,7 @@ class FFTApp(App):
                             g.lbl_x.text = "Time (s)"
                             g.lbl_y.text = "Freq (Hz)"
                             g._prev_ticks = (None, None)
+                            g.set_texture(tex)
                             g._schedule_redraw()
                     Clock.schedule_once(_update)
     
@@ -1568,7 +1586,7 @@ class FFTApp(App):
                 if item is None:
                     g.clear_texture(); continue
                 tex, f_max, t_max = item
-                g.set_texture(tex)
+                
     
                 g.x_unit = "s"
                 g.min_x, g.max_x = 0.0, float(t_max)
@@ -1581,6 +1599,7 @@ class FFTApp(App):
                 g.lbl_y.text = "Freq (Hz)"
     
                 g._prev_ticks = (None, None)
+                g.set_texture(tex)
                 g._schedule_redraw()
     
         Clock.schedule_once(_update)
