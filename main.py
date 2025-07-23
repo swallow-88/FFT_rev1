@@ -1809,10 +1809,10 @@ class FFTApp(App):
                         t_axis = list(t_ax_crop)):
     
                 texs = [
-                    heatmap_to_texture(arrs[0],vmin=-60 if MEAS_MODE=="VEL" else -80,
-                                       vmax= 40 if MEAS_MODE=="VEL" else  20, lut=TURBO),
-                    heatmap_to_texture(arrs[1],vmin=-60 if MEAS_MODE=="VEL" else -80,
-                                       vmax= 40 if MEAS_MODE=="VEL" else  20, lut=TURBO),
+                    heatmap_to_texture(arrs[0],vmin=-50 if MEAS_MODE=="VEL" else -80,
+                                       vmax= 50 if MEAS_MODE=="VEL" else  50, lut=TURBO),
+                    heatmap_to_texture(arrs[1],vmin=-50 if MEAS_MODE=="VEL" else -80,
+                                       vmax= 50 if MEAS_MODE=="VEL" else  50, lut=TURBO),
                     heatmap_to_texture(arrs[2], vmin=-20,  vmax=20,  lut=TURBO)
                 ]
     
