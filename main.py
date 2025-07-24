@@ -1137,13 +1137,15 @@ class FFTApp(App):
         self.btn_view.text = f"VIEW: {self.view_mode}"
 
 
-        if self.rt_on:              # 이미 센서 읽는 중이면…
-            self.rt_on = False      # 두 스레드 루프를 자연 종료
-            time.sleep(0.6)         # 1 프레임만큼 대기
+
+        if self.rt_on:
+            self.rt_on = False
+            time.sleep(0.6)
             self.rt_on = True
-            thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop   # ❸
             threading.Thread(target=thread_func, daemon=True).start()
 
+        
         # 그래프 클리어
         for g in self.graphs: g.clear_texture()
     
@@ -1158,11 +1160,12 @@ class FFTApp(App):
         self.rt_view = 'STFT' if self.rt_view == "FFT" else "FFT"
         self.btn_rt_view.text = f"RT VIEW: {self.rt_view}"
 
-        if self.rt_on:              # 이미 센서 읽는 중이면…
-            self.rt_on = False      # 두 스레드 루프를 자연 종료
-            time.sleep(0.6)         # 1 프레임만큼 대기
+
+        if self.rt_on:
+            self.rt_on = False
+            time.sleep(0.6)
             self.rt_on = True
-            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop
+            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop   # ❷
             threading.Thread(target=thread_func, daemon=True).start()
 
 
@@ -1309,11 +1312,10 @@ class FFTApp(App):
                 return
     
             Clock.schedule_interval(self._poll_accel, 0)
-    
-            if self.rt_view == "FFT":
-                threading.Thread(target=self._rt_fft_loop, daemon=True).start()
-            else:                             # STFT 모드
-                threading.Thread(target=self._rt_stft_loop, daemon=True).start()
+                
+            # ❶ ← 실시간 화면( rt_view ) 기준으로 스레드 선택
+            thread_func = self._rt_stft_loop if self.rt_view == "STFT" else self._rt_fft_loop
+            threading.Thread(target=thread_func, daemon=True).start()
     
         else:
             try: accelerometer.disable()
@@ -1322,8 +1324,6 @@ class FFTApp(App):
         if self.rt_on and self.view_mode == "STFT":
             self._rt_stft_once()          # 토글 켜질 때 한 번 그려줌
     
-
-
 
 
     def _poll_accel(self, dt):
@@ -1363,9 +1363,6 @@ class FFTApp(App):
     #  FFT 실시간 분석 루프 – 최종 수정본
     # ──────────────────────────────────────────────────────────────
     def _rt_fft_loop(self):
-        if self.rt_view == "STFT":
-            self._rt_stft_once()     # ① STFT 모드 한 프레임만 그리고
-            return                   #    리턴 → 0.5 초 뒤 다시 호출
     # ↓ 기존 FFT 코드 그대로
 
         """
