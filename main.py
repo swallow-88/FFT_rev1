@@ -985,7 +985,7 @@ class GraphWidget(Widget):
         self._use_tex = False
         self._tex = None
         self._schedule_redraw()
-        self.overlay = []
+        self._overlay = []
     # ---------------------------------------------------------------------------
 
 
@@ -1534,7 +1534,10 @@ class FFTApp(App):
                     def _update(_dt, tl=tex_list):
                         for g, item in zip(self.graphs, tl):
                             if item is None:
-                                g.clear_texture(); continue
+                                # 직전 texture 유지. 단, 첫 업데이트 이전이라면 clear
+                                if not g._use_tex:
+                                    g.clear_texture()
+                                continue
                             tex, f_max, t_max = item
     
                             # 축·눈금 세팅
