@@ -1580,36 +1580,34 @@ class FFTApp(App):
             if fs is None or fs < MIN_FS:
                 tex_list.append(None); continue
     
+            # ── ② STFT 계산 (선형 스펙) ───────────────────────────
             sig = np.asarray(val_arr, float)
-            spec, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
+            lin, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
     
-            # ── FFTApp._rt_stft_loop  /  _rt_stft_once ▸ spec 계산 이후부터 교체 ──
             sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
             if not sel_f.any():
-                tex_list.append(None);  continue
-            
-            lin   = spec[sel_f, :]                  # 선형 진폭 (|FFT|)  
-            f_sel = f_ax[sel_f][:, None]            # (F,1) → VEL 변환용
-            
-            # --- ACC ↔ VEL 변환 & dB 스케일 -------------------------------
-            if MEAS_MODE == "VEL":
-                amp = lin / (2*np.pi*np.where(f_sel < 1e-6, 1e-6, f_sel)) * 1e3  # mm/s
-                ref = REF_MM_S
-            else:                               # ACC 모드
-                amp = lin                                     # m/s²
-                ref = REF_ACC
-            
-            db  = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
-            
-            # --- 텍스처 생성 ----------------------------------------------
-            tex = heatmap_to_texture(
-                    db,
-                    vmin=-40 if MEAS_MODE == "VEL" else -50,
-                    vmax= 40 if MEAS_MODE == "VEL" else  50,
-                    lut=TURBO)
-            
-            tex_list.append((tex, f_ax[sel_f][-1], t_ax[-1]))
+                tex_list.append(None); continue
     
+            lin  = lin[sel_f, :]
+            f_ax = f_ax[sel_f]
+            f_mat = f_ax[:, None]          # (F,1)  브로드캐스트용
+    
+            # ── ③ ACC ↔ VEL & dB 변환 ---------------------------
+            if MEAS_MODE == "VEL":
+                amp = lin / (2*np.pi*np.where(f_mat < 1e-6, 1e-6, f_mat)) * 1e3
+                ref = REF_MM_S
+                vmin, vmax = -40, 40        # mm/s 표시범위
+            else:                           # ACC 모드
+                amp = lin
+                ref = REF_ACC
+                vmin, vmax = -50, 50        # m/s² 표시범위
+    
+            db = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
+    
+            # ── ④ Texture 생성 ───────────────────────────────────
+            tex = heatmap_to_texture(db,vmin=vmin, vmax=vmax,lut=TURBO)
+            tex_list.append((tex, f_ax[-1], t_ax[-1]))
+            
         # ----- ② UI 갱신 -----
         def _update(_dt, tl=tex_list):
             for g, item in zip(self.graphs, tl):
