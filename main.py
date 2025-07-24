@@ -1478,17 +1478,14 @@ class FFTApp(App):
            
 
     # FFTApp 내부에 새 메서드 추가
+    # ─── FFTApp 내부 · _rt_stft_loop  (once 도 동일) ──────────────────
     def _rt_stft_loop(self):
-        """
-        0.5 s마다 버퍼 스냅샷 → STFT(dB) → 3 개의 히트맵(Texture) 업데이트
-        X,Y,Z 축은 각각 한 그래프, 컬러맵은  –50 ~ 50 dB  (필요하면 조정)
-        """
         RT_REFRESH_SEC = 0.5
-        MIN_FS        = 50
-        WIN, HOP      = (4096, 256) if HIRES else (2048, 512)
+        MIN_FS         = 50
+        WIN, HOP       = (4096, 256) if HIRES else (2048, 512)
     
         try:
-            while self.rt_on and self.rt_view == "STFT":
+            while self.rt_on and self.rt_view == "STFT":      # ← rt_view 체크
                 time.sleep(RT_REFRESH_SEC)
     
                 with self._buf_lock:
@@ -1496,71 +1493,68 @@ class FFTApp(App):
     
                 tex_list = []
                 for ax in "xyz":
+                    # ── ① 버퍼 길이 / fs 확인 ─────────────────────────────
                     if len(snap[ax]) < MIN_FS * 4:
-                        tex_list.append(None)
-                        continue
+                        tex_list.append(None); continue
     
                     t_arr, val_arr, _ = zip(*snap[ax])
                     fs = robust_fs(t_arr[-2048:])
                     if fs is None or fs < MIN_FS:
                         tex_list.append(None); continue
     
+                    # ── ② STFT 계산 (선형 스펙) ───────────────────────────
                     sig = np.asarray(val_arr, float)
-                    spec, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
+                    lin, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
     
-                    # ── FFTApp._rt_stft_loop  /  _rt_stft_once ▸ spec 계산 이후부터 교체 ──
                     sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
                     if not sel_f.any():
-                        tex_list.append(None);  continue
-                    
-                    lin   = spec[sel_f, :]                  # 선형 진폭 (|FFT|)  
-                    f_sel = f_ax[sel_f][:, None]            # (F,1) → VEL 변환용
-                    
-                    # --- ACC ↔ VEL 변환 & dB 스케일 -------------------------------
+                        tex_list.append(None); continue
+    
+                    lin  = lin[sel_f, :]
+                    f_ax = f_ax[sel_f]
+                    f_mat = f_ax[:, None]          # (F,1)  브로드캐스트용
+    
+                    # ── ③ ACC ↔ VEL & dB 변환 ---------------------------
                     if MEAS_MODE == "VEL":
-                        amp = lin / (2*np.pi*np.where(f_sel < 1e-6, 1e-6, f_sel)) * 1e3  # mm/s
+                        amp = lin / (2*np.pi*np.where(f_mat < 1e-6, 1e-6, f_mat)) * 1e3
                         ref = REF_MM_S
-                    else:                               # ACC 모드
-                        amp = lin                                     # m/s²
+                        vmin, vmax = -40, 40        # mm/s 표시범위
+                    else:                           # ACC 모드
+                        amp = lin
                         ref = REF_ACC
-                    
-                    db  = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
-                    
-                    # --- 텍스처 생성 ----------------------------------------------
-                    tex = heatmap_to_texture(
-                            db,
-                            vmin=-40 if MEAS_MODE == "VEL" else -50,
-                            vmax= 40 if MEAS_MODE == "VEL" else  50,
-                            lut=TURBO)
-                    
-                    tex_list.append((tex, f_ax[sel_f][-1], t_ax[-1]))
-                        
-                # UI 갱신 ------------------------------------------------------
+                        vmin, vmax = -50, 50        # m/s² 표시범위
+    
+                    db = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
+    
+                    # ── ④ Texture 생성 ───────────────────────────────────
+                    tex = heatmap_to_texture(db,
+                                             vmin=vmin, vmax=vmax,
+                                             lut=TURBO)
+                    tex_list.append((tex, f_ax[-1], t_ax[-1]))
+    
+                # ── ⑤ UI 갱신 -------------------------------------------------
                 if any(tex_list):
                     def _update(_dt, tl=tex_list):
                         for g, item in zip(self.graphs, tl):
                             if item is None:
                                 g.clear_texture(); continue
                             tex, f_max, t_max = item
-                            
+    
+                            # 축·눈금 세팅
                             g.x_unit = "s"
                             g.min_x, g.max_x = 0.0, float(t_max)
-                            g.X_TICKS = [round(x,2) for x
-                                         in np.linspace(0, t_max, 6)]
+                            g.X_TICKS = [round(x, 2) for x in
+                                         np.linspace(0, t_max, 6)]
                             g.Y_MIN, g.Y_MAX = 0.0, float(f_max)
                             g.Y_TICKS = list(range(0, int(f_max)+1, 10))
-                            g.lbl_x.text = "Time (s)"
-                            g.lbl_y.text = "Freq (Hz)"
+                            g.lbl_x.text, g.lbl_y.text = "Time (s)", "Freq (Hz)"
+    
                             g._prev_ticks = (None, None)
-                            g.set_texture(tex)
-                            g._schedule_redraw()
+                            g.set_texture(tex)       # redraw 포함
                     Clock.schedule_once(_update)
     
         except Exception:
             Logger.exception("Realtime STFT thread crashed")
-        finally:
-            # 루프가 끝났는데 rt_on 이면 FFT 루프를 다시 돌려도 됨
-            pass
     
     
     def _rt_stft_once(self, *_):
