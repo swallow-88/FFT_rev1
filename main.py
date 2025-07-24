@@ -1162,7 +1162,7 @@ class FFTApp(App):
             self.rt_on = False      # 두 스레드 루프를 자연 종료
             time.sleep(0.6)         # 1 프레임만큼 대기
             self.rt_on = True
-            thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop
+            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop
             threading.Thread(target=thread_func, daemon=True).start()
 
 
@@ -1310,7 +1310,7 @@ class FFTApp(App):
     
             Clock.schedule_interval(self._poll_accel, 0)
     
-            if self.view_mode == "FFT":
+            if self.rt_view == "FFT":
                 threading.Thread(target=self._rt_fft_loop, daemon=True).start()
             else:                             # STFT 모드
                 threading.Thread(target=self._rt_stft_loop, daemon=True).start()
@@ -1379,7 +1379,7 @@ class FFTApp(App):
         N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
    
         try:
-            while self.rt_on and self.view_mode == "FFT":
+            while self.rt_on and self.rt_view == "FFT":
                 time.sleep(RT_REFRESH_SEC)
    
                 # ① 버퍼 스냅샷 (락 보호) ---------------------------------
@@ -1488,7 +1488,7 @@ class FFTApp(App):
         WIN, HOP      = (4096, 256) if HIRES else (2048, 512)
     
         try:
-            while self.rt_on and self.view_mode == "STFT":
+            while self.rt_on and self.rt_view == "STFT":
                 time.sleep(RT_REFRESH_SEC)
     
                 with self._buf_lock:
