@@ -1004,7 +1004,7 @@ class FFTApp(App):
         self._buf_lock = threading.Lock()
         self._status = dict(files="-", action = "READY", result="")
         self.view_mode = "FFT"
-        self.rt_view = "FFT"
+        #self.rt_view = "FFT"
    
        
     # =========================================
@@ -1074,13 +1074,13 @@ class FFTApp(App):
         self.btn_view  = mk("VIEW: FFT", self._toggle_view)
 
         # build() → 버튼 만들던 부분
-        self.btn_rt_view = mk("RT VIEW: FFT", self._toggle_rt_view)
+        #self.btn_rt_view = mk("RT VIEW: FFT", self._toggle_rt_view)
         self.btn_stft_once = mk("STFT Refresh", lambda *_: self._rt_stft_once())
        
    
         for w in (self.btn_sel, self.btn_run, self.btn_rec, self.btn_mode,
                   self.btn_rt,  self.btn_hires, 
-                  self.btn_param, self.btn_view, self.btn_rt_view, self.btn_stft_once):
+                  self.btn_view, self.btn_param, self.btn_stft_once):
             btn_grid.add_widget(w)
         ctrl.add_widget(btn_grid)
    
@@ -1097,7 +1097,7 @@ class FFTApp(App):
                                 size_hint_y=None, height=ROW_H)
         self.spin_sm.bind(text=lambda s,t: self._set_smooth(int(t)))
         spin_row.add_widget(self.spin_dur)
-        spin_row.add_widget(self.spin_sm)
+        #spin_row.add_widget(self.spin_sm)
         ctrl.add_widget(spin_row)
    
         # 컨트롤 패널 높이 확정
@@ -1130,42 +1130,43 @@ class FFTApp(App):
         self._refresh_status()
         return root
 
+
+    def _restart_rt_thread(self):
+        # ① 이전 스레드 종료 플래그
+        self.rt_on = False
+        time.sleep(0.6)
+        # ② 플래그 켜고 새 스레드
+        self.rt_on = True
+        target = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
+        threading.Thread(target=target, daemon=True).start()
+
    
    
     def _toggle_view(self, *_):
-        self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
+        self.view_mode = "STFT" if self.view_mode == "FFT" else "FFT"
         self.btn_view.text = f"VIEW: {self.view_mode}"
-
-
-
-        if self.rt_on:
-            self.rt_on = False
-            time.sleep(0.6)
-            self.rt_on = True
-            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop   # ❸
-            threading.Thread(target=thread_func, daemon=True).start()
-
-        
-        # 그래프 클리어
-        for g in self.graphs: g.clear_texture()
     
-        # 실시간 켜져 있으면 루프 교체
+        # 실시간 버튼이 ON 이면 스레드만 갈아끼우기
         if self.rt_on:
-            self.toggle_realtime()   # OFF
-            self.toggle_realtime()   # ON → 새 모드
+            self._restart_rt_thread()
+    
+        # 그래프(clear) – 선·텍스쳐 모두 제거
+        for g in self.graphs:
+            g.clear_texture()
+            g.update_graph([], [], g.max_x)
 
 
 
     def _toggle_rt_view(self, *_):
-        self.rt_view = 'STFT' if self.rt_view == "FFT" else "FFT"
-        self.btn_rt_view.text = f"RT VIEW: {self.rt_view}"
+        self.view_mode = 'STFT' if self.view_mode == "FFT" else "FFT"
+        self.btn_rt_view.text = f"RT VIEW: {self.view_mode}"
 
 
         if self.rt_on:
             self.rt_on = False
             time.sleep(0.6)
             self.rt_on = True
-            thread_func = self._rt_stft_loop if self.rt_view == 'STFT' else self._rt_fft_loop   # ❷
+            thread_func = self._rt_stft_loop if self.view_mode == 'STFT' else self._rt_fft_loop   # ❷
             threading.Thread(target=thread_func, daemon=True).start()
 
 
@@ -1314,7 +1315,7 @@ class FFTApp(App):
             Clock.schedule_interval(self._poll_accel, 0)
                 
             # ❶ ← 실시간 화면( rt_view ) 기준으로 스레드 선택
-            thread_func = self._rt_stft_loop if self.rt_view == "STFT" else self._rt_fft_loop
+            thread_func = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
             threading.Thread(target=thread_func, daemon=True).start()
     
         else:
@@ -1376,7 +1377,7 @@ class FFTApp(App):
         N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
    
         try:
-            while self.rt_on and self.rt_view == "FFT":
+            while self.rt_on and self.view_mode == "FFT":
                 time.sleep(RT_REFRESH_SEC)
    
                 # ① 버퍼 스냅샷 (락 보호) ---------------------------------
@@ -1482,7 +1483,7 @@ class FFTApp(App):
         WIN, HOP       = (4096, 256) if HIRES else (2048, 512)
     
         try:
-            while self.rt_on and self.rt_view == "STFT":      # ← rt_view 체크
+            while self.rt_on and self.view_mode == "STFT":      # ← rt_view 체크
                 time.sleep(RT_REFRESH_SEC)
     
                 with self._buf_lock:
@@ -1500,6 +1501,7 @@ class FFTApp(App):
                         tex_list.append(None); continue
     
                     # ── ② STFT 계산 (선형 스펙) ───────────────────────────
+                    sig = np.asarray(val_arr, float)
                     lin, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
                     sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
 
