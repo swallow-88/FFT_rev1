@@ -1500,10 +1500,9 @@ class FFTApp(App):
                         tex_list.append(None); continue
     
                     # ── ② STFT 계산 (선형 스펙) ───────────────────────────
-                    sig = np.asarray(val_arr, float)
                     lin, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
-    
                     sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
+
                     if not sel_f.any():
                         tex_list.append(None); continue
     
@@ -1527,30 +1526,33 @@ class FFTApp(App):
                     tex = heatmap_to_texture(db,
                                              vmin=vmin, vmax=vmax,
                                              lut=TURBO)
-                    tex_list.append((tex, f_ax[-1], t_ax[-1]))
+                    tex_list.append((db, f_ax[-1], t_ax[-1]))
     
                 # ── ⑤ UI 갱신 -------------------------------------------------
                 if any(tex_list):
                     def _update(_dt, tl=tex_list):
                         for g, item in zip(self.graphs, tl):
                             if item is None:
-                                # 직전 texture 유지. 단, 첫 업데이트 이전이라면 clear
                                 if not g._use_tex:
                                     g.clear_texture()
                                 continue
-                            tex, f_max, t_max = item
-    
-                            # 축·눈금 세팅
-                            g.x_unit = "s"
-                            g.min_x, g.max_x = 0.0, float(t_max)
-                            g.X_TICKS = [round(x, 2) for x in
-                                         np.linspace(0, t_max, 6)]
-                            g.Y_MIN, g.Y_MAX = 0.0, float(f_max)
-                            g.Y_TICKS = list(range(0, int(f_max)+1, 10))
+                    
+                            db_mat, f_max, t_max = item
+                            # ★ 여기에서 생성 ★
+                            tex = heatmap_to_texture(
+                                    db_mat,
+                                    vmin=-40 if MEAS_MODE=="VEL" else -50,
+                                    vmax= 40 if MEAS_MODE=="VEL" else  50,
+                                    lut=TURBO)
+                    
+                            g.x_unit, g.min_x, g.max_x = "s", 0.0, float(t_max)
+                            g.X_TICKS = [round(x,2) for x in np.linspace(0,t_max,6)]
+                            g.Y_MIN,  g.Y_MAX = 0.0, float(f_max)
+                            g.Y_TICKS = list(range(0,int(f_max)+1,10))
                             g.lbl_x.text, g.lbl_y.text = "Time (s)", "Freq (Hz)"
-    
+                    
                             g._prev_ticks = (None, None)
-                            g.set_texture(tex)       # redraw 포함
+                            g.set_texture(tex)     
                     Clock.schedule_once(_update)
     
         except Exception:
