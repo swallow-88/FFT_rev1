@@ -609,18 +609,24 @@ class GraphWidget(Widget):
         self._schedule_redraw()
        
        
-     # ── Heat-map 전용 ----------
-    def set_texture(self, tex):
-        """STFT 모드: 외부에서 Texture 주입"""
-        self._tex = tex          # ← 새 속성
-        self._use_tex = tex is not None
-       
-        self.datasets = []
-        self.diff = []
-        self.canvas.clear()
-       
-        self._schedule_redraw()
+    # ── Heat-map 전용 ----------
 
+    def set_texture(self, tex):
+        self._tex = tex
+        if not hasattr(self, "_tex_rect"):           # 처음 한 번만
+            with self.canvas:
+                PushMatrix(); Translate(self.x, self.y)
+                Color(1,1,1,1)
+                self._tex_rect = Rectangle(          # ← 보관
+                    texture=tex,
+                    pos=(self.PAD_X, self.PAD_Y),
+                    size=(self.width-2*self.PAD_X, self.height-2*self.PAD_Y))
+                PopMatrix()
+        else:
+            self._tex_rect.texture = tex             # 깜박임 없이 교체
+
+        self._use_tex = tex is not None
+        self._schedule_redraw()      # 격자/라벨만 다시 그리기
 
 
     def _peak_label_pos(self, order):
@@ -1522,12 +1528,17 @@ class FFTApp(App):
                         ref = REF_ACC
                         vmin, vmax = -50, 50        # m/s² 표시범위
     
-                    db = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
-    
-                    # ── ④ Texture 생성 ───────────────────────────────────
-                    tex = heatmap_to_texture(db,
-                                             vmin=vmin, vmax=vmax,
-                                             lut=TURBO)
+                    # _rt_stft_loop / _rt_stft_once  ─ dB 변환 직후
+                    db = 20*np.log10(np.maximum(amp, ref*MIN_AMP_RATIO)/ref)
+                    
+                    p1 ,p99 = np.percentile(db, [ 1, 99 ])   # 분포의 1% / 99% 지점
+                    vmin,vmax = p1-1 , p99+1                 # 여유 ±1 dB
+                    # (너무 좁아지면 깜박거리므로 최소 폭은 20 dB 강제)
+                    if vmax-vmin < 20:
+                        mid = (vmax+vmin)/2
+                        vmin,vmax = mid-10 , mid+10
+                    
+                    tex = heatmap_to_texture(db, vmin=vmin, vmax=vmax, lut=TURBO)
                     tex_list.append((db, f_ax[-1], t_ax[-1]))
     
                 # ── ⑤ UI 갱신 -------------------------------------------------
@@ -1606,10 +1617,17 @@ class FFTApp(App):
                 ref = REF_ACC
                 vmin, vmax = -50, 50        # m/s² 표시범위
     
-            db = 20 * np.log10(np.maximum(amp, ref*MIN_AMP_RATIO) / ref)
-    
-            # ── ④ Texture 생성 ───────────────────────────────────
-            tex = heatmap_to_texture(db,vmin=vmin, vmax=vmax,lut=TURBO)
+            # _rt_stft_loop / _rt_stft_once  ─ dB 변환 직후
+            db = 20*np.log10(np.maximum(amp, ref*MIN_AMP_RATIO)/ref)
+            
+            p1 ,p99 = np.percentile(db, [ 1, 99 ])   # 분포의 1% / 99% 지점
+            vmin,vmax = p1-1 , p99+1                 # 여유 ±1 dB
+            # (너무 좁아지면 깜박거리므로 최소 폭은 20 dB 강제)
+            if vmax-vmin < 20:
+                mid = (vmax+vmin)/2
+                vmin,vmax = mid-10 , mid+10
+            
+            tex = heatmap_to_texture(db, vmin=vmin, vmax=vmax, lut=TURBO)
             tex_list.append((tex, f_ax[-1], t_ax[-1]))
             
         # ----- ② UI 갱신 -----
