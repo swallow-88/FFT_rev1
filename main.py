@@ -688,9 +688,11 @@ class GraphWidget(Widget):
    
     def _reposition_titles(self, *_):
         # X축 : 위젯 아래쪽 중앙
-        self.lbl_x.texture_update()  # width/height 최신화
+        # X축 제목 – 눈금 숫자보다 살짝 더 아래
+        self.lbl_x.texture_update()
+        tick_y = self.y + self.PAD_Y - 28              # 숫자 라벨 Y
         self.lbl_x.pos = (self.x + (self.width - self.lbl_x.texture_size[0]) / 2,
-                          self.y + 2)        # 살짝 안쪽
+                          tick_y - self.lbl_x.texture_size[1] - 4)  # 4px 여유
 
         # Y축 : 왼쪽 가운데 (회전돼 있으므로 width/height 바뀜)
         self.lbl_y.texture_update()
@@ -1574,12 +1576,14 @@ class FFTApp(App):
                     # _rt_stft_loop / _rt_stft_once  ─ dB 변환 직후
                     db = 20*np.log10(np.maximum(amp, ref*MIN_AMP_RATIO)/ref)
                     
-                    p1 ,p99 = np.percentile(db, [ 1, 99 ])   # 분포의 1% / 99% 지점
-                    vmin,vmax = p1-1 , p99+1                 # 여유 ±1 dB
-                    # (너무 좁아지면 깜박거리므로 최소 폭은 20 dB 강제)
-                    if vmax-vmin < 20:
-                        mid = (vmax+vmin)/2
-                        vmin,vmax = mid-10 , mid+10
+
+                    p5, p95 = np.percentile(db, [5, 95])     # 분포 중심 90 %
+                    vmin, vmax = p5, p95
+            
+                    # (선택) 폭이 너무 좁으면 최소 40 dB로 강제
+                    if vmax - vmin < 40:
+                        mid = (vmax + vmin) * 0.5
+                        vmin, vmax = mid - 20, mid + 20
                     
                     tex = heatmap_to_texture(db, vmin=vmin, vmax=vmax, lut=TURBO)
                     tex_list.append((db, f_ax[-1], t_ax[-1]))
