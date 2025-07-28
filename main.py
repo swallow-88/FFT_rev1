@@ -753,6 +753,13 @@ class GraphWidget(Widget):
         self.datasets = [seq for seq in (ds or []) if seq and len(seq) == 3]
         self.diff     = df or []
         self.max_x    = float(xm)
+        # ── 0) 모드에 맞춰 축 제목(Label) 바로 반영 ──────────────────
+        if mode == "FFT":
+            self.lbl_x.text, self.lbl_y.text = "Frequency (Hz)", "Level (dB)"
+        else:     # STFT
+            self.lbl_x.text, self.lbl_y.text = "Time (s)",      "Freq (Hz)"
+        self._reposition_titles()          # 위치도 즉시 갱신
+
         self.x_unit = "Hz" if mode == "FFT" else "s"
  
         #self._schedule_redraw()
