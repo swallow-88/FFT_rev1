@@ -1593,7 +1593,9 @@ class FFTApp(App):
                                     vmin=-40 if MEAS_MODE=="VEL" else -50,
                                     vmax= 40 if MEAS_MODE=="VEL" else  50,
                                     lut=TURBO)
-                    
+
+                            g.datasets, g.diff = [], []
+
                             g.x_unit, g.min_x, g.max_x = "s", 0.0, float(t_max)
                             g.X_TICKS = [round(x,2) for x in np.linspace(0,t_max,6)]
                             g.Y_MIN,  g.Y_MAX = 0.0, float(f_max)
