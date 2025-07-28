@@ -602,9 +602,11 @@ class GraphWidget(Widget):
         self.x_unit = "Hz"
         
         # ── Heat-map 레이어 두 개를 __init__ 안에서 생성 ―――――――――――――――――
-        from kivy.graphics import InstructionGroup
-        self.tex_group  = InstructionGroup()   # 히트맵 · 오버레이
-        self.line_group = InstructionGroup()   # 격자 · 선 · 텍스트
+
+        from kivy.graphics import Canvas
+        
+        self.tex_group  = Canvas()      # Canvas는 with 사용 가능
+        self.line_group = Canvas()
         self.canvas.add(self.tex_group)
         self.canvas.add(self.line_group)
 
