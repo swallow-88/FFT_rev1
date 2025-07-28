@@ -91,10 +91,12 @@ from functools import partial
 from kivy.properties import StringProperty
 from kivy.uix.floatlayout import FloatLayout
 
+
 #from utils_fft import robust_fs, next_pow2
 
 from kivy.graphics.texture import Texture
 from kivy.graphics import Color, Rectangle
+from kivy.graphics import InstructionGroup                          # ①
 
 def make_turbo_lut(n=256):
     c = np.asarray([  # 5차식 계수 (각각 R,G,B)
@@ -603,13 +605,15 @@ class GraphWidget(Widget):
         
         # ── Heat-map 레이어 두 개를 __init__ 안에서 생성 ―――――――――――――――――
 
-        from kivy.graphics import Canvas
-        
-        self.tex_group  = Canvas()      # Canvas는 with 사용 가능
-        self.line_group = Canvas()
+
+
+
+
+        # ② 두 그룹을 InstructionGroup 으로 생성
+        self.tex_group  = InstructionGroup()
+        self.line_group = InstructionGroup()
         self.canvas.add(self.tex_group)
         self.canvas.add(self.line_group)
-
     
 
     def set_overlay(self, boxes):
@@ -622,30 +626,22 @@ class GraphWidget(Widget):
        
 
  
+    # ③ 히트-맵 교체
     def set_texture(self, tex):
-
-        """STFT 모드: 히트맵 교체 + redraw 요청"""
         self.tex_group.clear()
-        self._tex      = tex
-        self._use_tex  = tex is not None
-        if tex is None:
-            self._schedule_redraw()
-            return
-        from kivy.graphics import PushMatrix, PopMatrix, Translate, Color, Rectangle
-        # GraphWidget.set_texture()  내부
-        with self.tex_group:
-            PushMatrix(); Translate(self.x, self.y)
-            Color(1, 1, 1, 1)
-            Rectangle(                      # ← 여는 (
+        self._tex = tex
+        self._use_tex = tex is not None
+        if tex:
+            self.tex_group.add(PushMatrix())
+            self.tex_group.add(Translate(self.x, self.y))
+            self.tex_group.add(Color(1, 1, 1, 1))
+            self.tex_group.add(Rectangle(
                 texture=tex,
                 pos=(self.PAD_X, self.PAD_Y),
-                size=(self.width - 2*self.PAD_X,
-                      self.height - 2*self.PAD_Y)
-            )                               # ← 첫 번째 닫기
-            PopMatrix()                     # ← 두 번째 닫기
- 
-
-        self._schedule_redraw()   # 격자·라벨만 다시
+                size=(self.width-2*self.PAD_X, self.height-2*self.PAD_Y)
+            ))
+            self.tex_group.add(PopMatrix())
+        self._schedule_redraw()
 
     #def set_texture(self, tex):
     #    self._tex = tex
@@ -884,146 +880,139 @@ class GraphWidget(Widget):
                
 
     # ───────────────────────────── 핵심 redraw
+    # ── GraphWidget 내부 ─────────────────────────────────────────────────────────
     def redraw(self, *_):
-
-
+        """heat-map(선택) + 격자 + 스펙트럼 선 + diff 선을 한 번에 그린다."""
+    
+        # ------------------------------------------------------------------
+        # 0. 레이어 초기화
+        # ------------------------------------------------------------------
+        self.tex_group.clear()
         self.line_group.clear()
- 
-        # ▼ 이하 내용은 self.line_group에 그리도록 수정
-        with self.line_group:
-            PushMatrix(); Translate(self.x, self.y)
-            self._grid()
-
-       
-        # Heat-map 모드
+    
+        # ------------------------------------------------------------------
+        # 1. 히트-맵(텍스처) + overlay 박스  ―― self.tex_group
+        # ------------------------------------------------------------------
         if self._use_tex and self._tex is not None:
-            with self.canvas:
-                PushMatrix()
-                Translate(self.x, self.y)
-                Color(1,1,1,1)
-                Rectangle(texture=self._tex,
-                          pos=(self.PAD_X, self.PAD_Y),
-                          size=(self.width - 2*self.PAD_X,
-                                self.height - 2*self.PAD_Y))
-                Color(.7,.7,.7,.6)
-                self._grid()
-
-                # --- overlay zone ----------------------------
-                Color(1, 0, 0, .35)
+            tg = self.tex_group
+            tg.add(PushMatrix())
+            tg.add(Translate(self.x, self.y))
+    
+            # ① 히트맵 텍스처
+            tg.add(Color(1, 1, 1, 1))
+            tg.add(Rectangle(
+                texture=self._tex,
+                pos=(self.PAD_X, self.PAD_Y),
+                size=(self.width - 2 * self.PAD_X,
+                      self.height - 2 * self.PAD_Y)
+            ))
+    
+            # ② overlay(알람) 박스
+            if self._overlay:
+                tg.add(Color(1, 0, 0, .35))
+                w = self.width  - 2 * self.PAD_X
+                h = self.height - 2 * self.PAD_Y
                 for (t0, t1), (f0, f1) in self._overlay:
-                    # 축 → 화면 좌표 변환
-                    w = self.width  - 2*self.PAD_X
-                    h = self.height - 2*self.PAD_Y
-                    x0 = self.PAD_X + (t0-self.min_x)/(self.max_x-self.min_x)*w
-                    x1 = self.PAD_X + (t1-self.min_x)/(self.max_x-self.min_x)*w
-                    y0 = self.PAD_Y + (f0-self.Y_MIN)/(self.Y_MAX-self.Y_MIN)*h
-                    y1 = self.PAD_Y + (f1-self.Y_MIN)/(self.Y_MAX-self.Y_MIN)*h
-                    Line(rectangle=(x0, y0, x1-x0, y1-y0), width=1.5)
-
-                
-                PopMatrix()
-
-       
- 
-        # ------------------------------- 변경 블록 시작
-        # 지금 라벨이 전혀 없으면 → 새로 만든다
+                    x0 = self.PAD_X + (t0 - self.min_x) / (self.max_x - self.min_x) * w
+                    x1 = self.PAD_X + (t1 - self.min_x) / (self.max_x - self.min_x) * w
+                    y0 = self.PAD_Y + (f0 - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
+                    y1 = self.PAD_Y + (f1 - self.Y_MIN) / (self.Y_MAX - self.Y_MIN) * h
+                    tg.add(Line(rectangle=(x0, y0, x1 - x0, y1 - y0), width=1.5))
+    
+            tg.add(PopMatrix())
+    
+        # ------------------------------------------------------------------
+        # 2. 격자 + 스펙트럼/Δ선  ―― self.line_group
+        # ------------------------------------------------------------------
+        lg = self.line_group
+        lg.add(PushMatrix())
+        lg.add(Translate(self.x, self.y))
+    
+        # ── 2-a) 격자 ------------------------------------------------------
+        for f in self.X_TICKS:
+            if self.min_x <= f <= self.max_x:
+                rel = (f - self.min_x) / (self.max_x - self.min_x)
+                gx  = self.PAD_X + rel * (self.width - 2 * self.PAD_X)
+                lg.add(Line(points=[gx, self.PAD_Y, gx, self.height - self.PAD_Y]))
+    
+        for v in self.Y_TICKS:
+            gy = self.y_pos(v)
+            lg.add(Line(points=[self.PAD_X, gy, self.width - self.PAD_X, gy]))
+    
+        # ── 2-b) X/Y/Z 스펙트럼 -------------------------------------------
+        for rms, pk, axis in self.datasets:
+            col = self.AXIS_CLR[axis]
+            lg.add(Color(*col))                      # 같은 색으로 rms·pk 둘 다
+            lg.add(Line(points=self._scale(rms), width=self.LINE_W))
+            lg.add(Line(points=self._scale(pk),  width=self.LINE_W,
+                        dash_offset=0, dash_length=6))   # pk 는 점선
+    
+        # ── 2-c) diff 선 ---------------------------------------------------
+        if len(self.diff) >= 2:
+            lg.add(Color(1, 1, 1))
+            lg.add(Line(points=self._scale(self.diff), width=self.LINE_W))
+    
+        lg.add(PopMatrix())
+    
+        # ------------------------------------------------------------------
+        # 3. 축 라벨 / 피크 라벨 갱신 (원래 로직 그대로) ---------------------
+        #    • 라벨은 위젯(child) 이므로 canvas 와는 별개로 유지합니다.
+        # ------------------------------------------------------------------
         if self.width < 5 or self.height < 5:
-            self._schedule_redraw()
+            self._schedule_redraw()         # 처음 로테이션 단계에서 크기 0 일 수 있음
             return
-       
+    
         axis_missing = not any(getattr(ch, "_axis", False) for ch in self.children)
-   
-        # 기존 판정 + 라벨 부재 여부까지 포함
-        need_new_axis = ((self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks) or axis_missing                # ◀︎ 여기!
-   
+        need_new_axis = ((self.max_x, (self.Y_MIN, self.Y_MAX)) != self._prev_ticks) or axis_missing
+    
         if need_new_axis:
-            # 남아 있던 라벨 싹 제거
+            # 기존 축 라벨 제거
             for ch in list(self.children):
                 if getattr(ch, "_axis", False):
                     self.remove_widget(ch)
-            # **위젯 크기가 너무 작으면 나중에 다시 그리도록 보류**
+    
             if self.width > 10 and self.height > 10:
                 self._make_labels()
                 self._prev_ticks = (self.max_x, (self.Y_MIN, self.Y_MAX))
             else:
-                # 라벨을 못 그렸으니 다음 프레임에도 다시 시도하게끔
                 self._prev_ticks = (None, None)
-        # ------------------------------- 변경 블록 끝
-
-       
-        # (피크 라벨·배지 제거 코드는 그대로 두세요)
+    
+        # ── 피크 라벨(텍스트 위젯) 처리 ------------------------------------
         for ch in list(self.children):
             if getattr(ch, "_peak", False):
                 self.remove_widget(ch)
-   
-
-        with self.canvas:
-            PushMatrix()
-            Translate(self.x, self.y)
-
-            self._grid()
-            peaks = []                         # (sx, sy, fx, axis, order)
-
-            for rms, pk, axis in self.datasets:
-                # ① 스펙트럼 선 그리기 ------------------------------------
-                for j, pts in enumerate((rms, pk)):
-                    if len(pts) < 2:
-                        continue
-                    Color(*self.AXIS_CLR[axis])
-                    self._safe_line(self._scale(pts), dash=bool(j))
-
-                # ② 이 축에서 큰 순으로 PEAK_N 개 좌표 수집 ---------------
-                # ① 기존 for-루프 안에서 rms 최대값을 찾는 부분을 ↓처럼 바꿉니다
-                sorted_rms = sorted(rms, key=lambda p: p[1], reverse=True)
-                for k, (fx, fy) in enumerate(self._select_peaks(sorted_rms)):
-                    sx, sy = self._scale([(fx, fy)])[:2]
-                    peaks.append((sx, sy, fx, axis, k))
-
-            # diff 그래프 (흰색) --------------------------------------------
-            if len(self.diff) >= 2:
-                Color(1, 1, 1)
-                self._safe_line(self._scale(self.diff))
-
-
-                diff_sorted = sorted(self.diff,
-                                     key=lambda p: abs(p[1]), reverse=True)
-                for k, (fx, fy) in enumerate(self._select_peaks(diff_sorted)):
-                    sx, sy = self._scale([(fx, fy)])[:2]
-                    peaks.append((sx, sy, fx, 'diff', k, fy))
-
-
-            PopMatrix()
-
-
-        # ── ③ 피크 라벨 배치 -----------------------------------------------
+    
+        peaks = []  # (sx, sy, fx, axis, order [, diff_val])
+        for rms, pk, axis in self.datasets:
+            sorted_rms = sorted(rms, key=lambda p: p[1], reverse=True)
+            for k, (fx, fy) in enumerate(self._select_peaks(sorted_rms)):
+                sx, sy = self._scale([(fx, fy)])[:2]
+                peaks.append((sx, sy, fx, axis, k))
+    
+        if len(self.diff) >= 2:
+            diff_sorted = sorted(self.diff, key=lambda p: abs(p[1]), reverse=True)
+            for k, (fx, fy) in enumerate(self._select_peaks(diff_sorted)):
+                sx, sy = self._scale([(fx, fy)])[:2]
+                peaks.append((sx, sy, fx, 'diff', k, fy))
+    
+        # 실제 라벨 위젯 생성
         for pt in peaks:
-            if len(pt) == 5:                      # ▸ X / Y / Z 라벨 (기존 형태)
+            if len(pt) == 5:                       # X/Y/Z
                 sx, sy, fx, axis, order = pt
-                txt  = f"{fx:.1f} Hz"
-                color = self.AXIS_CLR[axis] + (1,)
-            else:                                 # ▸ diff 라벨  (Hz + dB)
-                sx, sy, fx, axis, order, dv = pt   # axis 값은 'diff' 자리 → 쓰진 않음
-                txt  = f"{fx:.1f} Hz\n{dv:+.1f} dB"
-                color = (1, 1, 1, 1)               # 흰색
-       
+                txt, color = f"{fx:.1f} Hz", self.AXIS_CLR[axis] + (1,)
+            else:                                  # diff
+                sx, sy, fx, axis, order, dv = pt
+                txt, color = f"{fx:.1f} Hz\n{dv:+.1f} dB", (1, 1, 1, 1)
+    
             lbl = Label(text=txt, color=color, size_hint=(None, None))
             lbl.texture_update()
             w, h = lbl.texture_size
-       
-            # 꼭짓점 위에서 조금 띄워, 그래프 영역 안쪽에 배치
+    
             px = self.x + sx - w / 2
-            py = self.y + min(sy + 8 + order * 14,
-                              self.height - h - 4)
-       
+            py = self.y + min(sy + 8 + order * 14, self.height - h - 4)
             lbl.pos = (px, py)
             lbl._peak = True
             self.add_widget(lbl)
-
-        # 기존 피크 라벨 처리 아래에 ↓ (배지 Label 제거용)
-        for ch in list(self.children):
-            if getattr(ch, "_badge", False) and ch.text != self.status_text:
-                self.remove_widget(ch)
-
 
 
     # === NEW [GraphWidget methods] ---------------------------------------------
