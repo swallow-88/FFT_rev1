@@ -600,6 +600,15 @@ class GraphWidget(Widget):
         self._use_tex = False
         self._tex = None
         self.x_unit = "Hz"
+        
+        # ── Heat-map 레이어 두 개를 __init__ 안에서 생성 ―――――――――――――――――
+        from kivy.graphics import InstructionGroup
+        self.tex_group  = InstructionGroup()   # 히트맵 · 오버레이
+        self.line_group = InstructionGroup()   # 격자 · 선 · 텍스트
+        self.canvas.add(self.tex_group)
+        self.canvas.add(self.line_group)
+
+    
 
     def set_overlay(self, boxes):
         """
@@ -609,29 +618,25 @@ class GraphWidget(Widget):
         self._schedule_redraw()
        
        
-    # ── Heat-map 전용 ----------
 
-        from kivy.graphics import InstructionGroup
-        self.tex_group  = InstructionGroup()   # 히트맵·오버레이
-        self.line_group = InstructionGroup()   # 선/격자/텍스트
-        self.canvas.add(self.tex_group)
-        self.canvas.add(self.line_group)
  
-
     def set_texture(self, tex):
-        """STFT 모드: 히트맵 교체.  기존 선(Line) 레이어는 건드리지 않는다."""
+
+        """STFT 모드: 히트맵 교체 + redraw 요청"""
         self.tex_group.clear()
+        self._tex      = tex
+        self._use_tex  = tex is not None
         if tex is None:
+            self._schedule_redraw()
             return
         from kivy.graphics import PushMatrix, PopMatrix, Translate, Color, Rectangle
         with self.tex_group:
             PushMatrix(); Translate(self.x, self.y)
             Color(1,1,1,1)
             Rectangle(texture=tex,
-                      pos=(self.PAD_X, self.PAD_Y),
-                      size=(self.width-2*self.PAD_X,
-                            self.height-2*self.PAD_Y))
+
             PopMatrix()
+ 
 
         self._schedule_redraw()   # 격자·라벨만 다시
 
