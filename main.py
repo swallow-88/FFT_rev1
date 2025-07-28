@@ -611,22 +611,46 @@ class GraphWidget(Widget):
        
     # ── Heat-map 전용 ----------
 
-    def set_texture(self, tex):
-        self._tex = tex
-        if not hasattr(self, "_tex_rect"):           # 처음 한 번만
-            with self.canvas:
-                PushMatrix(); Translate(self.x, self.y)
-                Color(1,1,1,1)
-                self._tex_rect = Rectangle(          # ← 보관
-                    texture=tex,
-                    pos=(self.PAD_X, self.PAD_Y),
-                    size=(self.width-2*self.PAD_X, self.height-2*self.PAD_Y))
-                PopMatrix()
-        else:
-            self._tex_rect.texture = tex             # 깜박임 없이 교체
+        from kivy.graphics import InstructionGroup
+        self.tex_group  = InstructionGroup()   # 히트맵·오버레이
+        self.line_group = InstructionGroup()   # 선/격자/텍스트
+        self.canvas.add(self.tex_group)
+        self.canvas.add(self.line_group)
+ 
 
-        self._use_tex = tex is not None
-        self._schedule_redraw()      # 격자/라벨만 다시 그리기
+    def set_texture(self, tex):
+        """STFT 모드: 히트맵 교체.  기존 선(Line) 레이어는 건드리지 않는다."""
+        self.tex_group.clear()
+        if tex is None:
+            return
+        from kivy.graphics import PushMatrix, PopMatrix, Translate, Color, Rectangle
+        with self.tex_group:
+            PushMatrix(); Translate(self.x, self.y)
+            Color(1,1,1,1)
+            Rectangle(texture=tex,
+                      pos=(self.PAD_X, self.PAD_Y),
+                      size=(self.width-2*self.PAD_X,
+                            self.height-2*self.PAD_Y))
+            PopMatrix()
+
+        self._schedule_redraw()   # 격자·라벨만 다시
+
+    #def set_texture(self, tex):
+    #    self._tex = tex
+    #    if not hasattr(self, "_tex_rect"):           # 처음 한 번만
+    #        with self.canvas:
+    #            PushMatrix(); Translate(self.x, self.y)
+    #            Color(1,1,1,1)
+    #            self._tex_rect = Rectangle(          # ← 보관
+    #                texture=tex,
+    #                pos=(self.PAD_X, self.PAD_Y),
+    #                size=(self.width-2*self.PAD_X, self.height-2*self.PAD_Y))
+    #            PopMatrix()
+    #    else:
+    #        self._tex_rect.texture = tex             # 깜박임 없이 교체
+
+    #    self._use_tex = tex is not None
+    #    self._schedule_redraw()      # 격자/라벨만 다시 그리기
 
 
     def _peak_label_pos(self, order):
@@ -849,8 +873,15 @@ class GraphWidget(Widget):
 
     # ───────────────────────────── 핵심 redraw
     def redraw(self, *_):
-        self.canvas.clear()
-       
+
+
+        self.line_group.clear()
+ 
+        # ▼ 이하 내용은 self.line_group에 그리도록 수정
+        with self.line_group:
+            PushMatrix(); Translate(self.x, self.y)
+            self._grid()
+
        
         # Heat-map 모드
         if self._use_tex and self._tex is not None:
@@ -1138,9 +1169,11 @@ class FFTApp(App):
 
 
     def _restart_rt_thread(self):
+        if not self.rt_on:
+            return
         # ① 이전 스레드 종료 플래그
         self.rt_on = False
-        time.sleep(0.6)
+        time.sleep(0.3)
         # ② 플래그 켜고 새 스레드
         self.rt_on = True
         target = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
@@ -1153,13 +1186,15 @@ class FFTApp(App):
         self.btn_view.text = f"VIEW: {self.view_mode}"
     
         # 실시간 버튼이 ON 이면 스레드만 갈아끼우기
-        if self.rt_on:
-            self._restart_rt_thread()
+       # if self.rt_on:
+       #     self._restart_rt_thread()
     
         # 그래프(clear) – 선·텍스쳐 모두 제거
         for g in self.graphs:
             g.clear_texture()
             g.update_graph([], [], g.max_x)
+            g.set_texture(None)
+        self._restart_rt_thread()
 
 
 
