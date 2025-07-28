@@ -630,12 +630,17 @@ class GraphWidget(Widget):
             self._schedule_redraw()
             return
         from kivy.graphics import PushMatrix, PopMatrix, Translate, Color, Rectangle
+        # GraphWidget.set_texture()  내부
         with self.tex_group:
             PushMatrix(); Translate(self.x, self.y)
-            Color(1,1,1,1)
-            Rectangle(texture=tex,
-
-            PopMatrix()
+            Color(1, 1, 1, 1)
+            Rectangle(                      # ← 여는 (
+                texture=tex,
+                pos=(self.PAD_X, self.PAD_Y),
+                size=(self.width - 2*self.PAD_X,
+                      self.height - 2*self.PAD_Y)
+            )                               # ← 첫 번째 닫기
+            PopMatrix()                     # ← 두 번째 닫기
  
 
         self._schedule_redraw()   # 격자·라벨만 다시
