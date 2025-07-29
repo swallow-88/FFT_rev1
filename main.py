@@ -698,7 +698,7 @@ class GraphWidget(Widget):
         self.lbl_x.texture_update()
 
         tick_base_y = self.y + self.PAD_Y - 28      # 눈금 숫자가 찍히는 y
-        gap        = 12                             # 숫자 밑으로 내릴 거리
+        gap        = 24                             # 숫자 밑으로 내릴 거리
         self.lbl_x.pos = (
             self.x + (self.width - self.lbl_x.texture_size[0]) / 2,
             tick_base_y - gap - self.lbl_x.texture_size[1]
