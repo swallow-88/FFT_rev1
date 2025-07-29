@@ -572,6 +572,7 @@ class GraphWidget(Widget):
         self.bind(size=self._schedule_redraw, pos = self._schedule_redraw)
 
         self._overlay = []
+        self.status_lbl.opacity = 0
         
 
        # ───────────────────────────── 축 라벨
