@@ -691,10 +691,16 @@ class GraphWidget(Widget):
     def _reposition_titles(self, *_):
         # X축 : 위젯 아래쪽 중앙
         # X축 제목 – 눈금 숫자보다 살짝 더 아래
+
+        # X축 제목 : 숫자 눈금보다 12 px 더 아래
         self.lbl_x.texture_update()
-        tick_y = self.y + self.PAD_Y - 28              # 숫자 라벨 Y
-        self.lbl_x.pos = (self.x + (self.width - self.lbl_x.texture_size[0]) / 2,
-                          tick_y - self.lbl_x.texture_size[1] - 8)  # 4px 여유
+
+        tick_base_y = self.y + self.PAD_Y - 28      # 눈금 숫자가 찍히는 y
+        gap        = 12                             # 숫자 밑으로 내릴 거리
+        self.lbl_x.pos = (
+            self.x + (self.width - self.lbl_x.texture_size[0]) / 2,
+            tick_base_y - gap - self.lbl_x.texture_size[1]
+        )
 
         # Y축 : 왼쪽 가운데 (회전돼 있으므로 width/height 바뀜)
         self.lbl_y.texture_update()
@@ -789,12 +795,12 @@ class GraphWidget(Widget):
 
         # ── 상태 배지 텍스트/색상 ───────────────────────
    
-        if status is not None:
-            self.status_lbl.text  = status
-            self.status_lbl.color = (1,0,0,1) if status.startswith("PLZ") else (0,1,0,1)
-        else:
+        #if status is not None:
+        #    self.status_lbl.text  = status
+        #    self.status_lbl.color = (1,0,0,1) if status.startswith("PLZ") else (0,1,0,1)
+        #else:
             # 실시간 호출 등으로 배지를 지우고 싶을 때는 None/""를 넘겨서 빈 문자열 처리
-            self.status_lbl.text = ""
+        #    self.status_lbl.text = ""
 
         self._prev_ticks = (None, None)
        
