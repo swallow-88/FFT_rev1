@@ -548,6 +548,8 @@ class GraphWidget(Widget):
     X_TICKS = [5,10,20,30,40,50]
     PEAK_N = 3
     PEAK_MIN_SEP = 2.0
+    PEAK_FONT = '10sp'
+    PEAK_LINE_H = 18
  
     # 축 고유 색상:  X=Red, Y=Green, Z=Blue
     AXIS_CLR = {"x":(1,0,0), "y":(0,1,0), "z":(0,1,1)}
@@ -692,7 +694,7 @@ class GraphWidget(Widget):
         self.lbl_x.texture_update()
         tick_y = self.y + self.PAD_Y - 28              # 숫자 라벨 Y
         self.lbl_x.pos = (self.x + (self.width - self.lbl_x.texture_size[0]) / 2,
-                          tick_y - self.lbl_x.texture_size[1] - 4)  # 4px 여유
+                          tick_y - self.lbl_x.texture_size[1] - 8)  # 4px 여유
 
         # Y축 : 왼쪽 가운데 (회전돼 있으므로 width/height 바뀜)
         self.lbl_y.texture_update()
@@ -1013,12 +1015,17 @@ class GraphWidget(Widget):
                 sx, sy, fx, axis, order, dv = pt
                 txt, color = f"{fx:.1f} Hz\n{dv:+.1f} dB", (1, 1, 1, 1)
     
-            lbl = Label(text=txt, color=color, size_hint=(None, None))
+
+            lbl = Label(text=txt, color=color, font_size=self.PEAK_FONT,
+                        size_hint=(None, None))
+
+
+
             lbl.texture_update()
             w, h = lbl.texture_size
     
             px = self.x + sx - w / 2
-            py = self.y + min(sy + 8 + order * 14, self.height - h - 4)
+            py = self.y + min(sy + 8 + order * self.PEAK_LINE_H, self.height - h - 4)
             lbl.pos = (px, py)
             lbl._peak = True
             self.add_widget(lbl)
@@ -1085,7 +1092,7 @@ class FFTApp(App):
        
        
         self.status_lbl = Label(text='',
-                           halign='left', valign='middle', color=(1,1,1,1),
+                           halign='left', valign='middle', color=(0, 1, 0, 0),
                            size_hint_y=None)
         # 높이 자동 조정
         self.status_lbl.bind(size=lambda lbl,*_:
@@ -1246,11 +1253,11 @@ class FFTApp(App):
    
         # 색상 : 결과(PLZ/GOOD)가 있으면 우선, 없으면 진행중 여부
         if self._status['result'].startswith("PLZ"):
-            self.status_lbl.color = (1, 0, 0, 1)   # 빨강
+            self.status_lbl.color = (0,1,0,0)   # 빨강
         elif self._status['result'].startswith("GOOD"):
-            self.status_lbl.color = (0, 1, 0, 1)   # 초록
+            self.status_lbl.color = (0,1,0,0)   # 초록
         else:                                 # 회색 계열
-            self.status_lbl.color = (.9, .9, .9, 1)
+            self.status_lbl.color = (0,1,0,0)
 
 
     # ───────────────────────────── 헬퍼
@@ -1529,9 +1536,9 @@ class FFTApp(App):
     # FFTApp 내부에 새 메서드 추가
     # ─── FFTApp 내부 · _rt_stft_loop  (once 도 동일) ──────────────────
     def _rt_stft_loop(self):
-        RT_REFRESH_SEC = 0.5
+        RT_REFRESH_SEC = 0.25
         MIN_FS         = 50
-        WIN, HOP       = (4096, 256) if HIRES else (2048, 512)
+        WIN, HOP       = (4096, 128) if HIRES else (2048, 256)
     
         try:
             while self.rt_on and self.view_mode == "STFT":      # ← rt_view 체크
@@ -1628,7 +1635,7 @@ class FFTApp(App):
         (실시간 루프가 필요 없는 ‘수동 새로고침’ 용도)
         """
         MIN_FS        = 50
-        WIN, HOP      = (4096, 256) if HIRES else (2048, 512)
+        WIN, HOP      = (4096, 128) if HIRES else (2048, 256)
     
         # ----- ① 버퍼 스냅샷 -----
         with self._buf_lock:
