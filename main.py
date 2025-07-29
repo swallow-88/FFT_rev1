@@ -593,7 +593,7 @@ class GraphWidget(Widget):
 
         self.status_lbl = Label(bold=True,
                                 font_size='16sp',
-                                color=(0, 1, 0, 1),   # default green
+                                color=(0, 1, 0, 0),   # default green
                                 size_hint=(None, None))
         self.add_widget(self.status_lbl)
 
@@ -1092,7 +1092,7 @@ class FFTApp(App):
        
        
         self.status_lbl = Label(text='',
-                           halign='left', valign='middle', color=(0, 1, 0, 0),
+                           halign='left', valign='middle', color=(1,1,1,1),
                            size_hint_y=None)
         # 높이 자동 조정
         self.status_lbl.bind(size=lambda lbl,*_:
@@ -1253,11 +1253,11 @@ class FFTApp(App):
    
         # 색상 : 결과(PLZ/GOOD)가 있으면 우선, 없으면 진행중 여부
         if self._status['result'].startswith("PLZ"):
-            self.status_lbl.color = (0,1,0,0)   # 빨강
+            self.status_lbl.color = (1,0,0,1)   # 빨강
         elif self._status['result'].startswith("GOOD"):
-            self.status_lbl.color = (0,1,0,0)   # 초록
+            self.status_lbl.color = (0,1,0,1)   # 초록
         else:                                 # 회색 계열
-            self.status_lbl.color = (0,1,0,0)
+            self.status_lbl.color = (.9, .9, .9 ,1)
 
 
     # ───────────────────────────── 헬퍼
