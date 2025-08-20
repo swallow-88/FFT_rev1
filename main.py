@@ -1232,7 +1232,7 @@ class FFTApp(App):
 
         # ★ 실시간 ON 상태에서 STFT로 전환했다면 첫 프레임 즉시 렌더
         if self.rt_on and self.view_mode == "STFT":
-            self._rt_stft_once(
+            self._rt_stft_once()
 
 
 
