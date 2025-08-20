@@ -426,7 +426,7 @@ def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
         X = _rfft(seg)
         # ▼ 수정: FFT와 동일한 RMS 단일측 정규화
         spec[:, i] = 2.0 * np.abs(X) / (win * np.sqrt(2.0))
-    spec = np.sqrt(spec)
+    #spec = np.sqrt(spec)
     f = np.fft.rfftfreq(win, 1/fs)
     t = (np.arange(nfrm)*hop + win/2)/fs
     return spec, f, t
@@ -1198,17 +1198,10 @@ class FFTApp(App):
     def _restart_rt_thread(self):
         if not self.rt_on:
             return
-        # ① 끊기
-        self.rt_on = False
-        time.sleep(0.1)
-    
-        # ② 재시작: 센서/폴링 재등록 + 새 루프 시작
-        self.rt_on = True
-        try:
-            accelerometer.enable()
-        except Exception:
-            pass
-        Clock.schedule_interval(self._poll_accel, 0)  # ★ 이 줄이 핵심
+        # ❌ 아래 두 줄 제거
+        # self.rt_on = False
+        # time.sleep(0.3)
+        # self.rt_on = True
     
         target = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
         threading.Thread(target=target, daemon=True).start()
@@ -1391,7 +1384,7 @@ class FFTApp(App):
                 self.btn_rt.text=f"Realtime {self.view_mode} (OFF)"
                 return
     
-            Clock.schedule_interval(self._poll_accel, 1/120.0)
+            Clock.schedule_interval(self._poll_accel, 0)
                 
             # ❶ ← 실시간 화면( rt_view ) 기준으로 스레드 선택
             thread_func = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
@@ -1518,7 +1511,8 @@ class FFTApp(App):
                     f_vals    = np.array([y for _, y in rms_line])
                     band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
                     if band_sel.any():
-                        self.last_fn = f_centres[band_sel][f_vals[band_sel].max(axis=0, initial=-1).argmax()]
+                        idx = int(np.argmax(f_vals[band_sel]))
+                        self.last_fn = float(f_centres[band_sel][idx])
     
                     axis_sets[ax] = (rms_line, pk_line, ax)
                     xmax = max(xmax, FMAX)
@@ -1542,13 +1536,11 @@ class FFTApp(App):
     # ─── FFTApp 내부 · _rt_stft_loop  (once 도 동일) ──────────────────
     def _rt_stft_loop(self):
         RT_REFRESH_SEC = 0.25
-        MIN_FS         = 50
+        MIN_FS = 30               # (50이 너무 타이트하면 30으로)
         win_sec = HIRES_LEN_SEC if HIRES else 4
-        WIN = next_pow2(int(fs * win_sec))
-        HOP = max(1, WIN // 16)
-            
+    
         try:
-            while self.rt_on and self.view_mode == "STFT":      # ← rt_view 체크
+            while self.rt_on and self.view_mode == "STFT":
                 time.sleep(RT_REFRESH_SEC)
     
                 with self._buf_lock:
@@ -1556,85 +1548,67 @@ class FFTApp(App):
     
                 tex_list = []
                 for ax in "xyz":
-                    # ── ① 버퍼 길이 / fs 확인 ─────────────────────────────
                     if len(snap[ax]) < MIN_FS * 4:
                         tex_list.append(None); continue
     
                     t_arr, val_arr, _ = zip(*snap[ax])
-                    fs = robust_fs(t_arr[-2048:])
+                    fs = robust_fs(np.asarray(t_arr)[-2048:])
                     if fs is None or fs < MIN_FS:
                         tex_list.append(None); continue
     
-                    # ── ② STFT 계산 (선형 스펙) ───────────────────────────
+                    # ★ 여기서 계산해야 합니다 (fs 이후)
+                    WIN = next_pow2(int(fs * win_sec))
+                    HOP = max(1, WIN // 16)
+    
                     sig = np.asarray(val_arr, float)
                     lin, f_ax, t_ax = stft_np(sig, fs, win=WIN, hop=HOP)
                     sel_f = (f_ax >= HPF_CUTOFF) & (f_ax <= MAX_FMAX)
-
                     if not sel_f.any():
                         tex_list.append(None); continue
     
                     lin  = lin[sel_f, :]
                     f_ax = f_ax[sel_f]
-                    f_mat = f_ax[:, None]          # (F,1)  브로드캐스트용
+                    f_mat = f_ax[:, None]
     
-                    # ── ③ ACC ↔ VEL & dB 변환 ---------------------------
                     if MEAS_MODE == "VEL":
                         amp = lin / (2*np.pi*np.where(f_mat < 1e-6, 1e-6, f_mat)) * 1e3
                         ref = REF_MM_S
-                        vmin, vmax = -40, 40        # mm/s 표시범위
-                    else:                           # ACC 모드
-                        amp = lin
-                        ref = REF_ACC
-                        vmin, vmax = -50, 50        # m/s² 표시범위
+                    else:
+                        amp = lin; ref = REF_ACC
     
-                    # _rt_stft_loop / _rt_stft_once  ─ dB 변환 직후
                     db = 20*np.log10(np.maximum(amp, ref*MIN_AMP_RATIO)/ref)
-                    
-
-                    p5, p95 = np.percentile(db, [5, 95])     # 분포 중심 90 %
-                    vmin, vmax = p5, p95
-            
-                    # (선택) 폭이 너무 좁으면 최소 40 dB로 강제
-                    if vmax - vmin < 40:
-                        mid = (vmax + vmin) * 0.5
-                        vmin, vmax = mid - 20, mid + 20
-                    
-                    tex = heatmap_to_texture(db, vmin=vmin, vmax=vmax, lut=TURBO)
-                    tex_list.append((db, f_ax[-1], t_ax[-1]))
     
-                # ── ⑤ UI 갱신 -------------------------------------------------
-                if any(tex_list):
+                    # 가시화 스케일(원하는 방식으로 택1)
+                    p5, p95 = np.percentile(db, [5, 95])
+                    vmin, vmax = p5, p95
+                    if vmax - vmin < 40:
+                        mid = 0.5*(vmax+vmin); vmin, vmax = mid-20, mid+20
+    
+                    tex_list.append((db, f_ax[-1], t_ax[-1], vmin, vmax))
+    
+                if any(item is not None for item in tex_list):
                     def _update(_dt, tl=tex_list):
                         for g, item in zip(self.graphs, tl):
                             if item is None:
                                 if not g._use_tex:
                                     g.clear_texture()
                                 continue
-                    
-                            db_mat, f_max, t_max = item
-                            # ★ 여기에서 생성 ★
-                            tex = heatmap_to_texture(
-                                    db_mat,
-                                    vmin=-40 if MEAS_MODE=="VEL" else -50,
-                                    vmax= 40 if MEAS_MODE=="VEL" else  50,
-                                    lut=TURBO)
-
+                            db_mat, f_max, t_max, vmin, vmax = item
+                            tex = heatmap_to_texture(db_mat, vmin=vmin, vmax=vmax, lut=TURBO)
+    
                             g.datasets, g.diff = [], []
-
                             g.x_unit, g.min_x, g.max_x = "s", 0.0, float(t_max)
                             g.X_TICKS = [round(x,2) for x in np.linspace(0,t_max,6)]
                             g.Y_MIN = HPF_CUTOFF
                             g.Y_MAX = float(f_max)
-                            g.Y_TICKS = list(range(int(HPF_CUTOFF), int(f_max)+1,10))
+                            g.Y_TICKS = list(range(int(HPF_CUTOFF), int(f_max)+1, 10))
                             g.lbl_x.text, g.lbl_y.text = "Time (s)", "Freq (Hz)"
-                    
                             g._prev_ticks = (None, None)
-                            g.set_texture(tex)     
+                            g.set_texture(tex)
                     Clock.schedule_once(_update)
-    
         except Exception:
             Logger.exception("Realtime STFT thread crashed")
-    
+        
     
     def _rt_stft_once(self, *_):
         """
