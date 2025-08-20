@@ -1196,11 +1196,8 @@ class FFTApp(App):
     def _restart_rt_thread(self):
         if not self.rt_on:
             return
-        # ① 이전 스레드 종료 플래그
-        self.rt_on = False
-        time.sleep(0.3)
-        # ② 플래그 켜고 새 스레드
-        self.rt_on = True
+        # ❌ self.rt_on을 False로 내렸다가 다시 True로 올리면 _poll_accel이 unschedule됨
+        # ✅ 폴링은 그대로 두고, 분석 워커만 새로 시작 (기존 워커는 view_mode 검사로 자연 종료)
         target = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
         threading.Thread(target=target, daemon=True).start()
 
@@ -1378,7 +1375,7 @@ class FFTApp(App):
                 self.btn_rt.text=f"Realtime {self.view_mode} (OFF)"
                 return
     
-            Clock.schedule_interval(self._poll_accel, 0)
+            Clock.schedule_interval(self._poll_accel, 1/120.0)
                 
             # ❶ ← 실시간 화면( rt_view ) 기준으로 스레드 선택
             thread_func = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
@@ -1430,54 +1427,41 @@ class FFTApp(App):
     #  FFT 실시간 분석 루프 – 최종 수정본
     # ──────────────────────────────────────────────────────────────
     def _rt_fft_loop(self):
-    # ↓ 기존 FFT 코드 그대로
-
-        """
-        0.5 초마다 가속도 버퍼 스냅샷 → Welch-like 대역 RMS/Peak 계산 → 그래프 갱신
-        Hi-Res 모드가 ON이면
-          · 분석 길이 = HIRES_LEN_SEC
-          · 다중 DPSS 테이퍼(N_TAPER) 평균 사용
-        """
-        RT_REFRESH_SEC  = 0.5          # UI 갱신 속도
-        MIN_FS          = 50           # 최소 유효 샘플링 주파수
-        N_KEEP_FS_EST   = 2048         # fs 추정 시 뒤쪽 N개만 사용
-   
+        RT_REFRESH_SEC  = 0.5
+        MIN_FS_GATE     = 20.0          # ← 너무 보수적이면 빈화면이 잦아짐, 20Hz로 완화
+        N_KEEP_FS_EST   = 2048
+        SEG_LEN_SEC     = HIRES_LEN_SEC if HIRES else 4
+    
         try:
             while self.rt_on and self.view_mode == "FFT":
                 time.sleep(RT_REFRESH_SEC)
-   
-                # ① 버퍼 스냅샷 (락 보호) ---------------------------------
+    
                 with self._buf_lock:
                     snap = {ax: list(self.rt_buf[ax]) for ax in "xyz"}
-   
-                axis_sets: dict[str, tuple] = {}
-                xmax = 0.0
-   
-                # ② 축별 FFT 분석 ----------------------------------------
+    
+                axis_sets, xmax = {}, 0.0
+    
                 for ax in "xyz":
-                    if len(snap[ax]) < MIN_FS * (HIRES_LEN_SEC if HIRES else 4):
+                    if len(snap[ax]) < 8:      # 형식적 최소 (빈 버퍼 빠른 skip)
                         continue
-   
-                    # ── robust fs 추정
+    
                     t_arr, val_arr, _ = zip(*snap[ax])
-                    fs = robust_fs(t_arr[-N_KEEP_FS_EST:])
-                    if fs is None or fs < MIN_FS:
+    
+                    # ✅ 실제 타임스탬프 기반 fs 추정
+                    fs = robust_fs(np.asarray(t_arr)[-N_KEEP_FS_EST:], min_fs=MIN_FS_GATE)
+                    if fs is None:                # 샘플 불안정/너무 느림
                         continue
-   
-                    # ── FFT 길이 : 2^n 로 패딩
-                    seg_len_sec = HIRES_LEN_SEC if HIRES else 4
-                    fft_len     = next_pow2(int(fs * seg_len_sec))
+    
+                    # ✅ 실제 fs로 필요한 길이 산정(2의 거듭제곱 padding)
+                    fft_len = next_pow2(int(max(8, fs * SEG_LEN_SEC)))
                     if len(val_arr) < fft_len:
-                        continue      # 샘플 부족
-   
-                    # 최근 fft_len 구간 추출
+                        continue
+    
                     sig = np.asarray(val_arr[-fft_len:], float)
-                    sig = sig - sig.mean()        # DC 제거
-   
-                    # ── 창 & 스펙트럼 ---------------------------------
+                    sig = sig - sig.mean()
+    
                     if HIRES and USE_MULTITAPER and ss is not None:
-                        tapers  = ss.windows.dpss(fft_len, NW=2.5,
-                                                  Kmax=N_TAPER, sym=False)
+                        tapers  = ss.windows.dpss(fft_len, NW=2.5, Kmax=N_TAPER, sym=False)
                         spec_sq = 0.0
                         for tap in tapers:
                             spec_sq += np.abs(np.fft.rfft(sig * tap))**2
@@ -1485,60 +1469,57 @@ class FFTApp(App):
                     else:
                         win   = np.hanning(fft_len)
                         amp_a = 2 * np.abs(np.fft.rfft(sig * win)) / (fft_len*np.sqrt(2))
-   
+    
                     freq    = np.fft.rfftfreq(fft_len, d=1/fs)
                     amp_lin, ref0 = acc_to_spec(freq, amp_a)
-   
-                    # ── 0.5 Hz 밴드 RMS / Peak -------------------------
-                    rms_line, pk_line = [], []
+    
+                    # 표시 상한은 항상 Nyquist 이내
                     FMAX = min(MAX_FMAX, fs * 0.5)
-                   # ① Welch 루프 대역폭
+                    if FMAX < HPF_CUTOFF + BAND_HZ:   # 유효 대역 자체가 없음
+                        continue
+    
+                    rms_line, pk_line = [], []
                     for lo in np.arange(CFG["HPF_CUTOFF"], FMAX, CFG["BAND_HZ"]):
-
-                        hi  = lo + BAND_HZ
+                        hi  = lo + CFG["BAND_HZ"]
                         sel = (freq >= lo) & (freq < hi)
                         if not sel.any():
                             continue
-                        cen = (lo + hi) * 0.5
+                        cen = 0.5*(lo+hi)
                         rms = np.sqrt(np.mean(amp_lin[sel]**2))
                         pk  = amp_lin[sel].max()
                         rms_line.append((cen, 20*np.log10(max(rms, ref0*MIN_AMP_RATIO)/ref0)))
                         pk_line .append((cen, 20*np.log10(max(pk , ref0*MIN_AMP_RATIO)/ref0)))
-   
+    
                     if not rms_line:
                         continue
-   
-                    # ── 스무딩
+    
                     if len(rms_line) >= CFG["SMOOTH_N"]:
                         ys = smooth_y([y for _, y in rms_line])
                         rms_line = [(x, y) for (x, _), y in zip(rms_line, ys)]
-                       
-                    # ── 공진 주파수(Fₙ) 추적 ---------------------------
+    
+                    # Fₙ 추적 (있는 경우)
                     f_centres = np.array([x for x, _ in rms_line])
                     f_vals    = np.array([y for _, y in rms_line])
                     band_sel  = (f_centres >= FN_BAND[0]) & (f_centres <= FN_BAND[1])
                     if band_sel.any():
-                        self.last_fn = f_centres[band_sel][f_vals[band_sel].argmax()]
-   
-                    # ── 결과 저장
+                        self.last_fn = f_centres[band_sel][f_vals[band_sel].max(axis=0, initial=-1).argmax()]
+    
                     axis_sets[ax] = (rms_line, pk_line, ax)
                     xmax = max(xmax, FMAX)
-   
-                # ③ UI 스레드로 그래프 업데이트 ---------------------------
+    
                 if axis_sets:
                     def _update(_dt, sets=axis_sets, xm=xmax):
                         for ax, g in zip("xyz", self.graphs):
                             if ax in sets:
-                                g.update_graph([sets[ax]], [], xm, mode = "FFT")   # status 없음
+                                g.update_graph([sets[ax]], [], xm, mode="FFT")
                             else:
-                                g.update_graph([], [], xm, mode = "FFT")           # 빈 그래프
+                                g.update_graph([], [], xm, mode="FFT")
                     Clock.schedule_once(_update)
-   
+    
         except Exception:
             Logger.exception("Realtime FFT thread crashed")
             self.rt_on = False
-            Clock.schedule_once(
-                lambda *_: setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
+            Clock.schedule_once(lambda *_: setattr(self.btn_rt, "text", "Realtime FFT (OFF)"))
            
 
     # FFTApp 내부에 새 메서드 추가
