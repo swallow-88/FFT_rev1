@@ -148,7 +148,7 @@ def heatmap_to_texture(mat_db: np.ndarray,
     rgba[...,  3] = 255                          # alpha=opaque
 
     tex = Texture.create(size=rgba.shape[1::-1], colorfmt='rgba')
-    tex.blit_buffer(rgba[::-1].tobytes(), colorfmt='rgba', bufferfmt='ubyte')
+    tex.blit_buffer(rgba.tobytes(), colorfmt='rgba', bufferfmt='ubyte')
     tex.wrap = 'clamp_to_edge'
     mode = 'nearest' if nearest else 'linear'
     tex.min_filter = tex.mag_filter = mode
@@ -423,7 +423,9 @@ def stft_np(sig, fs, win=4096, hop=256, window=np.hanning):
     spec = np.empty((win//2+1, nfrm), np.float32)
     for i in range(nfrm):
         seg = sig[i*hop:i*hop+win] * w
-        spec[:, i] = np.square(np.abs(_rfft(seg)))
+        X = _rfft(seg)
+        # ▼ 수정: FFT와 동일한 RMS 단일측 정규화
+        spec[:, i] = 2.0 * np.abs(X) / (win * np.sqrt(2.0))
     spec = np.sqrt(spec)
     f = np.fft.rfftfreq(win, 1/fs)
     t = (np.arange(nfrm)*hop + win/2)/fs
@@ -1527,8 +1529,10 @@ class FFTApp(App):
     def _rt_stft_loop(self):
         RT_REFRESH_SEC = 0.25
         MIN_FS         = 50
-        WIN, HOP       = (4096, 128) if HIRES else (2048, 256)
-    
+        win_sec = HIRES_LEN_SEC if HIRES else 4
+        WIN = next_pow2(int(fs * win_sec))
+        HOP = max(1, WIN // 16)
+            
         try:
             while self.rt_on and self.view_mode == "STFT":      # ← rt_view 체크
                 time.sleep(RT_REFRESH_SEC)
@@ -1605,8 +1609,9 @@ class FFTApp(App):
 
                             g.x_unit, g.min_x, g.max_x = "s", 0.0, float(t_max)
                             g.X_TICKS = [round(x,2) for x in np.linspace(0,t_max,6)]
-                            g.Y_MIN,  g.Y_MAX = 0.0, float(f_max)
-                            g.Y_TICKS = list(range(0,int(f_max)+1,10))
+                            g.Y_MIN = HPF_CUTOFF
+                            g.Y_MAX = float(f_max)
+                            g.Y_TICKS = list(range(int(HPF_CUTOFF), int(f_max)+1,10))
                             g.lbl_x.text, g.lbl_y.text = "Time (s)", "Freq (Hz)"
                     
                             g._prev_ticks = (None, None)
