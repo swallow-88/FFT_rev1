@@ -1198,8 +1198,18 @@ class FFTApp(App):
     def _restart_rt_thread(self):
         if not self.rt_on:
             return
-        # ❌ self.rt_on을 False로 내렸다가 다시 True로 올리면 _poll_accel이 unschedule됨
-        # ✅ 폴링은 그대로 두고, 분석 워커만 새로 시작 (기존 워커는 view_mode 검사로 자연 종료)
+        # ① 끊기
+        self.rt_on = False
+        time.sleep(0.1)
+    
+        # ② 재시작: 센서/폴링 재등록 + 새 루프 시작
+        self.rt_on = True
+        try:
+            accelerometer.enable()
+        except Exception:
+            pass
+        Clock.schedule_interval(self._poll_accel, 0)  # ★ 이 줄이 핵심
+    
         target = self._rt_stft_loop if self.view_mode == "STFT" else self._rt_fft_loop
         threading.Thread(target=target, daemon=True).start()
 
@@ -1219,6 +1229,10 @@ class FFTApp(App):
             g.update_graph([], [], g.max_x)
             g.set_texture(None)
         self._restart_rt_thread()
+
+        # ★ 실시간 ON 상태에서 STFT로 전환했다면 첫 프레임 즉시 렌더
+        if self.rt_on and self.view_mode == "STFT":
+            self._rt_stft_once(
 
 
 
